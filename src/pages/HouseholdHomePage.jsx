@@ -13,6 +13,10 @@ export default function HouseholdHomePage({
   monthKey,
   householdProfile,
   householdMembers,
+  householdRequests = [],
+  canManageHousehold = false,
+  handleApproveHouseholdRequest,
+  handleRejectHouseholdRequest,
   dueSoon,
   totalBal,
   totalPaid,
@@ -33,6 +37,7 @@ export default function HouseholdHomePage({
   const totalDebtLeft = progress?.totalDebtLeftLabel || dashboard?.totalBalanceLabel || money.format(Number(totalBal || 0));
   const paidThisMonth = progress?.paidThisMonthLabel || dashboard?.paidLabel || money.format(Number(totalPaid || 0));
   const nextMove = buildHouseholdNextMove({ dueSoon, totalDue, remaining });
+  const pendingRequests = (householdRequests || []).filter((request) => request?.status === 'pending');
 
   return (
     <div style={{ display:'grid', gap:14, marginBottom:18 }}>
@@ -80,6 +85,89 @@ export default function HouseholdHomePage({
         </div>
       </div>
       <HouseholdMembersRow palette={c} members={householdMembers} />
+      {!!pendingRequests.length && canManageHousehold && (
+        <div style={{ background:c.surf, border:`1px solid ${c.border}`, borderRadius:18, padding:'16px 18px', display:'grid', gap:12 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:12, flexWrap:'wrap' }}>
+            <div>
+              <div style={{ fontSize:11, fontWeight:800, letterSpacing:'0.1em', textTransform:'uppercase', color:c.muted, marginBottom:4 }}>
+                Waiting to join
+              </div>
+              <div style={{ fontSize:13, color:c.tx2, lineHeight:1.5 }}>
+                Keep it easy. Let in the people you trust.
+              </div>
+            </div>
+            <div style={{ fontSize:12, color:c.muted }}>
+              {pendingRequests.length} pending
+            </div>
+          </div>
+          <div style={{ display:'grid', gap:10 }}>
+            {pendingRequests.slice(0, 3).map((request) => {
+              const requestId = request.uid || request.id;
+              return (
+                <div
+                  key={requestId}
+                  style={{
+                    display:'flex',
+                    justifyContent:'space-between',
+                    alignItems:'center',
+                    gap:12,
+                    flexWrap:'wrap',
+                    padding:'14px 14px',
+                    borderRadius:16,
+                    border:`1px solid ${c.border}`,
+                    background:c.surf2,
+                  }}
+                >
+                  <div style={{ minWidth:0 }}>
+                    <div style={{ fontSize:15, fontWeight:800, color:c.tx }}>
+                      {request.displayName || request.email || 'New member'}
+                    </div>
+                    {!!request.email && (
+                      <div style={{ fontSize:12, color:c.tx2, marginTop:2 }}>
+                        {request.email}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={() => handleApproveHouseholdRequest?.(requestId)}
+                      style={{
+                        padding:'10px 14px',
+                        borderRadius:12,
+                        border:'none',
+                        background:c.ac,
+                        color:'#000',
+                        fontSize:13,
+                        fontWeight:800,
+                        cursor:'pointer',
+                      }}
+                    >
+                      Let them in
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRejectHouseholdRequest?.(requestId)}
+                      style={{
+                        padding:'10px 14px',
+                        borderRadius:12,
+                        border:`1px solid ${c.re}`,
+                        background:c.surf,
+                        color:c.re,
+                        fontSize:13,
+                        fontWeight:800,
+                        cursor:'pointer',
+                      }}
+                    >
+                      Not now
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       {activityLoading && !activity.length ? (
         <div style={{ background:c.surf, border:`1px solid ${c.border}`, borderRadius:18, padding:'16px 18px', fontSize:13, color:c.muted }}>Loading recent updates...</div>
       ) : householdId ? (

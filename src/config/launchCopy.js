@@ -4,7 +4,7 @@ export const LAUNCH_COPY = {
     eyebrow: "Privacy & security",
     title: "Clear and simple",
     detail:
-      "This app is built to stay simple. Your private data stays with you, and shared household data only shows up for the people in that shared space.",
+      "Your private data stays with you. Shared household data only shows up for the people in that shared space.",
   },
   privacyItems: [
     {
@@ -13,7 +13,7 @@ export const LAUNCH_COPY = {
     },
     {
       title: "What households can see",
-      detail: "Shared household members can see the bills, progress, and updates inside that shared space.",
+      detail: "Shared household members can see the shared bills, progress, updates, and member names inside that shared space.",
     },
     {
       title: "Who can manage a household",
@@ -76,15 +76,15 @@ export const LAUNCH_COPY = {
   ],
   onboarding: {
     welcomeDetail: "See what is due, track progress, and keep your next move clear without the noise.",
-    welcomeNote: "You can start solo and stay simple. Shared household mode is there whenever you want it.",
+    welcomeNote: "You can start solo and keep things private. Shared household mode is there whenever you want it.",
     addBillNote: "Open Settings, add a bill, then come back to watch your progress build.",
-    simpleDetail: "You only need one small action today. The app will help with the rest.",
+    simpleDetail: "You only need one small action today. The next step will stay clear.",
   },
   householdSetup: {
     chooserNote:
-      "You can start simple here. Solo mode stays private, and shared mode is ready whenever you want to do this together.",
+      "Start solo if you want to keep things private. Shared mode is ready whenever you want to do this together.",
     soloNote:
-      "Solo mode keeps everything private and simple. You can still create or join a household later without losing your current flow.",
+      "Solo mode keeps everything private. You can still create or join a household later without losing your current flow.",
   },
   uploadModes: {
     pdf: {

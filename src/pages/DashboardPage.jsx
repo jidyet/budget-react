@@ -27,6 +27,7 @@ import UpgradeCard from "../components/billing/UpgradeCard";
 import GuidanceStack from "../components/guidance/GuidanceStack";
 import CelebrationBanner from "../components/ui/CelebrationBanner";
 import LaunchSupportCard from "../components/ui/LaunchSupportCard";
+import EmptyStateCard from "../components/ui/EmptyStateCard";
 import { canUseFeature, getUpgradeMessage } from "../utils/planLimits";
 import { buildCelebrationState } from "../services/retentionService";
 import { buildSoftLaunchPrompt } from "../services/softLaunchService";
@@ -58,6 +59,10 @@ export default function DashboardPage(props) {
     monthKey,
     householdProfile,
     householdMembers,
+    householdRequests,
+    canManageHousehold,
+    handleApproveHouseholdRequest,
+    handleRejectHouseholdRequest,
     payoffSimulate,
     subscription,
     openBillingPage,
@@ -107,6 +112,9 @@ export default function DashboardPage(props) {
   const canSeeAdvancedProgress = canUseFeature(subscription, "advancedProgress");
   const canSeeWeeklySummaries = canUseFeature(subscription, "weeklySummaries");
   const canSeeReminders = canUseFeature(subscription, "reminders");
+  const hasAccounts = allAccts.length > 0;
+  const pendingHouseholdRequests = (householdRequests || []).filter((request) => request?.status === "pending");
+  const homepageJoinRequest = canManageHousehold ? pendingHouseholdRequests[0] : null;
   const heroButtonStyle = {
     padding: "11px 15px",
     borderRadius: 999,
@@ -256,7 +264,78 @@ export default function DashboardPage(props) {
         </div>
       )}
 
-      <div style={{ display:"grid", gridTemplateColumns:isMobile ? "1fr" : "1.1fr .9fr", gap:12, marginBottom:16 }}>
+      {!!homepageJoinRequest && (
+        <div
+          style={{
+            marginBottom: 14,
+            background: `linear-gradient(135deg, ${c.ac}14, ${c.surf} 34%, ${c.surf2} 84%, ${c.wa}12)`,
+            border: `1px solid ${c.border}`,
+            borderRadius: 20,
+            padding: isMobile ? "14px 14px" : "16px 18px",
+            boxShadow: `0 14px 30px rgba(0,0,0,0.06)`,
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: c.muted, marginBottom: 4 }}>
+                Heads up
+              </div>
+              <div style={{ fontSize: 22, fontWeight: 900, color: c.tx, marginBottom: 4 }}>
+                {pendingHouseholdRequests.length > 1 ? `${pendingHouseholdRequests.length} people want to join` : "Someone wants to join"}
+              </div>
+              <div style={{ fontSize: 13, color: c.tx2, lineHeight: 1.5 }}>
+                {homepageJoinRequest.displayName || homepageJoinRequest.email || "A new member"} is waiting for your yes.
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                style={{
+                  ...heroButtonStyle,
+                  background: c.ac,
+                  border: "none",
+                }}
+                onClick={() => handleApproveHouseholdRequest?.(homepageJoinRequest.uid || homepageJoinRequest.id)}
+              >
+                Let them in
+              </button>
+              <button
+                type="button"
+                style={{
+                  ...heroButtonStyle,
+                  background: c.surf,
+                  color: c.tx,
+                }}
+                onClick={() => handleRejectHouseholdRequest?.(homepageJoinRequest.uid || homepageJoinRequest.id)}
+              >
+                Not now
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!hasAccounts && (
+        <div style={{ marginBottom: 16 }}>
+          <EmptyStateCard
+            palette={c}
+            title="Start your progress here"
+            message="Add your first bill, import a sheet, or upload a statement. Once you do, this home screen will show what changed and what to do next."
+            action={
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button type="button" style={heroButtonStyle} onClick={() => setPage("settings")}>
+                  Add a bill
+                </button>
+                <button type="button" style={heroButtonStyle} onClick={() => setPage("upload")}>
+                  Import or upload
+                </button>
+              </div>
+            }
+          />
+        </div>
+      )}
+
+      {hasAccounts && <div style={{ display:"grid", gridTemplateColumns:isMobile ? "1fr" : "1.1fr .9fr", gap:12, marginBottom:16 }}>
         <DailyCheckInCard palette={c} checkIn={checkIn} onAction={openCheckInAction} />
         <div style={{ display:"grid", gap:12 }}>
           <MomentumCard palette={c} momentum={momentum} />
@@ -273,18 +352,18 @@ export default function DashboardPage(props) {
             />
           )}
         </div>
-      </div>
+      </div>}
 
-      <GuidanceStack
+      {hasAccounts && <GuidanceStack
         palette={c}
         isMobile={isMobile}
         score={progressScore}
         headsUps={headsUps}
         nextMove={nextMove}
         notes={progressNotes}
-      />
+      />}
 
-      {workspaceMode === "household" && activeHouseholdId ? (
+      {hasAccounts && (workspaceMode === "household" && activeHouseholdId ? (
         <>
           <HouseholdHomePage
             palette={c}
@@ -292,6 +371,10 @@ export default function DashboardPage(props) {
             monthKey={monthKey}
             householdProfile={householdProfile}
             householdMembers={householdMembers}
+            householdRequests={householdRequests}
+            canManageHousehold={canManageHousehold}
+            handleApproveHouseholdRequest={handleApproveHouseholdRequest}
+            handleRejectHouseholdRequest={handleRejectHouseholdRequest}
             dueSoon={dueSoon}
             totalBal={totalBal}
             totalPaid={totalPaid}
@@ -396,7 +479,7 @@ export default function DashboardPage(props) {
             </div>
           </div>
         </>
-      )}
+      ))}
 
       <div
         style={{

@@ -3,8 +3,8 @@ export default function AuthModal({ authLoading, user, isMobile, safeTop, safeBo
   const c = palette;
 
   return (
-    <div style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: isMobile ? `calc(${safeTop} + ${mobileTopChrome}) 12px calc(${safeBottom} + 16px)` : '180px 16px 24px', background: 'rgba(0,0,0,0.25)', zIndex: 1200 }}>
-      <div style={{ width: 440, maxWidth: '96vw', maxHeight: '92vh', borderRadius: 16, background: c.surf, border: `1px solid ${c.border}`, boxShadow: '0 24px 60px rgba(0,0,0,.22)', overflow: 'auto' }}>
+    <div style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: isMobile ? `calc(${safeTop} + ${mobileTopChrome}) 12px calc(${safeBottom} + 16px)` : '180px 16px 24px', background: 'rgba(0,0,0,0.25)', zIndex: 1200, pointerEvents: 'auto' }}>
+      <div style={{ width: 440, maxWidth: '96vw', maxHeight: '92vh', borderRadius: 16, background: c.surf, border: `1px solid ${c.border}`, boxShadow: '0 24px 60px rgba(0,0,0,.22)', overflow: 'auto', pointerEvents: 'auto' }}>
         <div style={{ background: `linear-gradient(135deg, ${c.acD}, ${c.waD})`, padding: '22px 24px 18px', borderBottom: `1px solid ${c.border}` }}>
           <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 20, fontWeight: 800, color: c.tx, letterSpacing: '-0.04em', display: 'flex', alignItems: 'center', gap: 8 }}>Household Budget</div>
           <div style={{ fontSize: 13, color: c.tx2, marginTop: 4 }}>{authMode === 'login' ? 'Sign in to access your data' : 'Create a new account'}</div>

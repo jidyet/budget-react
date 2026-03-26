@@ -27,7 +27,7 @@ export default function SupportPage({
           Quick answers, calm support
         </div>
         <div style={{ fontSize: 14, color: c.tx2, lineHeight: 1.6, maxWidth: 720 }}>
-          This app is meant to stay easy to scan and easy to trust. If something feels unclear, use feedback or reach out directly.
+          If something feels unclear, use feedback or reach out directly. Short notes are enough.
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 4 }}>
           <button

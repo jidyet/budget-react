@@ -69,7 +69,7 @@ export default function PrivacySecurityPage({ mounted, c, isMobile }) {
             ))}
           </div>
           <div style={{ fontSize: 12, color: c.muted, lineHeight: 1.6 }}>
-            This page keeps the basics plain on purpose. It is meant to help users understand trust quickly, not read a wall of policy text.
+            This page is a short guide to what stays private, what gets shared, and who can see it.
           </div>
         </div>
       </div>

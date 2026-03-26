@@ -15,6 +15,7 @@ export default function HouseholdPage(props) {
     handleApproveHouseholdRequest,
     handleRejectHouseholdRequest,
     userProfile,
+    householdInviteLink,
     subscription,
     openBillingPage,
     handleSaveHouseholdProfile,
@@ -32,6 +33,7 @@ export default function HouseholdPage(props) {
         householdMembers={householdMembers}
         householdRequests={householdRequests}
         userProfile={userProfile}
+        householdInviteLink={householdInviteLink}
         subscription={subscription}
         onOpenBilling={openBillingPage}
         onSaveProfile={handleSaveHouseholdProfile}

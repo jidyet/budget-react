@@ -1,12 +1,13 @@
 import { useState } from "react";
 import ProviderMark from "../components/ProviderMark";
 import EditPanel from "../components/EditPanel";
+import EmptyStateCard from "../components/ui/EmptyStateCard";
 import { CAT_ICON } from "../data/mockAccounts";
 import { fx, pct, accountViewModel } from "../utils/budgetUtils";
 
 export default function AccountsPage(props) {
   const {
-    mounted, c, isMobile, allAccts, acctOwnerF, setAcctOwnerF, acctCatF, setAcctCatF, acctStatusF, setAcctStatusF, acctSearch, setAcctSearch, acctGroupBy, setAcctGroupBy, allOwners, allCategories, inputStyle, selStyle, bulkMode, setBulkMode, bulkSelected, setBulkSelected, openDueNextView, acctExpanded, setAcctExpanded, swipeState, setSwipeState, updateRecord, showToast, showUndoToast, setEditId, editId, getPrevRecord, getEffectiveApr, markPaid, openEdit, theme, buildAutoBalanceUpdates
+    mounted, c, isMobile, allAccts, acctOwnerF, setAcctOwnerF, acctCatF, setAcctCatF, acctStatusF, setAcctStatusF, acctSearch, setAcctSearch, acctGroupBy, setAcctGroupBy, allOwners, allCategories, inputStyle, selStyle, bulkMode, setBulkMode, bulkSelected, setBulkSelected, openDueNextView, acctExpanded, setAcctExpanded, swipeState, setSwipeState, updateRecord, showToast, showUndoToast, setEditId, editId, getPrevRecord, getEffectiveApr, markPaid, openEdit, theme, buildAutoBalanceUpdates, setPage
   } = props;
       const [hoveredId, setHoveredId] = useState(null);
       const matches = (a) => {
@@ -36,6 +37,33 @@ export default function AccountsPage(props) {
 
       return (
         <div style={{opacity:mounted?1:0,transition:"opacity .3s",marginTop:16,overflowX:"auto",position:"relative",zIndex:10,isolation:"isolate",pointerEvents:"auto"}}>
+          {!allAccts.length && (
+            <div style={{ marginBottom: 14 }}>
+              <EmptyStateCard
+                palette={c}
+                title="No bills yet"
+                message="Start with one bill, import a sheet, or upload a statement. Your progress will show here as soon as you add something."
+                action={
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      onClick={() => setPage?.("settings")}
+                      style={{ padding: "9px 14px", borderRadius: 999, border: "none", background: c.ac, color: "#001014", fontSize: 12, fontWeight: 900, cursor: "pointer" }}
+                    >
+                      Add your first bill
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPage?.("upload")}
+                      style={{ padding: "9px 14px", borderRadius: 999, border: `1px solid ${c.border2}`, background: c.surf, color: c.tx, fontSize: 12, fontWeight: 800, cursor: "pointer" }}
+                    >
+                      Import or upload
+                    </button>
+                  </div>
+                }
+              />
+            </div>
+          )}
           <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,minmax(0,1fr))",gap:10,marginBottom:14}}>
             {[
               { label:"In View", value: filtered.length, tone:c.tx, sub:"Bills in this list" },

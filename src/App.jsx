@@ -55,7 +55,7 @@ import useInstallPrompt from "./hooks/useInstallPrompt";
 import useReminderPreferences from "./hooks/useReminderPreferences";
 import useSoftLaunchSupport from "./hooks/useSoftLaunchSupport";
 import useReducedMotion from "./hooks/useReducedMotion";
-import { getLaunchFlags } from "./config/launchFlags";
+import { canAccessFounderOps, getLaunchFlags } from "./config/launchFlags";
 import { canUseFeature, getUpgradeMessage } from "./utils/planLimits";
 import { isStripeReady, openBillingPortal, startStripeCheckout } from "./services/stripeService";
 import { buildReturnPrompt } from "./services/retentionService";
@@ -72,6 +72,7 @@ const SAVINGS_GOAL = 2000;
 const MAX_SIMULATION_MONTHS = 240;
 const SIM_DISPLAY_ROWS = 60;
 const SYSTEM_INCOME_SOURCES = ["BOA", "EAGLEVIEW"];
+const EMPTY_STARTER_ACCOUNTS = [];
 
 export default function BudgetApp() {
   const authInProgress = useRef(false);
@@ -162,7 +163,7 @@ export default function BudgetApp() {
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newAcct, setNewAcct] = useState({
     name: "",
-    owner: "Babajide",
+    owner: "",
     bank: "",
     category: "CREDIT CARDS",
     apr: "",
@@ -384,9 +385,27 @@ export default function BudgetApp() {
     setDueNextExpanded({});
   }, [selMonth, selYear]);
 
+  const allowLocalFallbackAuth = Boolean(import.meta.env.DEV);
+  const launchFlags = getLaunchFlags();
+  const founderOpsState = readFounderOpsState();
+  const currentUserLabel =
+    (userProfile?.displayName || "").trim()
+    || (user?.email ? user.email.split("@")[0] : "")
+    || "Me";
+  const defaultOwnerLabel = currentUserLabel;
+  const founderOpsVisible = canAccessFounderOps(user?.email);
+  const activeHouseholdOwnerEmail =
+    householdProfile?.activeHousehold?.ownerEmail
+    || householdMembers.find((member) => (member?.role || "") === "owner")?.email
+    || "";
+  const founderOwnedHousehold = canAccessFounderOps(activeHouseholdOwnerEmail);
+  const starterTemplateAccounts = (launchFlags.starterTemplateEnabled || founderOpsVisible)
+    ? MOCK_ACCOUNTS
+    : EMPTY_STARTER_ACCOUNTS;
+
   const localData = createLocalDataService({
     seedMonthKey: monthKey,
-    seedAccounts: MOCK_ACCOUNTS,
+    seedAccounts: starterTemplateAccounts,
     defaultRecord,
   });
   const ensureLocalUserData = localData.ensureLocalUserData;
@@ -411,9 +430,6 @@ export default function BudgetApp() {
     softLaunchState,
     patchSoftLaunchState,
   } = useSoftLaunchSupport();
-  const allowLocalFallbackAuth = Boolean(import.meta.env.DEV);
-  const launchFlags = getLaunchFlags();
-  const founderOpsState = readFounderOpsState();
   const stripeReady = isStripeReady() && launchFlags.billingEnabled;
   const returnPrompt = buildReturnPrompt({
     reminderPreferences,
@@ -421,6 +437,32 @@ export default function BudgetApp() {
     offlineReady,
   });
   const softLaunchSummary = `${softLaunchState.activeDays || 0} active day${Number(softLaunchState.activeDays || 0) === 1 ? "" : "s"} • ${softLaunchState.visitCount || 0} opens`;
+
+  useEffect(() => {
+    setRecords({});
+    setIncome([]);
+    setIncomeReceipts({});
+    setPlans([]);
+    setCustomAccounts([]);
+    setUserCategories([]);
+    setDeletedAccountIds([]);
+    setAccountOverrides({});
+    setWorkspaceMode("solo");
+    setActiveHouseholdId("");
+    setHouseholdProfile({ activeHousehold: null, memberships: [] });
+    setHouseholdMembers([]);
+    setHouseholdRequests([]);
+  }, [user?.uid, isLocalUser]);
+
+  useEffect(() => {
+    setNewAcct((prev) => (prev.owner ? prev : { ...prev, owner: defaultOwnerLabel }));
+  }, [defaultOwnerLabel]);
+
+  useEffect(() => {
+    if (page === "founder" && !founderOpsVisible) {
+      setPage("overview");
+    }
+  }, [page, founderOpsVisible]);
 
   // Subscribe to Firebase for the selected month
   useEffect(() => {
@@ -432,7 +474,7 @@ export default function BudgetApp() {
     if (user.isLocal || isLocalUser) {
       const merged = {};
       const lr = localData.loadRecords(user.uid, monthKey);
-      MOCK_ACCOUNTS.forEach(a => {
+      starterTemplateAccounts.forEach(a => {
         const fbData = lr[String(a.id)];
         merged[a.id] = fbData ? { ...defaultRecord(a), ...fbData } : defaultRecord(a);
       });
@@ -460,7 +502,7 @@ export default function BudgetApp() {
 
     const unsub = subscribeRecords(user.uid, monthKey, (fbRecords) => {
       const merged = {};
-      MOCK_ACCOUNTS.forEach(a => {
+      starterTemplateAccounts.forEach(a => {
         const fbData = fbRecords[String(a.id)];
         merged[a.id] = fbData ? { ...defaultRecord(a), ...fbData } : defaultRecord(a);
       });
@@ -497,7 +539,7 @@ export default function BudgetApp() {
       clearTimeout(fallbackTimer);
       unsub();
     };
-  }, [monthKey, user, activeHouseholdId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [monthKey, user, activeHouseholdId, starterTemplateAccounts]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let alive = true;
@@ -842,7 +884,7 @@ export default function BudgetApp() {
     Math.max(0, getBalanceBase(account) - Number(account?.paid_v || 0) + Number(account?.purch_v || 0));
 
   const updateRecord = useCallback(async (id, updates) => {
-    const sourceAccounts = [...MOCK_ACCOUNTS, ...customAccounts];
+    const sourceAccounts = [...starterTemplateAccounts, ...customAccounts];
     const source = (sourceAccounts.find(a=>a.id===id) || { budgeted_min:0, starting_bal:0, apr:0, name:"", bank:"", owner:"", category:"" });
     const current = records[id] || defaultRecord(source);
     const updated  = { ...current, ...updates };
@@ -879,7 +921,7 @@ export default function BudgetApp() {
       data.months[monthKey].accounts = currentAccounts;
       localStorage.setItem(localKey(user.uid), JSON.stringify(data));
     }
-  }, [records, monthKey, user, isLocalUser, customAccounts]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [records, monthKey, user, isLocalUser, customAccounts, starterTemplateAccounts]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const buildAutoBalanceUpdates = (account, nextVals) => {
     const nextPaid = Number(nextVals?.paid_v || 0);
@@ -1338,8 +1380,12 @@ export default function BudgetApp() {
 
   const currentHouseholdMember = householdMembers.find((member) => String(member.uid || member.id) === String(user?.uid || ""));
   const canManageHousehold = ["owner", "admin"].includes(currentHouseholdMember?.role || "");
+  const resolvedHousehold =
+    householdProfile.activeHousehold
+    || householdProfile.memberships?.find((item) => String(item.id) === String(activeHouseholdId))
+    || null;
   const householdInviteLink = buildHouseholdInviteLink(
-    householdProfile.activeHousehold,
+    resolvedHousehold,
     typeof window !== "undefined" ? window.location.origin : ""
   );
 
@@ -1367,6 +1413,13 @@ export default function BudgetApp() {
         plans,
       };
       const created = await createHousehold({ ...user, ...userProfile }, householdForm, seed);
+      setHouseholdProfile((prev) => ({
+        activeHousehold: created,
+        memberships: [
+          created,
+          ...((prev?.memberships || []).filter((item) => String(item.id) !== String(created.id))),
+        ],
+      }));
       setActiveHouseholdId(created.id);
       setWorkspaceMode("household");
       setHouseholdSetupOpen(false);
@@ -1731,7 +1784,7 @@ export default function BudgetApp() {
     const account = {
       id,
       name,
-      owner: newAcct.owner || "Babajide",
+      owner: newAcct.owner || defaultOwnerLabel,
       bank: (newAcct.bank || name).trim(),
       category,
       apr: aprVal,
@@ -1748,7 +1801,7 @@ export default function BudgetApp() {
     if (!allCategories.includes(category)) setUserCategories(nextCategories);
     setNewAcct({
       name: "",
-      owner: newAcct.owner || "Babajide",
+      owner: newAcct.owner || defaultOwnerLabel,
       bank: "",
       category,
       apr: "",
@@ -1969,11 +2022,18 @@ export default function BudgetApp() {
   const safeBottom = "env(safe-area-inset-bottom, 0px)";
   const mobileTopChrome = `${mobileChromeHeight}px`;
 
-  const baseAccounts = [...MOCK_ACCOUNTS, ...customAccounts]
+  const sharedLegacyAccounts =
+    workspaceMode === "household" && activeHouseholdId && founderOwnedHousehold && !customAccounts.length
+      ? MOCK_ACCOUNTS
+      : starterTemplateAccounts;
+
+  const baseAccounts = [...sharedLegacyAccounts, ...customAccounts]
     .filter((account) => !deletedAccountIds.includes(account.id))
     .map((account) => ({ ...account, ...(accountOverrides[account.id] || {}) }));
   const allCategories = Array.from(new Set([...CATEGORIES, ...userCategories, ...baseAccounts.map((a) => a.category)])).filter(Boolean);
-  const allOwners = ["All", ...Array.from(new Set(baseAccounts.map((a) => a.owner))).filter(Boolean)];
+  const ownerOptions = Array.from(new Set(baseAccounts.map((a) => a.owner))).filter(Boolean);
+  if (!ownerOptions.length) ownerOptions.push(defaultOwnerLabel);
+  const allOwners = ["All", ...ownerOptions];
   const incomeSources = Array.from(new Set([...incomeTemplates.map((x) => x.src), ...income.map((x) => x.src), "Other"].filter(Boolean)));
   const isCur = selYear===today.getFullYear() && selMonth===today.getMonth()+1;
   const allAccts = baseAccounts.map(a => {
@@ -2092,7 +2152,7 @@ export default function BudgetApp() {
       { id:"payoff", label:"Payoff Planner", icon:"📈" },
       { id:"insights", label:"Trends", icon:"📊" },
       { id:"beta", label:"Beta help", icon:"🛟" },
-      ...(launchFlags.founderOpsEnabled ? [{ id:"founder", label:"Founder ops", icon:"🧭" }] : []),
+      ...(founderOpsVisible ? [{ id:"founder", label:"Founder ops", icon:"🧭" }] : []),
       { id:"privacy", label:"Privacy", icon:"🔒" },
       { id:"support", label:"Help & FAQ", icon:"❓" },
       { id:"billing", label:"Billing", icon:"✦" },
@@ -2640,6 +2700,10 @@ export default function BudgetApp() {
       monthKey={monthKey}
       householdProfile={householdProfile}
       householdMembers={householdMembers}
+      householdRequests={householdRequests}
+      canManageHousehold={canManageHousehold}
+      handleApproveHouseholdRequest={handleApproveHouseholdRequest}
+      handleRejectHouseholdRequest={handleRejectHouseholdRequest}
       payoffSimulate={payoffSimulate}
       subscription={subscription}
       openBillingPage={openBillingPage}
@@ -2692,6 +2756,7 @@ export default function BudgetApp() {
       getEffectiveApr={getEffectiveApr}
       markPaid={markPaid}
       openEdit={openEdit}
+      setPage={setPage}
       theme={theme}
       buildAutoBalanceUpdates={buildAutoBalanceUpdates}
     />
@@ -3228,6 +3293,7 @@ export default function BudgetApp() {
       canManageHousehold={canManageHousehold}
       handleApproveHouseholdRequest={handleApproveHouseholdRequest}
       handleRejectHouseholdRequest={handleRejectHouseholdRequest}
+      householdInviteLink={householdInviteLink}
       handleSaveHouseholdProfile={handleSaveHouseholdProfile}
       handleCopyHouseholdInvite={handleCopyHouseholdInvite}
       handleShareHouseholdInvite={handleShareHouseholdInvite}
@@ -3650,7 +3716,7 @@ export default function BudgetApp() {
             {page === "insights" && Trends()}
             {page === "billing" && Billing()}
             {page === "beta" && BetaHelp()}
-            {page === "founder" && launchFlags.founderOpsEnabled && FounderOps()}
+            {page === "founder" && founderOpsVisible && FounderOps()}
             {page === "privacy" && PrivacySecurity()}
             {page === "support" && Support()}
             {page === "notifications" && NotificationSettings()}
@@ -3765,7 +3831,7 @@ export default function BudgetApp() {
           isMobile={isMobile}
           onClose={() => setShowMoreDrawer(false)}
           navigateTo={navigateTo}
-          founderOpsEnabled={launchFlags.founderOpsEnabled}
+          founderOpsEnabled={founderOpsVisible}
         />
         {/* Income Modal */}
         {showIncome && (
@@ -4011,7 +4077,7 @@ export default function BudgetApp() {
               {cmdkResults.length === 0 && cmdkQuery.trim().length === 0 && (
                 <div style={{ padding:"16px 18px", color:c.muted, fontSize:12 }}>
                   <div style={{ marginBottom:8, fontWeight:700 }}>Quick Navigate</div>
-                  {["Overview","Bills","Payoff Planner","Trends","Beta help", ...(launchFlags.founderOpsEnabled ? ["Founder ops"] : []), "Privacy","Help & FAQ","Billing"].map(label => (
+                  {["Overview","Bills","Payoff Planner","Trends","Beta help", ...(founderOpsVisible ? ["Founder ops"] : []), "Privacy","Help & FAQ","Billing"].map(label => (
                     <div key={label} style={{ padding:"6px 0", fontSize:13, color:c.tx2, cursor:"pointer" }}
                       onClick={() => {
                         setPage(

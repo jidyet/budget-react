@@ -7,6 +7,7 @@ const COLOR_OPTIONS = ["#14b8a6", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6", "#
 export default function HouseholdSettingsPage({
   palette,
   householdProfile,
+  householdInviteLink,
   workspaceMode,
   currentHouseholdMember,
   householdMembers,
@@ -37,7 +38,7 @@ export default function HouseholdSettingsPage({
     });
   }, [currentHouseholdMember, userProfile]);
 
-  const inviteLink = buildHouseholdInviteLink(household, typeof window !== "undefined" ? window.location.origin : "");
+  const inviteLink = householdInviteLink || buildHouseholdInviteLink(household, typeof window !== "undefined" ? window.location.origin : "");
 
   return (
     <div style={{ display: "grid", gap: 12 }}>

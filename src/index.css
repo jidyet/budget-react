@@ -1,0 +1,56 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  display: block;
+  overflow-x: hidden;
+}
+
+#root {
+  overflow-x: hidden;
+}
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  overscroll-behavior-y: none;
+}
+
+button, input, select, textarea {
+  touch-action: manipulation;
+}
+
+.app-shell-page {
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.app-shell-scroll {
+  min-height: 100vh;
+}
+
+@supports (height: 100dvh) {
+  html, body, #root, .app-shell-scroll {
+    min-height: 100dvh;
+  }
+}

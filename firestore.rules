@@ -1,0 +1,392 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isShortString(value, max) {
+      return value is string && value.size() <= max;
+    }
+
+    function isRequiredString(value, max) {
+      return value is string && value.size() > 0 && value.size() <= max;
+    }
+
+    function isHouseholdRole(value) {
+      return value in ["owner", "admin", "member", "viewer"];
+    }
+
+    function isJoinMode(value) {
+      return value in ["open", "approval"];
+    }
+
+    function isMemberStatus(value) {
+      return value in ["active", "inactive"];
+    }
+
+    function isJoinRequestStatus(value) {
+      return value in ["pending", "approved", "rejected"];
+    }
+
+    function validTimestamp(value) {
+      return value is timestamp;
+    }
+
+    function validStringList(value) {
+      return value is list;
+    }
+
+    function householdMemberDoc(householdId) {
+      return get(/databases/$(database)/documents/households/$(householdId)/members/$(request.auth.uid));
+    }
+
+    function isActiveHouseholdMember(householdId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/households/$(householdId)/members/$(request.auth.uid))
+        && householdMemberDoc(householdId).data.status == "active";
+    }
+
+    function isHouseholdAdmin(householdId) {
+      return isActiveHouseholdMember(householdId)
+        && householdMemberDoc(householdId).data.role in ["owner", "admin"];
+    }
+
+    function isHouseholdOwnerFromRoot(householdId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/households/$(householdId))
+        && get(/databases/$(database)/documents/households/$(householdId)).data.ownerId == request.auth.uid;
+    }
+
+    function rootDoc(householdId) {
+      return get(/databases/$(database)/documents/households/$(householdId));
+    }
+
+    function rootJoinMode(householdId) {
+      return rootDoc(householdId).data.joinMode;
+    }
+
+    function validHouseholdRootCreate(householdId) {
+      return request.resource.data.keys().hasAll([
+          "name", "description", "joinMode", "joinCode", "ownerId", "ownerEmail",
+          "memberIds", "memberCount", "active", "createdAt", "updatedAt",
+          "updatedBy", "updatedByLabel", "dailyMessage"
+        ])
+        && request.resource.data.keys().hasOnly([
+          "name", "description", "joinMode", "joinCode", "ownerId", "ownerEmail",
+          "memberIds", "memberCount", "active", "createdAt", "updatedAt",
+          "updatedBy", "updatedByLabel", "dailyMessage", "schemaVersion"
+        ])
+        && isRequiredString(request.resource.data.name, 80)
+        && isShortString(request.resource.data.description, 220)
+        && isJoinMode(request.resource.data.joinMode)
+        && isRequiredString(request.resource.data.joinCode, 12)
+        && request.resource.data.ownerId == request.auth.uid
+        && isShortString(request.resource.data.ownerEmail, 160)
+        && validStringList(request.resource.data.memberIds)
+        && request.resource.data.memberIds.size() == 1
+        && request.resource.data.memberIds[0] == request.auth.uid
+        && request.resource.data.memberCount == 1
+        && request.resource.data.active == true
+        && validTimestamp(request.resource.data.createdAt)
+        && validTimestamp(request.resource.data.updatedAt)
+        && request.resource.data.updatedBy == request.auth.uid
+        && isRequiredString(request.resource.data.updatedByLabel, 120)
+        && isShortString(request.resource.data.dailyMessage, 160);
+    }
+
+    function validHouseholdRootUpdate(householdId) {
+      return request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.ownerEmail == resource.data.ownerEmail
+        && request.resource.data.joinCode == resource.data.joinCode
+        && request.resource.data.createdAt == resource.data.createdAt
+        && isRequiredString(request.resource.data.name, 80)
+        && isShortString(request.resource.data.description, 220)
+        && isJoinMode(request.resource.data.joinMode)
+        && validStringList(request.resource.data.memberIds)
+        && request.resource.data.memberCount is int
+        && request.resource.data.memberCount >= 1
+        && request.resource.data.memberIds.size() == request.resource.data.memberCount
+        && request.resource.data.active is bool
+        && validTimestamp(request.resource.data.updatedAt)
+        && isRequiredString(request.resource.data.updatedByLabel, 120)
+        && isShortString(request.resource.data.dailyMessage, 160);
+    }
+
+    function validOpenJoinRootUpdate(householdId) {
+      return rootJoinMode(householdId) == "open"
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "memberIds", "memberCount", "updatedAt", "updatedBy", "updatedByLabel"
+        ])
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.ownerEmail == resource.data.ownerEmail
+        && request.resource.data.joinCode == resource.data.joinCode
+        && request.resource.data.joinMode == resource.data.joinMode
+        && request.resource.data.name == resource.data.name
+        && request.resource.data.description == resource.data.description
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.active == resource.data.active
+        && request.resource.data.dailyMessage == resource.data.dailyMessage
+        && request.resource.data.updatedBy == request.auth.uid
+        && isRequiredString(request.resource.data.updatedByLabel, 120)
+        && validTimestamp(request.resource.data.updatedAt)
+        && request.resource.data.memberCount == resource.data.memberCount + 1
+        && request.resource.data.memberIds.size() == request.resource.data.memberCount
+        && request.resource.data.memberIds.hasAll(resource.data.memberIds)
+        && request.resource.data.memberIds.hasAny([request.auth.uid])
+        && !resource.data.memberIds.hasAny([request.auth.uid]);
+    }
+
+    function validDirectoryDoc(householdId) {
+      return request.resource.data.keys().hasAll([
+          "householdId", "name", "nameLower", "description", "joinCode",
+          "joinMode", "ownerId", "memberCount", "active", "updatedAt"
+        ])
+        && request.resource.data.keys().hasOnly([
+          "householdId", "name", "nameLower", "description", "joinCode",
+          "joinMode", "ownerId", "memberCount", "active", "updatedAt"
+        ])
+        && request.resource.data.householdId == householdId
+        && isRequiredString(request.resource.data.name, 80)
+        && isShortString(request.resource.data.nameLower, 80)
+        && isShortString(request.resource.data.description, 220)
+        && isRequiredString(request.resource.data.joinCode, 12)
+        && isJoinMode(request.resource.data.joinMode)
+        && isRequiredString(request.resource.data.ownerId, 120)
+        && request.resource.data.memberCount is int
+        && request.resource.data.memberCount >= 0
+        && request.resource.data.active is bool
+        && validTimestamp(request.resource.data.updatedAt);
+    }
+
+    function validOpenJoinDirectoryUpdate(householdId) {
+      return rootJoinMode(householdId) == "open"
+        && request.resource.data.householdId == resource.data.householdId
+        && request.resource.data.name == resource.data.name
+        && request.resource.data.nameLower == resource.data.nameLower
+        && request.resource.data.description == resource.data.description
+        && request.resource.data.joinCode == resource.data.joinCode
+        && request.resource.data.joinMode == resource.data.joinMode
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.active == resource.data.active
+        && request.resource.data.memberCount == resource.data.memberCount + 1
+        && validTimestamp(request.resource.data.updatedAt);
+    }
+
+    function validMemberDoc(memberId) {
+      return request.resource.data.keys().hasAll([
+          "uid", "email", "label", "displayName", "photoURL",
+          "avatarColor", "role", "status", "updatedAt"
+        ])
+        && request.resource.data.keys().hasOnly([
+          "uid", "email", "label", "displayName", "photoURL",
+          "avatarColor", "role", "status", "joinedAt", "updatedAt"
+        ])
+        && request.resource.data.uid == memberId
+        && isShortString(request.resource.data.email, 160)
+        && isRequiredString(request.resource.data.label, 120)
+        && isRequiredString(request.resource.data.displayName, 120)
+        && isShortString(request.resource.data.photoURL, 500)
+        && isShortString(request.resource.data.avatarColor, 32)
+        && isHouseholdRole(request.resource.data.role)
+        && isMemberStatus(request.resource.data.status)
+        && validTimestamp(request.resource.data.updatedAt);
+    }
+
+    function validSelfMemberProfileUpdate(memberId) {
+      return request.auth.uid == memberId
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.joinedAt == resource.data.joinedAt
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "label", "displayName", "photoURL", "avatarColor", "updatedAt"
+        ])
+        && isRequiredString(request.resource.data.label, 120)
+        && isRequiredString(request.resource.data.displayName, 120)
+        && isShortString(request.resource.data.photoURL, 500)
+        && isShortString(request.resource.data.avatarColor, 32)
+        && validTimestamp(request.resource.data.updatedAt);
+    }
+
+    function validJoinRequest(requestId) {
+      return request.resource.data.keys().hasAll([
+          "uid", "email", "label", "displayName", "photoURL",
+          "avatarColor", "status", "createdAt", "updatedAt"
+        ])
+        && request.resource.data.keys().hasOnly([
+          "uid", "email", "label", "displayName", "photoURL",
+          "avatarColor", "status", "createdAt", "updatedAt",
+          "reviewedAt", "reviewedBy"
+        ])
+        && request.resource.data.uid == requestId
+        && isShortString(request.resource.data.email, 160)
+        && isRequiredString(request.resource.data.label, 120)
+        && isRequiredString(request.resource.data.displayName, 120)
+        && isShortString(request.resource.data.photoURL, 500)
+        && isShortString(request.resource.data.avatarColor, 32)
+        && isJoinRequestStatus(request.resource.data.status);
+    }
+
+    function isFeedbackCategory(value) {
+      return value in ["confusing", "bug", "helpful", "idea", "other"];
+    }
+
+    match /householdDirectory/{householdId} {
+      allow read: if signedIn();
+      allow create: if isHouseholdOwnerFromRoot(householdId) && validDirectoryDoc(householdId);
+      allow update: if validDirectoryDoc(householdId)
+        && (
+          (
+            isHouseholdAdmin(householdId)
+            && request.resource.data.householdId == resource.data.householdId
+            && request.resource.data.ownerId == resource.data.ownerId
+            && request.resource.data.joinCode == resource.data.joinCode
+          )
+          || isHouseholdOwnerFromRoot(householdId)
+          || validOpenJoinDirectoryUpdate(householdId)
+        );
+      allow delete: if false;
+    }
+
+    match /users/{uid} {
+      allow read, write: if isOwner(uid);
+
+      match /{document=**} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+
+    match /feedback/{feedbackId} {
+      allow create: if signedIn()
+        && request.resource.data.keys().hasAll([
+          "userId", "userEmail", "userLabel", "page", "category",
+          "rating", "message", "whatConfused", "whatHelped", "whatShouldChange",
+          "workspaceMode", "version", "build", "status", "createdAt"
+        ])
+        && request.resource.data.keys().hasOnly([
+          "userId", "userEmail", "userLabel", "page", "category",
+          "rating", "message", "whatConfused", "whatHelped", "whatShouldChange",
+          "workspaceMode", "version", "build", "status", "createdAt"
+        ])
+        && request.resource.data.userId == request.auth.uid
+        && isShortString(request.resource.data.userEmail, 160)
+        && isRequiredString(request.resource.data.userLabel, 120)
+        && isRequiredString(request.resource.data.page, 80)
+        && isFeedbackCategory(request.resource.data.category)
+        && (request.resource.data.rating == null || (request.resource.data.rating is int && request.resource.data.rating >= 1 && request.resource.data.rating <= 5))
+        && isRequiredString(request.resource.data.message, 1400)
+        && isShortString(request.resource.data.whatConfused, 400)
+        && isShortString(request.resource.data.whatHelped, 400)
+        && isShortString(request.resource.data.whatShouldChange, 400)
+        && request.resource.data.workspaceMode in ["solo", "household"]
+        && isRequiredString(request.resource.data.version, 40)
+        && isRequiredString(request.resource.data.build, 80)
+        && request.resource.data.status == "new"
+        && validTimestamp(request.resource.data.createdAt);
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /households/{householdId} {
+      allow read: if isActiveHouseholdMember(householdId);
+      allow create: if signedIn() && validHouseholdRootCreate(householdId);
+      allow update: if validHouseholdRootUpdate(householdId)
+        && (
+          isHouseholdAdmin(householdId)
+          || validOpenJoinRootUpdate(householdId)
+        );
+
+      match /members/{memberId} {
+        allow read: if isActiveHouseholdMember(householdId);
+        allow create: if validMemberDoc(memberId)
+          && (
+            (isHouseholdOwnerFromRoot(householdId) && request.auth.uid == memberId && request.resource.data.role == "owner")
+            || (isHouseholdAdmin(householdId) && request.resource.data.role in ["admin", "member", "viewer"])
+            || (
+              rootJoinMode(householdId) == "open"
+              && request.auth.uid == memberId
+              && request.resource.data.role == "member"
+              && request.resource.data.status == "active"
+            )
+          );
+        allow update: if validMemberDoc(memberId)
+          && (
+            isHouseholdOwnerFromRoot(householdId)
+            || (
+              isHouseholdAdmin(householdId)
+              && !isHouseholdOwnerFromRoot(householdId)
+              && resource.data.role != "owner"
+              && request.resource.data.role in ["admin", "member", "viewer"]
+            )
+            || (isActiveHouseholdMember(householdId) && validSelfMemberProfileUpdate(memberId))
+          );
+        allow delete: if isHouseholdAdmin(householdId);
+      }
+
+      match /joinRequests/{requestId} {
+        allow read: if isHouseholdAdmin(householdId) || (signedIn() && request.auth.uid == requestId);
+        allow create: if signedIn()
+          && request.auth.uid == requestId
+          && validJoinRequest(requestId)
+          && request.resource.data.status == "pending"
+          && validTimestamp(request.resource.data.createdAt)
+          && validTimestamp(request.resource.data.updatedAt);
+        allow update: if isHouseholdAdmin(householdId)
+          && validJoinRequest(requestId)
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.email == resource.data.email
+          && request.resource.data.label == resource.data.label
+          && request.resource.data.displayName == resource.data.displayName
+          && request.resource.data.photoURL == resource.data.photoURL
+          && request.resource.data.avatarColor == resource.data.avatarColor
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.status in ["approved", "rejected"]
+          && validTimestamp(request.resource.data.reviewedAt)
+          && request.resource.data.reviewedBy == request.auth.uid;
+        allow delete: if isHouseholdAdmin(householdId);
+      }
+
+      match /months/{monthKey} {
+        allow read: if isActiveHouseholdMember(householdId);
+        allow write: if isActiveHouseholdMember(householdId) || isHouseholdOwnerFromRoot(householdId);
+
+        match /accounts/{accountId} {
+          allow read: if isActiveHouseholdMember(householdId);
+          allow write: if isActiveHouseholdMember(householdId) || isHouseholdOwnerFromRoot(householdId);
+        }
+
+        match /uploads/{uploadId} {
+          allow read: if isActiveHouseholdMember(householdId);
+          allow write: if isActiveHouseholdMember(householdId) || isHouseholdOwnerFromRoot(householdId);
+        }
+      }
+
+      match /payoff_plans/{planId} {
+        allow read: if isActiveHouseholdMember(householdId);
+        allow write: if isActiveHouseholdMember(householdId) || isHouseholdOwnerFromRoot(householdId);
+      }
+
+      match /meta/{docId} {
+        allow read: if isActiveHouseholdMember(householdId);
+        allow write: if isActiveHouseholdMember(householdId) || isHouseholdOwnerFromRoot(householdId);
+      }
+
+      match /activity/{activityId} {
+        allow read: if isActiveHouseholdMember(householdId);
+        allow create: if isActiveHouseholdMember(householdId) || isHouseholdOwnerFromRoot(householdId);
+        allow update, delete: if false;
+      }
+
+      match /dashboard/{docId} {
+        allow read: if isActiveHouseholdMember(householdId);
+        allow write: if isActiveHouseholdMember(householdId) || isHouseholdOwnerFromRoot(householdId);
+      }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "appId": "com.household.budget",
+  "appName": "Household Budget",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": true,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 0
+    }
+  }
+}

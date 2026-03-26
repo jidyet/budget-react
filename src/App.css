@@ -1,0 +1,9 @@
+/* App-level stylesheet intentionally minimal.
+   Layout is controlled inline in App.jsx to keep full-width behavior. */
+
+#root {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}

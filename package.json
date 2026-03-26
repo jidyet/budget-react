@@ -1,0 +1,43 @@
+{
+  "name": "budget-react",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test:firestore": "node scripts/run-firestore-tests.mjs",
+    "android:sync": "npm run build && npx cap sync android",
+    "android:open": "npx cap open android",
+    "android:build": "npm run build && npx cap sync android && cd android && gradlew.bat assembleDebug",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.2.0",
+    "@capacitor/cli": "^8.2.0",
+    "@capacitor/core": "^8.2.0",
+    "@capacitor/local-notifications": "^8.0.2",
+    "@fontsource/dm-mono": "^5.2.7",
+    "@fontsource/instrument-sans": "^5.2.8",
+    "@fontsource/syne": "^5.2.7",
+    "firebase": "^12.10.0",
+    "pdfjs-dist": "^5.5.207",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "tesseract.js": "^7.0.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@firebase/rules-unit-testing": "^5.0.0",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "globals": "^16.5.0",
+    "vite": "^7.3.1"
+  }
+}

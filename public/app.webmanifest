@@ -1,0 +1,17 @@
+{
+  "name": "Household Budget",
+  "short_name": "Budget",
+  "description": "Shared household budgeting and debt payoff planning.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f3f7f6",
+  "theme_color": "#00c9a7",
+  "icons": [
+    {
+      "src": "/vite.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

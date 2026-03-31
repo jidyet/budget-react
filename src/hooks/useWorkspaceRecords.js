@@ -128,7 +128,9 @@ export default function useWorkspaceRecords({
       clearTimeout(fallback);
       unsub();
     };
-  }, [monthKey, user, isLocalUser, workspaceScope, recordSeedAccounts, localData]); // eslint-disable-line react-hooks/exhaustive-deps
+  // workspaceScope?.householdId — not the full object — so member-metadata snapshots
+  // (same household, different array reference) don't restart the subscription.
+  }, [monthKey, user, isLocalUser, workspaceScope?.householdId, recordSeedAccounts, localData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- buildAutoBalanceUpdates ---
   const buildAutoBalanceUpdates = useCallback((account, nextVals) => {
@@ -215,7 +217,7 @@ export default function useWorkspaceRecords({
         localData.saveSettings(user.uid, settingsData);
       }
     }
-  }, [records, monthKey, user, isLocalUser, workspaceScope, allAccounts, localData]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [records, monthKey, user, isLocalUser, workspaceScope?.householdId, allAccounts, localData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
     records, setRecords,

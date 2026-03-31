@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
+﻿import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Capacitor } from "@capacitor/core";
 import {
   getMonthKey, saveRecord,
@@ -152,7 +152,7 @@ export default function BudgetApp() {
   // customAccounts, userCategories, deletedAccountIds, accountOverrides, editingAccountId,
   // editAcct, newCategoryName, newAcct → useAccounts (wired below)
   const [viewportW, setViewportW] = useState(typeof window !== "undefined" ? window.innerWidth : 1280);
-  const [mobileChromeHeight, setMobileChromeHeight] = useState(0);
+  const [mobileChromeHeight, setMobileChromeHeight] = useState(172);
   const settingsOverviewRef = useRef(null);
   const settingsBillsRef = useRef(null);
   const settingsCategoriesRef = useRef(null);
@@ -258,16 +258,15 @@ export default function BudgetApp() {
   }, []);
 
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (typeof window === "undefined") return undefined;
     const el = mobileChromeRef.current;
-    if (!el) return undefined;
     const syncMobileChromeHeight = () => {
-      const nextHeight = Math.ceil(el.getBoundingClientRect().height || 0);
+      const nextHeight = Math.ceil(el?.getBoundingClientRect?.().height || 172);
       setMobileChromeHeight((prev) => (Math.abs(prev - nextHeight) > 1 ? nextHeight : prev));
     };
     syncMobileChromeHeight();
-    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(syncMobileChromeHeight) : null;
+    const ro = el && typeof ResizeObserver !== "undefined" ? new ResizeObserver(syncMobileChromeHeight) : null;
     ro?.observe(el);
     window.addEventListener("resize", syncMobileChromeHeight);
     return () => {

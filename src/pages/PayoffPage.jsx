@@ -8,10 +8,14 @@ export default function PayoffPage(props) {
     mounted, c, isMobile, isTablet, allAccts, planOwner, setPlanOwner, planItems, setPlanItems, planMonthlyExtra, setPlanMonthlyExtra, whatIfExtra, setWhatIfExtra, planStrategy, setPlanStrategy, payoffSimulate, getEffectiveApr, setPlanId, setPlanName, planId, plans, planName, setShowStrategyCompare, showStrategyCompare, lblStyle, selStyle, inputStyle, savePlan, saveBtnStyle, buildDefaultPlanItems, selMonth, selYear, setPlanExpanded, planExpanded, goalDate, setGoalDate, goalRequiredExtra, setGoalRequiredExtra, showAllSimRows, setShowAllSimRows, MAX_SIMULATION_MONTHS, SIM_DISPLAY_ROWS, createPlanDraft, removePlan
   } = props;
       const [whatIfDraft, setWhatIfDraft] = useState(String(whatIfExtra || 0));
+      const [goalDateDraft, setGoalDateDraft] = useState(goalDate || "");
       const [scenarioAccountId, setScenarioAccountId] = useState("");
       useEffect(() => {
         setWhatIfDraft(String(whatIfExtra || 0));
       }, [whatIfExtra]);
+      useEffect(() => {
+        setGoalDateDraft(goalDate || "");
+      }, [goalDate]);
       const owners = ["All", ...Array.from(new Set(allAccts.map((a) => a.owner))).filter(Boolean)];
       const scopedAccounts = planOwner === "All" ? allAccts : allAccts.filter((a) => a.owner === planOwner);
       const visibleRows = scopedAccounts.map((a) => {
@@ -581,19 +585,38 @@ export default function PayoffPage(props) {
             </div>
             {/* Goal-First Planner */}
             <div style={{ background:c.surf, border:`1.5px solid ${c.border}`, borderRadius:14, padding:"18px 22px", marginBottom:20 }}>
-              <div style={{ fontSize:11, fontWeight:800, color:c.muted, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:10 }}>Finish by</div>
-              <div style={{ display:"grid", gridTemplateColumns:isMobile ? "1fr" : "minmax(0,auto) minmax(220px,auto) minmax(0,1fr)", alignItems:isMobile ? "stretch" : "center", gap:12 }}>
-                <span style={{ fontSize:13, color:c.tx2 }}>I want to be debt-free by:</span>
+              <div style={{ fontSize:11, fontWeight:800, color:c.muted, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:6 }}>Finish by</div>
+              <div style={{ fontSize:13, color:c.tx2, marginBottom:14, lineHeight:1.5 }}>
+                Pick a target date and we'll calculate exactly how much you need to pay each month to get there — no extra payment needed upfront. You can also combine it with a what-if extra above to see what's still left to cover.
+              </div>
+              <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
+                <span style={{ fontSize:13, color:c.tx2, whiteSpace:"nowrap" }}>I want to be debt-free by:</span>
                 <input type="month"
-                  value={goalDate}
+                  value={goalDateDraft}
                   min={`${selYear}-${String(selMonth).padStart(2,"0")}`}
-                  onChange={e => {
-                    setGoalDate(e.target.value);
-                    if (!e.target.value) setGoalRequiredExtra(null);
-                  }}
-                  style={{ width:isMobile ? "100%" : 220, padding:"10px 12px", borderRadius:9, border:`1.5px solid ${c.border2}`, background:c.surf, color:c.tx, fontSize:13, outline:"none" }}
+                  onChange={e => setGoalDateDraft(e.target.value)}
+                  style={{ width:isMobile ? "100%" : 200, padding:"10px 12px", borderRadius:9, border:`1.5px solid ${c.border2}`, background:c.surf, color:c.tx, fontSize:13, outline:"none" }}
                 />
-                <div style={{ display:"flex", gap:8, flexWrap:"wrap", justifyContent:isMobile ? "flex-start" : "flex-end" }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGoalDate(goalDateDraft);
+                    if (!goalDateDraft) setGoalRequiredExtra(null);
+                  }}
+                  style={{ padding:"8px 14px", borderRadius:8, border:`1px solid ${c.ac}`, background:c.ac, color:"#062532", fontSize:12, fontWeight:800, cursor:"pointer", whiteSpace:"nowrap" }}
+                >
+                  Calculate
+                </button>
+                {goalDate && (
+                  <button
+                    type="button"
+                    onClick={() => { setGoalDate(""); setGoalDateDraft(""); setGoalRequiredExtra(null); }}
+                    style={{ padding:"8px 12px", borderRadius:8, border:`1px solid ${c.border2}`, background:"transparent", color:c.muted, fontSize:12, fontWeight:600, cursor:"pointer" }}
+                  >
+                    Clear
+                  </button>
+                )}
+                <div style={{ display:"flex", gap:8, flexWrap:"wrap", flex:1, justifyContent:isMobile ? "flex-start" : "flex-end" }}>
                   {goalPlanner?.valid && goalPlanner.additionalNeeded !== null && (
                     <div style={{ background:goalPlanner.additionalNeeded > 0 ? c.acD : c.surf2, border:`1px solid ${goalPlanner.additionalNeeded > 0 ? `${c.ac}40` : c.border2}`, borderRadius:8, padding:"8px 14px", fontSize:13, color:goalPlanner.additionalNeeded > 0 ? c.ac : c.tx2, fontWeight:700 }}>
                       {goalPlanner.additionalNeeded > 0 ? `+${fx(goalPlanner.additionalNeeded)}/mo needed` : "✓ On track"}

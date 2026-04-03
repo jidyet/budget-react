@@ -7,11 +7,14 @@ export default function HouseholdMembersPage({
   palette,
   householdMembers,
   householdRequests,
+  currentHouseholdMember,
   canManageHousehold,
   subscription,
   onOpenBilling,
   onApprove,
   onReject,
+  onLeave,
+  onRemoveMember,
 }) {
   const c = palette;
   const pendingRequests = householdRequests.filter((item) => item.status === "pending");
@@ -61,6 +64,24 @@ export default function HouseholdMembersPage({
                     <div style={{ padding: "6px 10px", borderRadius: 999, background: c.surf, border: `1px solid ${c.border}`, color: c.tx2, fontSize: 11, fontWeight: 700 }}>
                       {member.status || "active"}
                     </div>
+                    {String(member.uid || member.id) === String(currentHouseholdMember?.uid || "") && member.role !== "owner" && (
+                      <button
+                        type="button"
+                        onClick={onLeave}
+                        style={{ padding: "6px 10px", borderRadius: 10, border: `1px solid ${c.da}`, background: c.daD, color: c.da, fontSize: 11, fontWeight: 800, cursor: "pointer" }}
+                      >
+                        Leave
+                      </button>
+                    )}
+                    {canManageHousehold && String(member.uid || member.id) !== String(currentHouseholdMember?.uid || "") && member.role !== "owner" && (
+                      <button
+                        type="button"
+                        onClick={() => onRemoveMember(member.uid || member.id)}
+                        style={{ padding: "6px 10px", borderRadius: 10, border: `1px solid ${c.da}`, background: c.daD, color: c.da, fontSize: 11, fontWeight: 800, cursor: "pointer" }}
+                      >
+                        Remove
+                      </button>
+                    )}
                   </div>
                 </div>
               );

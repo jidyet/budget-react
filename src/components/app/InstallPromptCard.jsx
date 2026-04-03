@@ -1,3 +1,5 @@
+import BrandLockup from "../ui/BrandLockup";
+
 export default function InstallPromptCard({ palette, visible, onInstall, onDismiss, offlineReady }) {
   if (!visible && !offlineReady) return null;
   const c = palette;
@@ -21,13 +23,17 @@ export default function InstallPromptCard({ palette, visible, onInstall, onDismi
       }}
     >
       <div>
-        <div style={{ fontSize: 14, fontWeight: 800, color: c.tx }}>
-          {offlineReady ? "Offline mode ready" : "Install Household Budget"}
-        </div>
+        {offlineReady ? (
+          <div style={{ fontSize: 14, fontWeight: 800, color: c.tx }}>
+            Offline mode ready
+          </div>
+        ) : (
+          <BrandLockup size="sm" showTagline />
+        )}
         <div style={{ fontSize: 12, color: c.tx2, lineHeight: 1.45, marginTop: 4 }}>
           {offlineReady
             ? "The app can reopen from your home screen and keep core pages available when your connection drops."
-            : "Add it to your home screen for a full-screen app feel, faster launch, and offline support."}
+            : "Add it to your home screen for a faster launch, an app-like feel, and offline support."}
         </div>
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>

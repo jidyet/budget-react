@@ -1,13 +1,8 @@
-const money = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 0,
-});
+import { fx0 } from "./budgetUtils";
 
 const dateLabel = new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric" });
 
-export const asMoney = (value) => money.format(Number(value || 0));
+export const asMoney = (value) => fx0(Number(value || 0));
 
 export const safeNumber = (value) => {
   const parsed = Number(value);

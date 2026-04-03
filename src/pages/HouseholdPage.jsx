@@ -14,6 +14,8 @@ export default function HouseholdPage(props) {
     canManageHousehold,
     handleApproveHouseholdRequest,
     handleRejectHouseholdRequest,
+    handleLeaveHousehold,
+    handleRemoveHouseholdMember,
     userProfile,
     householdInviteLink,
     subscription,
@@ -21,6 +23,10 @@ export default function HouseholdPage(props) {
     handleSaveHouseholdProfile,
     handleCopyHouseholdInvite,
     handleShareHouseholdInvite,
+    handleInviteHouseholdMemberByUserId,
+    pendingHouseholdId,
+    pendingHouseholdName,
+    cancelPendingRequest,
   } = props;
 
   return (
@@ -39,6 +45,10 @@ export default function HouseholdPage(props) {
         onSaveProfile={handleSaveHouseholdProfile}
         onCopyInvite={handleCopyHouseholdInvite}
         onShareInvite={handleShareHouseholdInvite}
+        onInviteByUserId={handleInviteHouseholdMemberByUserId}
+        pendingHouseholdId={pendingHouseholdId}
+        pendingHouseholdName={pendingHouseholdName}
+        onCancelPendingRequest={cancelPendingRequest}
         onOpenSetup={() => {
           setHouseholdSetupOpen(true);
           setHouseholdSetupTab('choose');
@@ -50,11 +60,14 @@ export default function HouseholdPage(props) {
           palette={c}
           householdMembers={householdMembers}
           householdRequests={householdRequests}
+          currentHouseholdMember={currentHouseholdMember}
           canManageHousehold={canManageHousehold}
           subscription={subscription}
           onOpenBilling={openBillingPage}
           onApprove={handleApproveHouseholdRequest}
           onReject={handleRejectHouseholdRequest}
+          onLeave={handleLeaveHousehold}
+          onRemoveMember={handleRemoveHouseholdMember}
         />
       ) : (
         <div style={{ background:c.surf, border:`1px solid ${c.border}`, borderRadius:18, padding:'18px 20px' }}>

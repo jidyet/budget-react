@@ -56,6 +56,20 @@ service cloud.firestore {
         && householdMemberDoc(householdId).data.role in ["owner", "admin"];
     }
 
+    function isAppAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/config/admins)
+        && request.auth.uid in get(/databases/$(database)/documents/config/admins).data.uids;
+    }
+
+    function validAdminWorkspaceReset() {
+      return validUserWorkspaceFields(request.resource.data)
+        && request.resource.data.workspaceMode == "solo"
+        && request.resource.data.activeHouseholdId == ""
+        && request.resource.data.pendingHouseholdId == ""
+        && request.resource.data.pendingHouseholdName == "";
+    }
+
     function isHouseholdOwnerFromRoot(householdId) {
       return signedIn()
         && exists(/databases/$(database)/documents/households/$(householdId))
@@ -141,6 +155,52 @@ service cloud.firestore {
         && !resource.data.memberIds.hasAny([request.auth.uid]);
     }
 
+    function validLeaveRootUpdate(householdId) {
+      return isActiveHouseholdMember(householdId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "memberIds", "memberCount", "updatedAt", "updatedBy", "updatedByLabel"
+        ])
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.ownerEmail == resource.data.ownerEmail
+        && request.resource.data.joinCode == resource.data.joinCode
+        && request.resource.data.joinMode == resource.data.joinMode
+        && request.resource.data.name == resource.data.name
+        && request.resource.data.description == resource.data.description
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.active == resource.data.active
+        && request.resource.data.updatedBy == request.auth.uid
+        && isRequiredString(request.resource.data.updatedByLabel, 120)
+        && validTimestamp(request.resource.data.updatedAt)
+        && request.resource.data.memberCount == resource.data.memberCount - 1
+        && request.resource.data.memberIds.size() == request.resource.data.memberCount
+        && resource.data.memberIds.hasAny([request.auth.uid])
+        && !request.resource.data.memberIds.hasAny([request.auth.uid]);
+    }
+
+    function validInvitedJoinRootUpdate(householdId) {
+      return hasPendingHouseholdInvite(householdId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "memberIds", "memberCount", "updatedAt", "updatedBy", "updatedByLabel"
+        ])
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.ownerEmail == resource.data.ownerEmail
+        && request.resource.data.joinCode == resource.data.joinCode
+        && request.resource.data.joinMode == resource.data.joinMode
+        && request.resource.data.name == resource.data.name
+        && request.resource.data.description == resource.data.description
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.active == resource.data.active
+        && request.resource.data.dailyMessage == resource.data.dailyMessage
+        && request.resource.data.updatedBy == request.auth.uid
+        && isRequiredString(request.resource.data.updatedByLabel, 120)
+        && validTimestamp(request.resource.data.updatedAt)
+        && request.resource.data.memberCount == resource.data.memberCount + 1
+        && request.resource.data.memberIds.size() == request.resource.data.memberCount
+        && request.resource.data.memberIds.hasAll(resource.data.memberIds)
+        && request.resource.data.memberIds.hasAny([request.auth.uid])
+        && !resource.data.memberIds.hasAny([request.auth.uid]);
+    }
+
     function validDirectoryDoc(householdId) {
       return request.resource.data.keys().hasAll([
           "householdId", "name", "nameLower", "description", "joinCode",
@@ -165,6 +225,20 @@ service cloud.firestore {
 
     function validOpenJoinDirectoryUpdate(householdId) {
       return rootJoinMode(householdId) == "open"
+        && request.resource.data.householdId == resource.data.householdId
+        && request.resource.data.name == resource.data.name
+        && request.resource.data.nameLower == resource.data.nameLower
+        && request.resource.data.description == resource.data.description
+        && request.resource.data.joinCode == resource.data.joinCode
+        && request.resource.data.joinMode == resource.data.joinMode
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.active == resource.data.active
+        && request.resource.data.memberCount == resource.data.memberCount + 1
+        && validTimestamp(request.resource.data.updatedAt);
+    }
+
+    function validInvitedJoinDirectoryUpdate(householdId) {
+      return hasPendingHouseholdInvite(householdId)
         && request.resource.data.householdId == resource.data.householdId
         && request.resource.data.name == resource.data.name
         && request.resource.data.nameLower == resource.data.nameLower
@@ -237,6 +311,112 @@ service cloud.firestore {
       return value in ["confusing", "bug", "helpful", "idea", "other"];
     }
 
+    function isInviteStatus(value) {
+      return value in ["pending", "requested", "accepted", "declined"];
+    }
+
+    function hasPendingHouseholdInvite(householdId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid)/invites/$(householdId))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)/invites/$(householdId)).data.status == "pending";
+    }
+
+    function validHouseholdInviteDoc(householdId) {
+      return request.resource.data.keys().hasAll([
+          "householdId", "householdName", "householdDescription", "joinCode",
+          "joinMode", "invitedByUid", "invitedByEmail", "invitedByName",
+          "status", "createdAt", "updatedAt"
+        ])
+        && request.resource.data.keys().hasOnly([
+          "householdId", "householdName", "householdDescription", "joinCode",
+          "joinMode", "invitedByUid", "invitedByEmail", "invitedByName",
+          "status", "createdAt", "updatedAt"
+        ])
+        && request.resource.data.householdId == householdId
+        && isRequiredString(request.resource.data.householdName, 80)
+        && isShortString(request.resource.data.householdDescription, 220)
+        && isRequiredString(request.resource.data.joinCode, 12)
+        && isJoinMode(request.resource.data.joinMode)
+        && isRequiredString(request.resource.data.invitedByUid, 120)
+        && isShortString(request.resource.data.invitedByEmail, 160)
+        && isRequiredString(request.resource.data.invitedByName, 120)
+        && isInviteStatus(request.resource.data.status)
+        && validTimestamp(request.resource.data.createdAt)
+        && validTimestamp(request.resource.data.updatedAt);
+    }
+
+    function validUserWorkspaceFields(data) {
+      return data.activeHouseholdId is string
+        && isShortString(data.activeHouseholdId, 120)
+        && data.householdSetupDone is bool
+        && data.workspaceMode in ["solo", "household"]
+        && data.pendingHouseholdId is string
+        && isShortString(data.pendingHouseholdId, 120)
+        && data.pendingHouseholdName is string
+        && isShortString(data.pendingHouseholdName, 120)
+        && validTimestamp(data.updatedAt);
+    }
+
+    function validManagedWorkspaceTransition() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "activeHouseholdId", "householdSetupDone", "workspaceMode",
+          "pendingHouseholdId", "pendingHouseholdName", "updatedAt"
+        ])
+        && validUserWorkspaceFields(request.resource.data);
+    }
+
+    function validManagedWorkspaceCreate() {
+      return request.resource.data.keys().hasOnly([
+          "activeHouseholdId", "householdSetupDone", "workspaceMode",
+          "pendingHouseholdId", "pendingHouseholdName", "updatedAt"
+        ])
+        && validUserWorkspaceFields(request.resource.data);
+    }
+
+    function canCreateManagedUserWorkspaceForHousehold(uid) {
+      return resource == null
+        && validManagedWorkspaceCreate()
+        && request.resource.data.activeHouseholdId.size() > 0
+        && (
+          isHouseholdAdmin(request.resource.data.activeHouseholdId)
+          || isHouseholdOwnerFromRoot(request.resource.data.activeHouseholdId)
+        )
+        && request.resource.data.householdSetupDone == true
+        && request.resource.data.workspaceMode == "household"
+        && request.resource.data.pendingHouseholdId == ""
+        && request.resource.data.pendingHouseholdName == "";
+    }
+
+    function canUpdateManagedUserWorkspaceForHousehold(uid) {
+      return resource != null
+        && resource.data != null
+        && validManagedWorkspaceTransition()
+        && (
+          (
+            resource.data.activeHouseholdId is string
+            && resource.data.activeHouseholdId.size() > 0
+            && (
+              isHouseholdAdmin(resource.data.activeHouseholdId)
+              || isHouseholdOwnerFromRoot(resource.data.activeHouseholdId)
+            )
+            && request.resource.data.activeHouseholdId == ""
+            && request.resource.data.workspaceMode == "solo"
+            && request.resource.data.pendingHouseholdId == ""
+            && request.resource.data.pendingHouseholdName == ""
+          )
+          || (
+            request.resource.data.activeHouseholdId.size() > 0
+            && (
+              isHouseholdAdmin(request.resource.data.activeHouseholdId)
+              || isHouseholdOwnerFromRoot(request.resource.data.activeHouseholdId)
+            )
+            && request.resource.data.workspaceMode == "household"
+            && request.resource.data.pendingHouseholdId == ""
+            && request.resource.data.pendingHouseholdName == ""
+          )
+        );
+    }
+
     match /householdDirectory/{householdId} {
       allow read: if signedIn();
       allow create: if isHouseholdOwnerFromRoot(householdId) && validDirectoryDoc(householdId);
@@ -250,15 +430,49 @@ service cloud.firestore {
           )
           || isHouseholdOwnerFromRoot(householdId)
           || validOpenJoinDirectoryUpdate(householdId)
+          || validInvitedJoinDirectoryUpdate(householdId)
         );
       allow delete: if false;
     }
 
     match /users/{uid} {
-      allow read, write: if isOwner(uid);
+      allow read: if isOwner(uid) || isAppAdmin();
+      allow write: if isOwner(uid) || isAppAdmin();
+
+      match /meta/app {
+        allow read: if isOwner(uid) || isAppAdmin();
+        allow create: if isOwner(uid) || canCreateManagedUserWorkspaceForHousehold(uid) || (isAppAdmin() && validAdminWorkspaceReset());
+        allow update: if isOwner(uid) || canUpdateManagedUserWorkspaceForHousehold(uid) || (isAppAdmin() && validAdminWorkspaceReset());
+        allow delete: if false;
+      }
+
+      match /invites/{householdId} {
+        allow read: if isOwner(uid);
+        allow create: if validHouseholdInviteDoc(householdId)
+          && request.resource.data.status == "pending"
+          && (
+            isHouseholdAdmin(householdId)
+            || isHouseholdOwnerFromRoot(householdId)
+          );
+        allow update: if isOwner(uid)
+          && validHouseholdInviteDoc(householdId)
+          && request.resource.data.householdId == resource.data.householdId
+          && request.resource.data.householdName == resource.data.householdName
+          && request.resource.data.householdDescription == resource.data.householdDescription
+          && request.resource.data.joinCode == resource.data.joinCode
+          && request.resource.data.joinMode == resource.data.joinMode
+          && request.resource.data.invitedByUid == resource.data.invitedByUid
+          && request.resource.data.invitedByEmail == resource.data.invitedByEmail
+          && request.resource.data.invitedByName == resource.data.invitedByName
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.status in ["requested", "accepted", "declined"];
+        allow delete: if isOwner(uid)
+          || isHouseholdAdmin(householdId)
+          || isHouseholdOwnerFromRoot(householdId);
+      }
 
       match /{document=**} {
-        allow read, write: if isOwner(uid);
+        allow read, write: if isOwner(uid) || isAppAdmin();
       }
     }
 
@@ -293,17 +507,42 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // User registry — each authenticated user writes their own sanitized profile on login.
+    // Admins can read all entries for the admin panel.
+    match /registry/{uid} {
+      allow read: if isOwner(uid) || isAppAdmin();
+      allow write: if isOwner(uid) || isAppAdmin();
+    }
+
+    // App-level config. /config/admins contains uids: [...] for admin checks.
+    // Write only via Firebase console or Admin SDK.
+    match /config/{docId} {
+      allow read: if isAppAdmin();
+      allow write: if isAppAdmin();
+    }
+
     match /households/{householdId} {
-      allow read: if isActiveHouseholdMember(householdId);
+      // Both get and list use the memberIds field so Firestore can verify the rule
+      // without cross-document reads. memberIds is kept in sync (members removed from
+      // it when they leave/are removed), so this is equivalent to active membership.
+      allow read: if signedIn()
+        && (
+          resource.data.memberIds.hasAny([request.auth.uid])
+          || resource.data.active == true
+        );
       allow create: if signedIn() && validHouseholdRootCreate(householdId);
       allow update: if validHouseholdRootUpdate(householdId)
         && (
           isHouseholdAdmin(householdId)
+          || isAppAdmin()
           || validOpenJoinRootUpdate(householdId)
+          || validInvitedJoinRootUpdate(householdId)
+          || validLeaveRootUpdate(householdId)
         );
 
       match /members/{memberId} {
-        allow read: if isActiveHouseholdMember(householdId);
+        allow read: if isActiveHouseholdMember(householdId)
+          || (signedIn() && request.auth.uid == memberId);
         allow create: if validMemberDoc(memberId)
           && (
             (isHouseholdOwnerFromRoot(householdId) && request.auth.uid == memberId && request.resource.data.role == "owner")
@@ -314,10 +553,17 @@ service cloud.firestore {
               && request.resource.data.role == "member"
               && request.resource.data.status == "active"
             )
+            || (
+              hasPendingHouseholdInvite(householdId)
+              && request.auth.uid == memberId
+              && request.resource.data.role == "member"
+              && request.resource.data.status == "active"
+            )
           );
         allow update: if validMemberDoc(memberId)
           && (
             isHouseholdOwnerFromRoot(householdId)
+            || isAppAdmin()
             || (
               isHouseholdAdmin(householdId)
               && !isHouseholdOwnerFromRoot(householdId)
@@ -326,7 +572,10 @@ service cloud.firestore {
             )
             || (isActiveHouseholdMember(householdId) && validSelfMemberProfileUpdate(memberId))
           );
-        allow delete: if isHouseholdAdmin(householdId);
+        // Admins can remove any non-owner member; members can leave themselves (not if owner)
+        allow delete: if isHouseholdAdmin(householdId)
+          || isAppAdmin()
+          || (isActiveHouseholdMember(householdId) && request.auth.uid == memberId && resource.data.role != "owner");
       }
 
       match /joinRequests/{requestId} {
@@ -349,7 +598,9 @@ service cloud.firestore {
           && request.resource.data.status in ["approved", "rejected"]
           && validTimestamp(request.resource.data.reviewedAt)
           && request.resource.data.reviewedBy == request.auth.uid;
-        allow delete: if isHouseholdAdmin(householdId);
+        // Allow the requester to delete their own request (withdraw pending, clear rejection to re-request)
+        allow delete: if isHouseholdAdmin(householdId)
+          || (signedIn() && request.auth.uid == requestId);
       }
 
       match /months/{monthKey} {

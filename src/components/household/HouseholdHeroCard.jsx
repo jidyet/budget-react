@@ -1,4 +1,4 @@
-export default function HouseholdHeroCard({ palette, householdName, totalDebtLeft, paidThisMonth, memberCount }) {
+export default function HouseholdHeroCard({ palette, householdName, totalDebtLeft, paidThisMonth, memberCount, updatedTodayCount = 0 }) {
   const c = palette;
 
   return (
@@ -35,8 +35,15 @@ export default function HouseholdHeroCard({ palette, householdName, totalDebtLef
           <div style={{ fontSize: 28, fontWeight: 900, color: c.tx, margin: "12px 0 4px" }}>{householdName || "Your household"}</div>
           <div style={{ fontSize: 14, color: c.tx2, lineHeight: 1.55 }}>You&apos;re doing this together. Keep it simple. Keep it moving.</div>
         </div>
-        <div style={{ padding: "8px 12px", borderRadius: 999, background: `${c.surf}CC`, border: `1px solid ${c.ac}30`, color: c.ac, fontSize: 12, fontWeight: 900, boxShadow: `0 8px 20px ${c.ac}18` }}>
-          {memberCount} member{memberCount === 1 ? "" : "s"}
+        <div style={{ display: "grid", gap: 6, textAlign: "right" }}>
+          <div style={{ padding: "6px 12px", borderRadius: 999, background: `${c.surf}CC`, border: `1px solid ${c.ac}30`, color: c.ac, fontSize: 12, fontWeight: 900, boxShadow: `0 8px 20px ${c.ac}18` }}>
+            {memberCount} member{memberCount === 1 ? "" : "s"}
+          </div>
+          {updatedTodayCount > 0 && (
+            <div style={{ padding: "5px 10px", borderRadius: 999, background: `${c.go}14`, border: `1px solid ${c.go}33`, color: c.go, fontSize: 11, fontWeight: 800, textAlign: "center" }}>
+              {updatedTodayCount === 1 ? "1 update today" : `${updatedTodayCount} updates today`}
+            </div>
+          )}
         </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, position: "relative" }}>

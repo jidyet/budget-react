@@ -24,6 +24,16 @@ export default function HistoryPage(props) {
   const [uploadsError, setUploadsError] = useState(null);
   const [sel, setSel] = useState(null);
 
+  const formatUploadDate = (createdAt) => {
+    try {
+      if (!createdAt) return "";
+      const d = createdAt?.toDate ? createdAt.toDate() : new Date(createdAt);
+      return d.toLocaleString();
+    } catch {
+      return "";
+    }
+  };
+
   const buildStatementHighlights = (upload, row) => {
     const parsed = upload?.parsed || {};
     const before = row?.before || {};
@@ -92,7 +102,7 @@ export default function HistoryPage(props) {
             <div style={{ minWidth: 0 }}>
               <div style={{ fontWeight: 800 }}>{upload.fileName || upload.type}</div>
               <div style={{ fontSize: 12, color: c.muted }}>
-                {upload.uploader || upload.parsed?.account_hint || ""} - {new Date(upload.createdAt?.toDate ? upload.createdAt.toDate() : upload.createdAt || Date.now()).toLocaleString()}
+                {upload.uploader || upload.parsed?.account_hint || ""} - {formatUploadDate(upload.createdAt)}
               </div>
             </div>
             <div>

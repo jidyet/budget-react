@@ -19,9 +19,13 @@ export default function HouseholdSettingsPage({
   onSaveProfile,
   onCopyInvite,
   onShareInvite,
+  onInviteByUserId,
+  pendingHouseholdId = "",
+  pendingHouseholdName = "",
+  onCancelPendingRequest,
 }) {
   const c = palette;
-  const household = householdProfile.activeHousehold;
+  const household = workspaceMode === "household" && currentHouseholdMember ? householdProfile.activeHousehold : null;
   const pendingCount = householdRequests.filter((item) => item.status === "pending").length;
   const freePlanAtLimit = subscription?.billingEnabled && !subscription?.premium && Boolean(subscription?.memberLimitReached);
   const [draft, setDraft] = useState({
@@ -29,12 +33,15 @@ export default function HouseholdSettingsPage({
     photoURL: "",
     avatarColor: COLOR_OPTIONS[0],
   });
+  const [inviteUserId, setInviteUserId] = useState("");
 
   useEffect(() => {
-    setDraft({
-      displayName: currentHouseholdMember?.displayName || currentHouseholdMember?.label || userProfile?.displayName || "",
-      photoURL: currentHouseholdMember?.photoURL || userProfile?.photoURL || "",
-      avatarColor: currentHouseholdMember?.avatarColor || userProfile?.avatarColor || COLOR_OPTIONS[0],
+    queueMicrotask(() => {
+      setDraft({
+        displayName: currentHouseholdMember?.displayName || currentHouseholdMember?.label || userProfile?.displayName || "",
+        photoURL: currentHouseholdMember?.photoURL || userProfile?.photoURL || "",
+        avatarColor: currentHouseholdMember?.avatarColor || userProfile?.avatarColor || COLOR_OPTIONS[0],
+      });
     });
   }, [currentHouseholdMember, userProfile]);
 
@@ -48,15 +55,47 @@ export default function HouseholdSettingsPage({
             <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", color: c.muted, marginBottom: 4 }}>
               Household
             </div>
-            <div style={{ fontSize: 20, fontWeight: 900, color: c.tx }}>{household?.name || (workspaceMode === "household" ? "Shared home" : "Solo flow")}</div>
+            <div style={{ fontSize: 20, fontWeight: 900, color: c.tx }}>{household?.name || (workspaceMode === "household" ? "Shared home" : (pendingHouseholdId ? pendingHouseholdName || "Pending" : "Solo flow"))}</div>
             <div style={{ fontSize: 13, color: c.tx2, lineHeight: 1.6 }}>
-              {household?.description || "A simple shared place for progress, payments, and the next move."}
+              {workspaceMode === "household"
+                ? (household?.description || "A simple shared place for progress, payments, and the next move.")
+                : pendingHouseholdId
+                  ? "Your request is still waiting for approval."
+                  : "You're back in solo mode. Start a new shared household whenever you're ready."}
             </div>
           </div>
-          <button type="button" onClick={onOpenSetup} style={{ padding: "10px 14px", borderRadius: 10, border: `1px solid ${c.border2}`, background: c.surf2, color: c.tx, fontSize: 12, fontWeight: 800, cursor: "pointer" }}>
-            {workspaceMode === "household" ? "Open setup" : "Start sharing"}
-          </button>
+          {workspaceMode !== "household" && !pendingHouseholdId && (
+            <button type="button" onClick={onOpenSetup} style={{ padding: "10px 14px", borderRadius: 10, border: `1px solid ${c.border2}`, background: c.surf2, color: c.tx, fontSize: 12, fontWeight: 800, cursor: "pointer" }}>
+              Start sharing
+            </button>
+          )}
+          {workspaceMode === "household" && (
+            <button type="button" onClick={onOpenSetup} style={{ padding: "10px 14px", borderRadius: 10, border: `1px solid ${c.border2}`, background: c.surf2, color: c.tx, fontSize: 12, fontWeight: 800, cursor: "pointer" }}>
+              Open setup
+            </button>
+          )}
         </div>
+
+        {workspaceMode !== "household" && pendingHouseholdId && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "12px 14px", borderRadius: 14, background: `${c.wa}12`, border: `1.5px solid ${c.wa}55` }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ width: 32, height: 32, borderRadius: "50%", display: "grid", placeItems: "center", background: `${c.wa}20`, color: c.wa, fontSize: 16, flexShrink: 0 }}>⏳</div>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 800, color: c.tx }}>Waiting for approval</div>
+                <div style={{ fontSize: 11, color: c.tx2 }}>
+                  Your request to join <strong>{pendingHouseholdName || "a household"}</strong> is pending. You'll be switched over once approved.
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onCancelPendingRequest}
+              style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${c.border2}`, background: c.surf2, color: c.tx2, fontSize: 11, fontWeight: 800, cursor: "pointer", flexShrink: 0 }}
+            >
+              Cancel request
+            </button>
+          </div>
+        )}
 
         {workspaceMode === "household" && (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
@@ -106,6 +145,32 @@ export default function HouseholdSettingsPage({
                 Open billing
               </button>
             )}
+          </div>
+          <div style={{ marginTop: 4, display: "grid", gap: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: c.muted }}>
+              Invite by user ID
+            </div>
+            <div style={{ fontSize: 12, color: c.tx2, lineHeight: 1.5 }}>
+              If someone shares their user ID with you, paste it here and send them an invite that shows on their home page.
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <input
+                value={inviteUserId}
+                onChange={(event) => setInviteUserId(event.target.value)}
+                placeholder="Paste their user ID"
+                style={{ flex: 1, minWidth: 220, padding: "11px 12px", borderRadius: 10, border: `1px solid ${c.border2}`, background: c.surf2, color: c.tx, fontSize: 14 }}
+              />
+              <button
+                type="button"
+                onClick={async () => {
+                  const sent = await onInviteByUserId?.(inviteUserId);
+                  if (sent) setInviteUserId("");
+                }}
+                style={{ padding: "10px 14px", borderRadius: 10, border: "none", background: c.ac, color: "#001014", fontSize: 12, fontWeight: 800, cursor: "pointer" }}
+              >
+                Send invite
+              </button>
+            </div>
           </div>
         </div>
       )}

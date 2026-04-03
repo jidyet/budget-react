@@ -17,7 +17,7 @@ export const subscribeFormattedHouseholdActivity = (householdId, callback, maxIt
 
 export const formatHouseholdActivityItem = (item = {}) => {
   const actor = item.actorLabel || item.actorEmail || "Someone";
-  const account = item.accountName || item.statementName || item.planName || item.householdName || item.requestEmail || item.accountId || "the budget";
+  const account = item.accountName || item.statementName || item.planName || item.householdName || item.requestEmail || "a bill";
 
   const messageMap = {
     "household.created": `${actor} started this household`,

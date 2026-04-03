@@ -1,6 +1,17 @@
 import { LAUNCH_COPY } from "../config/launchCopy";
+import BrandLockup from "../components/ui/BrandLockup";
 
-export default function OnboardingFlow({ c, isMobile, step, setStep, completeOnboarding, openSettings }) {
+export default function OnboardingFlow({
+  c,
+  isMobile,
+  step,
+  setStep,
+  completeOnboarding,
+  openSettings,
+  currencyCode = "USD",
+  currencyOptions = [],
+  onCurrencyChange,
+}) {
   if (step <= 0) return null;
 
   return (
@@ -15,12 +26,36 @@ export default function OnboardingFlow({ c, isMobile, step, setStep, completeOnb
 
         {step === 1 && (
           <div style={{ display:"grid", gap:10 }}>
-            <div style={{ fontSize:26, fontWeight:900, color:c.tx }}>Welcome to Household Budget</div>
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: c.muted, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                Welcome to
+              </div>
+              <BrandLockup size="lg" showTagline />
+            </div>
             <div style={{ fontSize:14, color:c.tx2, lineHeight:1.6 }}>
               {LAUNCH_COPY.onboarding.welcomeDetail}
             </div>
             <div style={{ padding:"12px 14px", borderRadius:14, background:c.surf2, border:`1px solid ${c.border}`, fontSize:13, color:c.tx2 }}>
               {LAUNCH_COPY.onboarding.welcomeNote}
+            </div>
+            <div style={{ display:"grid", gap:6, marginTop:4 }}>
+              <div style={{ fontSize:12, fontWeight:800, color:c.muted, letterSpacing:"0.08em", textTransform:"uppercase" }}>
+                Currency
+              </div>
+              <select
+                value={currencyCode}
+                onChange={(e) => onCurrencyChange?.(e.target.value)}
+                style={{ width:"100%", padding:"12px 14px", borderRadius:12, border:`1px solid ${c.border}`, background:c.surf, color:c.tx, fontSize:14, fontWeight:700, outline:"none" }}
+              >
+                {currencyOptions.map((option) => (
+                  <option key={option.code} value={option.code}>
+                    {option.code} - {option.label}
+                  </option>
+                ))}
+              </select>
+              <div style={{ fontSize:12, color:c.tx2, lineHeight:1.5 }}>
+                Pick the currency you want the app to use. You can change it again later in Settings.
+              </div>
             </div>
             <button type="button" onClick={() => setStep(2)} style={{ width:"100%", padding:"13px", borderRadius:12, border:"none", background:c.ac, color:"#001014", fontSize:15, fontWeight:800, cursor:"pointer", marginTop:8 }}>
               Start here

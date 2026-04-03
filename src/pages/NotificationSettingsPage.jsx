@@ -1,16 +1,17 @@
 import EmptyStateCard from "../components/ui/EmptyStateCard";
 import LoadingState from "../components/ui/LoadingState";
+import ProTag from "../components/billing/ProTag";
 
 export default function NotificationSettingsPage({
   mounted,
   c,
-  isMobile,
   notifPermission,
   requestBillReminderPermission,
   reminderPreferences,
   preferencesLoading,
   patchReminderPreferences,
   pwaInstalled,
+  subscription,
 }) {
   const toggleStyle = (enabled) => ({
     width: 48,
@@ -35,7 +36,10 @@ export default function NotificationSettingsPage({
     <div style={{ opacity: mounted ? 1 : 0, transition: "opacity .3s", display: "grid", gap: 12, maxWidth: 860 }}>
       <div style={{ background: `linear-gradient(135deg, ${c.ac}14, ${c.surf} 36%, ${c.surf2})`, border: `1px solid ${c.border}`, borderRadius: 20, padding: "18px 20px", display: "grid", gap: 8 }}>
         <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: c.muted }}>Notifications</div>
-        <div style={{ fontSize: 26, fontWeight: 900, color: c.tx }}>Stay in sync</div>
+        <div style={{ fontSize: 26, fontWeight: 900, color: c.tx }}>
+          Stay in sync
+          <ProTag subscription={subscription} palette={c} />
+        </div>
         <div style={{ fontSize: 13, color: c.tx2, lineHeight: 1.55, maxWidth: 620 }}>
           Keep reminders light and useful. Turn on only the nudges that help you keep going.
         </div>

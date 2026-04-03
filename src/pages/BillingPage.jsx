@@ -17,13 +17,16 @@ const PLAN_OPTIONS = [
   },
 ];
 
-const PREMIUM_BENEFITS = [
-  "Full household support",
-  "Advanced progress visuals",
-  "Payoff acceleration insights",
-  "Gentle reminders and nudges",
-  "Weekly summaries",
-  "Export and backup tools",
+// [label, free, premium]
+const FEATURE_COMPARISON = [
+  ["Track bills & balances",         true,  true],
+  ["Payoff planner",                 true,  true],
+  ["Monthly trends",                 true,  true],
+  ["Household sharing",              "2 people", "Up to 12"],
+  ["Advanced progress visuals",      false, true],
+  ["Bill reminders & nudges",        false, true],
+  ["Weekly summaries",               false, true],
+  ["Export & backup tools",          false, true],
 ];
 
 export default function BillingPage({
@@ -147,35 +150,62 @@ export default function BillingPage({
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
-        <div style={{ background: c.surf, border: `1px solid ${c.border}`, borderRadius: 20, padding: "18px 18px", display: "grid", gap: 12 }}>
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: c.muted, marginBottom: 4 }}>
-              What opens up
-            </div>
-            <div style={{ fontSize: 20, fontWeight: 900, color: c.tx }}>More support, same calm flow</div>
+      <div style={{ background: c.surf, border: `1px solid ${c.border}`, borderRadius: 20, padding: "18px 18px", display: "grid", gap: 14 }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: c.muted, marginBottom: 4 }}>
+            Free vs Premium
           </div>
-          <div style={{ display: "grid", gap: 8 }}>
-            {PREMIUM_BENEFITS.map((item) => (
-              <div key={item} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 14, background: c.surf2, border: `1px solid ${c.border}` }}>
-                <div style={{ width: 8, height: 8, borderRadius: "50%", background: c.ac, flexShrink: 0 }} />
-                <div style={{ fontSize: 13, color: c.tx }}>{item}</div>
-              </div>
-            ))}
-          </div>
+          <div style={{ fontSize: 20, fontWeight: 900, color: c.tx }}>Same calm flow. More depth.</div>
         </div>
-
-        <UpgradeCard
-          palette={c}
-          title="See more of your progress"
-          detail={testerUnlocked
-            ? "You already have the full tester path open. Billing will show up here later when launch is closer."
-            : "The free plan keeps the basics open. Premium adds richer progress, more shared room, and cleaner support when you want it."}
-          cta={billingComingSoon ? "Coming soon" : (subscription?.premium ? "Manage billing" : (stripeReady ? "Start premium" : "Billing setup soon"))}
-          onClick={billingComingSoon ? undefined : (subscription?.premium ? onManageBilling : (stripeReady ? () => onStartCheckout(interval) : undefined))}
-          disabled={billingComingSoon || (!subscription?.premium && !stripeReady)}
-        />
+        <div style={{ display: "grid", gap: 0, borderRadius: 14, overflow: "hidden", border: `1px solid ${c.border}` }}>
+          {/* Header */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 80px 80px", background: c.surf2, padding: "10px 14px", borderBottom: `1px solid ${c.border}` }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: c.muted, letterSpacing: "0.08em", textTransform: "uppercase" }}>Feature</div>
+            <div style={{ fontSize: 11, fontWeight: 800, color: c.muted, letterSpacing: "0.08em", textTransform: "uppercase", textAlign: "center" }}>Free</div>
+            <div style={{ fontSize: 11, fontWeight: 800, color: c.ac, letterSpacing: "0.08em", textTransform: "uppercase", textAlign: "center" }}>Pro</div>
+          </div>
+          {FEATURE_COMPARISON.map(([label, free, premium], i) => (
+            <div
+              key={label}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 80px 80px",
+                padding: "10px 14px",
+                borderBottom: i < FEATURE_COMPARISON.length - 1 ? `1px solid ${c.border}` : "none",
+                background: i % 2 === 0 ? c.surf : c.surf2,
+                alignItems: "center",
+              }}
+            >
+              <div style={{ fontSize: 13, color: c.tx }}>{label}</div>
+              <div style={{ textAlign: "center", fontSize: 13 }}>
+                {free === true
+                  ? <span style={{ color: "#2b8e37", fontWeight: 800 }}>✓</span>
+                  : free === false
+                    ? <span style={{ color: c.muted }}>—</span>
+                    : <span style={{ fontSize: 11, color: c.tx2, fontWeight: 700 }}>{free}</span>}
+              </div>
+              <div style={{ textAlign: "center", fontSize: 13 }}>
+                {premium === true
+                  ? <span style={{ color: c.ac, fontWeight: 800 }}>✓</span>
+                  : premium === false
+                    ? <span style={{ color: c.muted }}>—</span>
+                    : <span style={{ fontSize: 11, color: c.ac, fontWeight: 800 }}>{premium}</span>}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
+
+      <UpgradeCard
+        palette={c}
+        title="See more of your progress"
+        detail={testerUnlocked
+          ? "You already have the full tester path open. Billing will show up here later when launch is closer."
+          : "The free plan keeps the basics open. Premium adds richer progress, more shared room, and cleaner support when you want it."}
+        cta={billingComingSoon ? "Coming soon" : (subscription?.premium ? "Manage billing" : (stripeReady ? "Start premium" : "Billing setup soon"))}
+        onClick={billingComingSoon ? undefined : (subscription?.premium ? onManageBilling : (stripeReady ? () => onStartCheckout(interval) : undefined))}
+        disabled={billingComingSoon || (!subscription?.premium && !stripeReady)}
+      />
     </div>
   );
 }

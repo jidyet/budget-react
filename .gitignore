@@ -15,11 +15,26 @@ dist-ssr
 functions/.env.local
 .firebase-config/
 .firebase-bin/
+.firebase/
+.gradle-home/
+.safety-snapshots/
+android/.gradle/
+android/app/build/
+android/app/src/main/assets/
 firestore-debug.log
 .claude/
 .tmp_streamlit_review/
 *.code-workspace
 *.backup
+audit.json
+outdated.txt
+firebase.app.json
+eslint-*.json
+eslint-*.txt
+eslint_report.json
+eslint-report*.json
+eslint-summary.json
+tmp-accounts-eslint.json
 
 # Editor directories and files
 .vscode/*

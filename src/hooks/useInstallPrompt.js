@@ -29,13 +29,18 @@ export default function useInstallPrompt() {
 
     window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
     window.addEventListener("appinstalled", onInstalled);
-    navigator.serviceWorker?.addEventListener?.("controllerchange", onControllerChange);
-    if (navigator.serviceWorker?.controller) setOfflineReady(true);
+    const serviceWorker = navigator.serviceWorker;
+    if (serviceWorker && typeof serviceWorker.addEventListener === "function") {
+      serviceWorker.addEventListener("controllerchange", onControllerChange);
+    }
+    if (serviceWorker?.controller) setOfflineReady(true);
 
     return () => {
       window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
       window.removeEventListener("appinstalled", onInstalled);
-      navigator.serviceWorker?.removeEventListener?.("controllerchange", onControllerChange);
+      if (serviceWorker && typeof serviceWorker.removeEventListener === "function") {
+        serviceWorker.removeEventListener("controllerchange", onControllerChange);
+      }
     };
   }, []);
 
@@ -66,4 +71,3 @@ export default function useInstallPrompt() {
     handleInstallApp,
   };
 }
-

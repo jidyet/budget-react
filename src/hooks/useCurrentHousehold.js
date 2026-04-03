@@ -8,12 +8,14 @@ export default function useCurrentHousehold(user, isLocalUser) {
 
   useEffect(() => {
     if (!user || user.isLocal || isLocalUser) {
-      setProfile({ activeHousehold: null, memberships: [] });
-      setLoading(false);
-      setError(null);
+      queueMicrotask(() => {
+        setProfile({ activeHousehold: null, memberships: [] });
+        setLoading(false);
+        setError(null);
+      });
       return () => {};
     }
-    setLoading(true);
+    queueMicrotask(() => setLoading(true));
     const unsub = subscribeCurrentHousehold(user.uid, (next) => {
       setProfile(next);
       setLoading(false);

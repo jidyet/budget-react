@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TrackToZero</title>
+    <style>
+      :root {
+        --bg: #f6fbff;
+        --card: rgba(255, 255, 255, 0.9);
+        --text: #183153;
+        --muted: #56708f;
+        --green: #3ca941;
+        --blue: #1e9be3;
+        --orange: #ff8a18;
+        --border: rgba(75, 128, 197, 0.22);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        font-family: "Segoe UI", Arial, sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(60, 169, 65, 0.18), transparent 28%),
+          radial-gradient(circle at top right, rgba(255, 138, 24, 0.16), transparent 24%),
+          radial-gradient(circle at bottom center, rgba(30, 155, 227, 0.16), transparent 28%),
+          var(--bg);
+      }
+
+      .card {
+        width: min(720px, 100%);
+        padding: 32px;
+        border-radius: 28px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        box-shadow: 0 24px 60px rgba(24, 49, 83, 0.12);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 20px;
+      }
+
+      .brand img {
+        width: 72px;
+        height: 72px;
+        object-fit: contain;
+      }
+
+      .brand h1 {
+        margin: 0;
+        font-size: clamp(32px, 5vw, 48px);
+        line-height: 1;
+        font-weight: 800;
+        letter-spacing: -0.04em;
+      }
+
+      .brand .track {
+        color: var(--green);
+      }
+
+      .brand .to {
+        color: var(--blue);
+      }
+
+      .brand .zero {
+        color: var(--orange);
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 14px;
+        margin-bottom: 14px;
+        border-radius: 999px;
+        background: rgba(60, 169, 65, 0.12);
+        color: var(--green);
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .eyebrow::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: currentColor;
+      }
+
+      h2 {
+        margin: 0 0 12px 0;
+        font-size: clamp(28px, 4vw, 40px);
+        line-height: 1.05;
+      }
+
+      p {
+        margin: 0;
+        font-size: 18px;
+        line-height: 1.6;
+        color: var(--muted);
+      }
+
+      .panel {
+        margin-top: 24px;
+        padding: 18px 20px;
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.74);
+        border: 1px solid var(--border);
+      }
+
+      .panel strong {
+        display: block;
+        margin-bottom: 8px;
+        font-size: 18px;
+        color: var(--text);
+      }
+
+      .footer {
+        margin-top: 24px;
+        font-size: 15px;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <div class="brand">
+        <img src="/track_to_zero.png" alt="TrackToZero" />
+        <h1>
+          <span class="track">Track</span><span class="to">To</span><span class="zero">Zero</span>
+        </h1>
+      </div>
+
+      <div class="eyebrow">Temporary pause</div>
+      <h2>We’re finishing a few fixes before reopening.</h2>
+      <p>
+        TrackToZero is temporarily offline while we complete a final reliability pass.
+        Your data is still there. We’ll bring the app back as soon as this is ready.
+      </p>
+
+      <section class="panel">
+        <strong>What’s happening</strong>
+        <p>
+          We found a few live issues around household sharing and mobile behavior.
+          We’re holding access briefly so we can fix them cleanly before reopening.
+        </p>
+      </section>
+
+      <p class="footer">Thanks for your patience. We’ll be back shortly.</p>
+    </main>
+  </body>
+  </html>

@@ -21,6 +21,10 @@ html {
 body {
   display: block;
   overflow-x: hidden;
+  font-family: 'Instrument Sans', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 #root {
@@ -32,7 +36,7 @@ body {
 }
 
 body {
-  overscroll-behavior-y: none;
+  overscroll-behavior-y: auto;
 }
 
 button, input, select, textarea {
@@ -53,4 +57,57 @@ button, input, select, textarea {
   html, body, #root, .app-shell-scroll {
     min-height: 100dvh;
   }
+}
+
+/* ── Celebration & Momentum animations ───────────────────────────────────── */
+@keyframes riseFade {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes milestonePop {
+  0%   { opacity: 0; transform: scale(0.88) translateY(8px); }
+  70%  { transform: scale(1.03) translateY(-1px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 0 0 currentColor; }
+  50%       { box-shadow: 0 0 0 8px transparent; }
+}
+
+@keyframes celebPulse {
+  0%, 100% { box-shadow: 0 14px 40px var(--cel-glow, rgba(0,200,120,.18)); }
+  50%       { box-shadow: 0 14px 56px var(--cel-glow, rgba(0,200,120,.36)); }
+}
+
+@keyframes confettiDrift {
+  0%   { transform: translateY(0) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(-38px) rotate(360deg); opacity: 0; }
+}
+
+@keyframes sparkle {
+  0%, 100% { opacity: .15; transform: scale(.7); }
+  50%       { opacity: 1;   transform: scale(1.2); }
+}
+
+@keyframes ringPop {
+  0%   { opacity: 0; transform: scale(0.7); }
+  65%  { transform: scale(1.08); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes shimmerSweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+@keyframes floatUp {
+  0%   { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-32px) scale(0.7); }
 }

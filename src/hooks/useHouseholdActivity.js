@@ -7,11 +7,13 @@ export default function useHouseholdActivity(householdId, maxItems = 8) {
 
   useEffect(() => {
     if (!householdId) {
-      setActivity([]);
-      setLoading(false);
+      queueMicrotask(() => {
+        setActivity([]);
+        setLoading(false);
+      });
       return () => {};
     }
-    setLoading(true);
+    queueMicrotask(() => setLoading(true));
     const unsub = subscribeFormattedHouseholdActivity(householdId, (items) => {
       setActivity(items);
       setLoading(false);

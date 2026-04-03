@@ -7,8 +7,8 @@ export default function ProgressHeroCard({ palette, progress, workspaceMode }) {
   const ratioPct = Math.max(6, Math.round((progress?.overallRatio || 0) * 100));
 
   return (
-    <div style={{ background:`linear-gradient(135deg, ${c.ac}18 0%, ${c.surf} 28%, ${c.surf2} 72%, ${c.wa}14 100%)`, border:`1px solid ${c.border}`, borderRadius:24, padding:"22px 22px", marginBottom:16, boxShadow:`0 18px 44px ${c.ac}14`, overflow:"hidden", position:"relative" }}>
-      <div style={{ position:"absolute", inset:"auto -40px -70px auto", width:180, height:180, borderRadius:"50%", background:`radial-gradient(circle, ${c.ac}22, transparent 70%)`, pointerEvents:"none" }} />
+    <div style={{ background:`linear-gradient(135deg, ${c.ac}30 0%, ${c.surf} 32%, ${c.surf2} 70%, ${c.wa}22 100%)`, border:`1.5px solid ${c.ac}44`, borderRadius:24, padding:"22px 22px", marginBottom:16, boxShadow:`0 18px 48px ${c.ac}22`, overflow:"hidden", position:"relative" }}>
+      <div style={{ position:"absolute", inset:"auto -40px -70px auto", width:200, height:200, borderRadius:"50%", background:`radial-gradient(circle, ${c.ac}30, transparent 70%)`, pointerEvents:"none" }} />
       <div style={{ display:"flex", justifyContent:"space-between", gap:16, alignItems:"flex-start", flexWrap:"wrap", position:"relative" }}>
         <div style={{ flex:1, minWidth:220 }}>
           <div style={{ display:"inline-flex", alignItems:"center", gap:8, padding:"6px 10px", borderRadius:999, background:`${c.surf}CC`, border:`1px solid ${c.border}` }}>

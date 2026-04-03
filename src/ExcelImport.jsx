@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { fx } from "./utils/budgetUtils";
 
 // Column mapping based on your existing Excel structure:
 // A = Expense (name), B = Amount (min due), C = Due Date, D = Adj Due Date
@@ -174,7 +175,7 @@ export default function ExcelImport({ accounts, theme, onImported, onUpload }) {
     opacity: disabled ? 0.6 : 1,
   });
 
-  const fxLocal = v => v == null ? "—" : `$${Number(v).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+  const fxLocal = (v) => v == null ? "—" : fx(v);
 
   const handleFile = async (file) => {
     if (!file) return;
@@ -290,10 +291,15 @@ export default function ExcelImport({ accounts, theme, onImported, onUpload }) {
       };
       // capture before snapshot from provided `accounts` prop
       const before = (accounts||[]).find(a=>a.id===acct.id) || null;
-      await (onImported ? onImported(acct.id, updates) : Promise.resolve());
-      auditRows.push({ accountId: acct.id, name: acct.name, before, after: updates });
-      count++;
-      setDoneCount(count);
+      try {
+        await (onImported ? onImported(acct.id, updates) : Promise.resolve());
+        auditRows.push({ accountId: acct.id, name: acct.name, before, after: updates });
+        count++;
+        setDoneCount(count);
+      } catch (e) {
+        console.error(`Import failed for "${acct.name}":`, e);
+        auditRows.push({ accountId: acct.id, name: acct.name, before, after: updates, error: e?.message || String(e) });
+      }
     }
     setImporting(false);
     setStatus("done");

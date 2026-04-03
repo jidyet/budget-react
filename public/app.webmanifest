@@ -1,11 +1,11 @@
 {
-  "name": "Household Budget",
-  "short_name": "Budget",
-  "description": "Shared household budgeting and debt payoff planning.",
+  "name": "TrackToZero",
+  "short_name": "TrackToZero",
+  "description": "Simple shared debt progress and payoff tracking.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f3f7f6",
-  "theme_color": "#00c9a7",
+  "theme_color": "#18a7e1",
   "icons": [
     {
       "src": "/vite.svg",

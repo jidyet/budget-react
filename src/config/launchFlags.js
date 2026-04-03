@@ -14,7 +14,6 @@ const parseList = (value) =>
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean);
 
-const DEFAULT_FOUNDER_EMAILS = ["jidyet@yahoo.co.uk"];
 const founderEmails = parseList(env.VITE_FOUNDER_EMAILS);
 
 export const LAUNCH_FLAGS = {
@@ -24,7 +23,8 @@ export const LAUNCH_FLAGS = {
   softLaunchEnabled: parseFlag(env.VITE_LAUNCH_SOFT_MODE, true),
   reviewPromptsEnabled: parseFlag(env.VITE_LAUNCH_REVIEW_PROMPTS, true),
   founderOpsEnabled: parseFlag(env.VITE_LAUNCH_FOUNDER_OPS, true),
-  founderEmails: founderEmails.length ? founderEmails : DEFAULT_FOUNDER_EMAILS,
+  localAuthEnabled: parseFlag(env.VITE_LAUNCH_LOCAL_AUTH, false),
+  founderEmails,
   starterTemplateEnabled: parseFlag(env.VITE_LAUNCH_STARTER_TEMPLATE, false),
 };
 
@@ -33,8 +33,13 @@ export const getLaunchFlags = () => ({ ...LAUNCH_FLAGS });
 export const isTesterPremiumUnlocked = () =>
   Boolean(LAUNCH_FLAGS.testerMode && LAUNCH_FLAGS.premiumUnlockedForTesters);
 
+export const isFounderEmail = (email = "") =>
+  Boolean(
+    LAUNCH_FLAGS.founderEmails.includes(String(email || "").trim().toLowerCase())
+  );
+
 export const canAccessFounderOps = (email = "") =>
   Boolean(
     LAUNCH_FLAGS.founderOpsEnabled &&
-    LAUNCH_FLAGS.founderEmails.includes(String(email || "").trim().toLowerCase())
+    isFounderEmail(email)
   );

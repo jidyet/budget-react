@@ -1,11 +1,17 @@
+import { useEffect, useState } from "react";
 import ProviderMark from "../components/ProviderMark";
 import { CAT_ICON, MONTHS } from "../data/mockAccounts";
 import { fx, pct } from "../utils/budgetUtils";
 
 export default function PayoffPage(props) {
   const {
-    mounted, c, isMobile, isTablet, allAccts, planOwner, setPlanOwner, planItems, setPlanItems, planMonthlyExtra, setPlanMonthlyExtra, whatIfExtra, setWhatIfExtra, planStrategy, setPlanStrategy, payoffSimulate, getEffectiveApr, setPlanId, setPlanName, planId, plans, planName, setShowStrategyCompare, showStrategyCompare, lblStyle, selStyle, inputStyle, savePlan, saveBtnStyle, buildDefaultPlanItems, selMonth, selYear, setPlanExpanded, planExpanded, whatIfExtraTimerRef, goalDate, setGoalDate, goalRequiredExtra, setGoalRequiredExtra, showAllSimRows, setShowAllSimRows, MAX_SIMULATION_MONTHS, SIM_DISPLAY_ROWS, createPlanDraft, removePlan
+    mounted, c, isMobile, isTablet, allAccts, planOwner, setPlanOwner, planItems, setPlanItems, planMonthlyExtra, setPlanMonthlyExtra, whatIfExtra, setWhatIfExtra, planStrategy, setPlanStrategy, payoffSimulate, getEffectiveApr, setPlanId, setPlanName, planId, plans, planName, setShowStrategyCompare, showStrategyCompare, lblStyle, selStyle, inputStyle, savePlan, saveBtnStyle, buildDefaultPlanItems, selMonth, selYear, setPlanExpanded, planExpanded, goalDate, setGoalDate, goalRequiredExtra, setGoalRequiredExtra, showAllSimRows, setShowAllSimRows, MAX_SIMULATION_MONTHS, SIM_DISPLAY_ROWS, createPlanDraft, removePlan
   } = props;
+      const [whatIfDraft, setWhatIfDraft] = useState(String(whatIfExtra || 0));
+      const [scenarioAccountId, setScenarioAccountId] = useState("");
+      useEffect(() => {
+        setWhatIfDraft(String(whatIfExtra || 0));
+      }, [whatIfExtra]);
       const owners = ["All", ...Array.from(new Set(allAccts.map((a) => a.owner))).filter(Boolean)];
       const scopedAccounts = planOwner === "All" ? allAccts : allAccts.filter((a) => a.owner === planOwner);
       const visibleRows = scopedAccounts.map((a) => {
@@ -25,21 +31,168 @@ export default function PayoffPage(props) {
       const included = visibleRows.filter((r) => r.include);
       const extraMap = {};
       included.forEach((r) => { extraMap[r.id] = Number(r.extra || 0); });
-      const runSim = (strategy, overrideExtra) => payoffSimulate(
+      const scenarioAccounts = scopedAccounts.filter((a) => Number(a.cur_bal || 0) > 0.01);
+      useEffect(() => {
+        if (!scenarioAccounts.length) {
+          if (scenarioAccountId) setScenarioAccountId("");
+          return;
+        }
+        const stillExists = scenarioAccounts.some((a) => String(a.id) === String(scenarioAccountId));
+        if (!stillExists) setScenarioAccountId(String(scenarioAccounts[0].id));
+      }, [scenarioAccounts, scenarioAccountId]);
+      const scenarioSelectedDebt = scenarioAccounts.find((a) => String(a.id) === String(scenarioAccountId)) || null;
+      const scenarioCurrentPayment = scenarioSelectedDebt
+        ? Math.max(0, Number(scenarioSelectedDebt.paid_v || 0)) > 0
+          ? Math.max(0, Number(scenarioSelectedDebt.paid_v || 0))
+          : Math.max(0, Number(scenarioSelectedDebt.min_due_v || 0))
+        : 0;
+      const scenarioBaselineRows = scenarioSelectedDebt
+        ? payoffSimulate([scenarioSelectedDebt], "avalanche", 0, {}, selMonth, selYear)
+        : [];
+      const scenarioRows = scenarioSelectedDebt
+        ? payoffSimulate([scenarioSelectedDebt], "avalanche", Number(whatIfExtra || 0), {}, selMonth, selYear)
+        : [];
+      const scenarioMonthsCurrent = scenarioBaselineRows.length;
+      const scenarioMonthsNew = scenarioRows.length;
+      const scenarioFinishCurrent = scenarioBaselineRows[scenarioBaselineRows.length - 1]?.month || "n/a";
+      const scenarioFinishNew = scenarioRows[scenarioRows.length - 1]?.month || "n/a";
+      const scenarioInterestCurrent = scenarioBaselineRows.reduce((s, r) => s + (Number(r.total_interest) || 0), 0);
+      const scenarioInterestNew = scenarioRows.reduce((s, r) => s + (Number(r.total_interest) || 0), 0);
+      const scenarioMonthsSaved = Math.max(0, scenarioMonthsCurrent - scenarioMonthsNew);
+      const scenarioInterestSaved = Math.max(0, scenarioInterestCurrent - scenarioInterestNew);
+      const scenarioComparisonRows = (() => {
+        const totalRows = Math.max(scenarioBaselineRows.length, scenarioRows.length);
+        return Array.from({ length: totalRows }, (_, index) => {
+          const currentRow = scenarioBaselineRows[index];
+          const newRow = scenarioRows[index];
+          return {
+            month: currentRow?.month || newRow?.month || `Month ${index + 1}`,
+            currentBalance: Number(currentRow?.remaining_debt || 0),
+            newBalance: Number(newRow?.remaining_debt || 0),
+            currentInterest: Number(currentRow?.total_interest || 0),
+            newInterest: Number(newRow?.total_interest || 0),
+          };
+        });
+      })();
+      const runSim = (strategy, monthlyExtra, perAccountExtra = extraMap) => payoffSimulate(
         included,
         strategy,
-        overrideExtra !== undefined ? Number(overrideExtra) : Number(planMonthlyExtra || 0) + Number(whatIfExtra || 0),
-        extraMap
+        Number(monthlyExtra || 0),
+        perAccountExtra,
+        selMonth,
+        selYear
       );
-      const simRows = runSim(planStrategy);
+      const currentPlanRows = runSim(planStrategy, Number(planMonthlyExtra || 0), extraMap);
+      const scenarioExtraMap = scenarioSelectedDebt
+        ? { ...extraMap, [scenarioSelectedDebt.id]: Number(extraMap[scenarioSelectedDebt.id] || 0) + Number(whatIfExtra || 0) }
+        : extraMap;
+      const simRows = Number(whatIfExtra || 0) > 0 && scenarioSelectedDebt
+        ? runSim(planStrategy, Number(planMonthlyExtra || 0), scenarioExtraMap)
+        : currentPlanRows;
       const payoffMonths = simRows.length;
       const payoffEnd = simRows[simRows.length - 1]?.month || "n/a";
       const totalInterest = simRows.reduce((s, r) => s + (r.total_interest || 0), 0);
-      const baselineRows = payoffSimulate(included, planStrategy, 0, {});
+      const baselineRows = payoffSimulate(included, planStrategy, 0, {}, selMonth, selYear);
       const baselineMonths = baselineRows.length;
       const baselineInterest = baselineRows.reduce((s, r) => s + (r.total_interest || 0), 0);
       const interestSaved = Math.max(0, baselineInterest - totalInterest);
       const monthsSaved = Math.max(0, baselineMonths - payoffMonths);
+      const totalScheduledDebtPayment = included.reduce((sum, acct) => {
+        const paid = Math.max(0, Number(acct?.paid_v || 0));
+        const minimum = Math.max(0, Number(acct?.min_due_v || 0));
+        return sum + (paid > 0 ? paid : minimum);
+      }, 0);
+      const totalPlannedPerAccountExtra = included.reduce((sum, acct) => {
+        return sum + Math.max(0, Number(extraMap[acct.id] || 0));
+      }, 0);
+      const scenarioAppliedExtra = scenarioSelectedDebt ? Math.max(0, Number(whatIfExtra || 0)) : 0;
+      const configuredMonthlyDebtPayment = totalScheduledDebtPayment
+        + totalPlannedPerAccountExtra
+        + Math.max(0, Number(planMonthlyExtra || 0))
+        + scenarioAppliedExtra;
+      const formatGoalMonth = (value) => {
+        if (!value) return "";
+        const parsed = new Date(`${value}-01T00:00:00`);
+        if (Number.isNaN(parsed.getTime())) return value;
+        return parsed.toLocaleString("en-US", { month: "long", year: "numeric" });
+      };
+      const goalPlanner = (() => {
+        if (!goalDate) return null;
+        const [goalYearRaw, goalMonthRaw] = goalDate.split("-");
+        const goalYearNum = Number(goalYearRaw);
+        const goalMonthNum = Number(goalMonthRaw);
+        if (!Number.isFinite(goalYearNum) || !Number.isFinite(goalMonthNum)) {
+          return { valid:false, reason:"invalid" };
+        }
+        const targetRowCount = ((goalYearNum - selYear) * 12) + (goalMonthNum - selMonth) + 1;
+        if (targetRowCount <= 0) {
+          return { valid:false, reason:"past" };
+        }
+        const targetLabel = formatGoalMonth(goalDate);
+        const whatIfApplied = Number(whatIfExtra || 0) > 0 && !!scenarioSelectedDebt;
+        const baselineProjectionRow = currentPlanRows[targetRowCount - 1] || currentPlanRows[currentPlanRows.length - 1] || null;
+        const baselineFinishesOnTime = currentPlanRows.length > 0 && currentPlanRows.length <= targetRowCount;
+        const baselineRemainingAtGoal = baselineFinishesOnTime ? 0 : Math.max(0, Number(baselineProjectionRow?.remaining_debt || 0));
+        const configuredRows = simRows;
+        const configuredFinishesOnTime = configuredRows.length > 0 && configuredRows.length <= targetRowCount;
+        const configuredProjectionRow = configuredRows[targetRowCount - 1] || configuredRows[configuredRows.length - 1] || null;
+        const configuredRemainingAtGoal = configuredFinishesOnTime
+          ? 0
+          : Math.max(0, Number(configuredProjectionRow?.remaining_debt || 0));
+        const configuredFinishMonth = configuredRows[configuredRows.length - 1]?.month || "n/a";
+        const simulateGoalPlan = (additionalMonthlyExtra) => {
+          const nextMonthlyExtra = Math.max(0, Number(planMonthlyExtra || 0) + Number(additionalMonthlyExtra || 0));
+          const perAccountPlan = whatIfApplied ? scenarioExtraMap : extraMap;
+          return runSim(planStrategy, nextMonthlyExtra, perAccountPlan);
+        };
+        let additionalNeeded = 0;
+        if (!configuredFinishesOnTime) {
+          let lo = 0;
+          let hi = 250;
+          let result = null;
+          const finishesByTarget = (rows) => rows.length > 0 && rows.length <= targetRowCount;
+          while (hi < 100000 && !finishesByTarget(simulateGoalPlan(hi))) {
+            hi *= 2;
+          }
+          if (finishesByTarget(simulateGoalPlan(hi))) {
+            for (let iter = 0; iter < 30; iter += 1) {
+              const mid = (lo + hi) / 2;
+              if (finishesByTarget(simulateGoalPlan(mid))) {
+                result = mid;
+                hi = mid;
+              } else {
+                lo = mid;
+              }
+            }
+          }
+          additionalNeeded = result === null ? null : Math.ceil(result);
+        }
+        const proposedRows = additionalNeeded === null ? [] : simulateGoalPlan(additionalNeeded);
+        const proposedFinishMonth = proposedRows[proposedRows.length - 1]?.month || configuredFinishMonth;
+        return {
+          valid:true,
+          targetLabel,
+          targetRowCount,
+          whatIfApplied,
+          baselineFinishesOnTime,
+          baselineRemainingAtGoal,
+          configuredFinishesOnTime,
+          configuredRemainingAtGoal,
+          configuredFinishMonth,
+          additionalNeeded,
+          proposedFinishMonth,
+          proposedTotalMonthlyPayment: additionalNeeded === null
+            ? null
+            : configuredMonthlyDebtPayment + additionalNeeded,
+        };
+      })();
+      useEffect(() => {
+        if (!goalPlanner?.valid) {
+          setGoalRequiredExtra(null);
+          return;
+        }
+        setGoalRequiredExtra(goalPlanner.additionalNeeded);
+      }, [goalPlanner, setGoalRequiredExtra]);
       const recommendedTarget = (() => {
         const candidates = included.filter((a) => Number(a.cur_bal || 0) > 0.01);
         if (!candidates.length) return null;
@@ -59,7 +212,7 @@ export default function PayoffPage(props) {
         : "";
 
       return (
-        <div style={{ opacity: mounted ? 1 : 0, transition: "opacity .3s", marginTop: 16, position:"relative", zIndex:10, isolation:"isolate", pointerEvents:"auto" }}>
+        <div style={{ opacity: mounted ? 1 : 0, transition: "opacity .3s", marginTop: 16, position:"relative", zIndex:10, isolation:"isolate", pointerEvents:"auto", display:"flex", flexDirection:"column" }}>
           <div style={{ background:`linear-gradient(135deg, ${c.surf}, ${c.surf2})`, border:`1px solid ${c.border}`, borderRadius:16, padding:isMobile ? "16px 18px" : "18px 22px", marginBottom:12 }}>
             <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:isMobile?"flex-start":"center",flexDirection:isMobile?"column":"row"}}>
               <div style={{flex:1,minWidth:0}}>
@@ -85,7 +238,7 @@ export default function PayoffPage(props) {
               </div>
             </div>
           </div>
-          <div style={{ display:"grid", gridTemplateColumns:isMobile ? "1fr" : "1.15fr 1fr 1fr", gap:10, marginBottom:12 }}>
+          <div style={{ display:"grid", gridTemplateColumns:isMobile ? "1fr" : "1.15fr 1fr 1fr", gap:10, marginBottom:12, order:3 }}>
             <div style={{ background:c.surf, border:`1px solid ${c.border}`, borderRadius:12, padding:"14px 16px" }}>
               <div style={{fontSize:10,fontWeight:800,letterSpacing:"0.08em",textTransform:"uppercase",color:c.muted,marginBottom:6}}>Current Target</div>
               {recommendedTarget ? (
@@ -126,7 +279,7 @@ export default function PayoffPage(props) {
               </div>
             </div>
           </div>
-          <div style={{ background: c.surf, border: `1px solid ${c.border}`, borderRadius: 12, padding: "14px 16px", marginBottom: 12, position:"relative", zIndex:30, isolation:"isolate", pointerEvents:"auto" }}>
+          <div style={{ background: c.surf, border: `1px solid ${c.border}`, borderRadius: 12, padding: "14px 16px", marginBottom: 12, position:"relative", zIndex:30, isolation:"isolate", pointerEvents:"auto", order:4 }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: isMobile ? "stretch" : "center", marginBottom: 10, flexWrap: isMobile ? "wrap" : "nowrap" }}>
               <div style={{ fontSize: 14, fontWeight: 800 }}>Saved plans</div>
               <div style={{ display:"flex", gap:8, flexWrap:"wrap", position:"relative", zIndex:31, pointerEvents:"auto" }}>
@@ -196,7 +349,7 @@ export default function PayoffPage(props) {
             </div>
           </div>
 
-          <div style={{ background: c.surf, border: `1px solid ${c.border}`, borderRadius: 12, padding: "14px 16px", marginBottom: 12, position:"relative", zIndex:30, isolation:"isolate", pointerEvents:"auto" }}>
+          <div style={{ background: c.surf, border: `1px solid ${c.border}`, borderRadius: 12, padding: "14px 16px", marginBottom: 12, position:"relative", zIndex:30, isolation:"isolate", pointerEvents:"auto", order:5 }}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:isMobile?"stretch":"center",marginBottom:8,gap:10,flexWrap:isMobile?"wrap":"nowrap"}}>
               <div>
                 <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: c.muted, marginBottom:4 }}>Pick what goes in</div>
@@ -375,93 +528,213 @@ export default function PayoffPage(props) {
             )})}
           </div>
 
-          <div style={{ background: c.surf, border: `1px solid ${c.border}`, borderRadius: 12, padding: "14px 16px" }}>
+          <div style={{ background: c.surf, border: `1px solid ${c.border}`, borderRadius: 12, padding: "14px 16px", order:2 }}>
             {/* What-If Hero */}
             <div style={{ background: c.surf, border:`1.5px solid ${c.border}`, borderRadius:14, padding:"18px 22px", marginBottom:20 }}>
               <div style={{ fontSize:11, fontWeight:800, color:c.muted, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:10 }}>What if I add more?</div>
-              <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
-                <span style={{ fontSize:13, color:c.tx2 }}>Extra monthly payment:</span>
-                <div style={{ display:"flex", alignItems:"center", gap:6, background:c.surf2, borderRadius:8, padding:"4px 10px", border:`1.5px solid ${c.ac}` }}>
-                  <span style={{ color:c.tx2, fontSize:14, fontWeight:600 }}>$</span>
-                  <input
-                    type="number" min="0" step="50"
-                    defaultValue={whatIfExtra}
-                    onChange={e => { clearTimeout(whatIfExtraTimerRef.current); whatIfExtraTimerRef.current = setTimeout(() => setWhatIfExtra(e.target.value), 300); }}
-                    style={{ width:90, padding:"6px 4px", border:"none", background:"transparent", color:c.tx, fontSize:16, fontWeight:700, fontFamily:"'DM Mono',monospace", outline:"none" }}
-                  />
-                </div>
-                {Number(whatIfExtra) > 0 && (
-                  <div style={{ background:c.acD, border:`1px solid ${c.ac}40`, borderRadius:8, padding:"6px 14px", fontSize:13, color:c.ac, fontWeight:700 }}>
-                    +${Number(whatIfExtra).toLocaleString()}/mo applied
+              <div style={{ display:"grid", gridTemplateColumns:isMobile ? "1fr" : "minmax(0,auto) minmax(280px,1fr)", gap:12, alignItems:"start" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
+                  <span style={{ fontSize:13, color:c.tx2 }}>Extra monthly payment:</span>
+                  <div style={{ display:"flex", alignItems:"center", gap:6, background:c.surf2, borderRadius:8, padding:"4px 10px", border:`1.5px solid ${c.ac}` }}>
+                    <span style={{ color:c.tx2, fontSize:14, fontWeight:600 }}>$</span>
+                    <input
+                      type="number" min="0" step="50"
+                      value={whatIfDraft}
+                      onChange={e => setWhatIfDraft(e.target.value)}
+                      style={{ width:90, padding:"6px 4px", border:"none", background:"transparent", color:c.tx, fontSize:16, fontWeight:700, fontFamily:"'DM Mono',monospace", outline:"none" }}
+                    />
                   </div>
-                )}
+                  <button
+                    type="button"
+                    onClick={() => setWhatIfExtra(String(Number(whatIfDraft || 0)))}
+                    style={{ padding:"8px 14px", borderRadius:8, border:`1px solid ${c.ac}`, background:c.ac, color:"#062532", fontSize:12, fontWeight:800, cursor:"pointer" }}
+                  >
+                    Generate
+                  </button>
+                  {Number(whatIfExtra) > 0 && (
+                    <div style={{ background:c.acD, border:`1px solid ${c.ac}40`, borderRadius:8, padding:"6px 14px", fontSize:13, color:c.ac, fontWeight:700 }}>
+                      +${Number(whatIfExtra).toLocaleString()}/mo applied
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <div style={{ ...lblStyle, marginBottom:6 }}>Run this scenario on</div>
+                  <select
+                    style={{ ...selStyle, width:"100%" }}
+                    value={scenarioAccountId}
+                    onChange={(e) => setScenarioAccountId(e.target.value)}
+                  >
+                    {scenarioAccounts.length === 0 && <option value="">No debts available</option>}
+                    {scenarioAccounts.map((acct) => (
+                      <option key={acct.id} value={String(acct.id)}>
+                        {`${acct.bank} (${acct.name})${acct.owner ? ` (${acct.owner})` : ""} | ${fx(acct.cur_bal || 0)}`}
+                      </option>
+                    ))}
+                  </select>
+                  <div style={{ marginTop:6, fontSize:12, color:c.tx2 }}>
+                    {scenarioSelectedDebt
+                      ? `The extra scenario payment is applied to ${scenarioSelectedDebt.bank} ${scenarioSelectedDebt.name}.`
+                      : "Pick a debt to see how the extra payment changes that debt's payoff path."}
+                  </div>
+                </div>
               </div>
             </div>
             {/* Goal-First Planner */}
             <div style={{ background:c.surf, border:`1.5px solid ${c.border}`, borderRadius:14, padding:"18px 22px", marginBottom:20 }}>
               <div style={{ fontSize:11, fontWeight:800, color:c.muted, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:10 }}>Finish by</div>
-              <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
+              <div style={{ display:"grid", gridTemplateColumns:isMobile ? "1fr" : "minmax(0,auto) minmax(220px,auto) minmax(0,1fr)", alignItems:isMobile ? "stretch" : "center", gap:12 }}>
                 <span style={{ fontSize:13, color:c.tx2 }}>I want to be debt-free by:</span>
                 <input type="month"
                   value={goalDate}
                   min={`${selYear}-${String(selMonth).padStart(2,"0")}`}
                   onChange={e => {
                     setGoalDate(e.target.value);
-                    if (!e.target.value) { setGoalRequiredExtra(null); return; }
-                    const [gy, gm] = e.target.value.split("-").map(Number);
-                    const targetMonths = (gy - selYear) * 12 + (gm - selMonth);
-                    if (targetMonths <= 0) { setGoalRequiredExtra(null); return; }
-                    let lo = 0, hi = 50000, result = null;
-                    for (let iter = 0; iter < 30; iter++) {
-                      const mid = (lo + hi) / 2;
-                      const rows = runSim(planStrategy, Number(planMonthlyExtra || 0) + mid);
-                      if (rows.length <= targetMonths) {
-                        result = mid;
-                        hi = mid;
-                      } else {
-                        lo = mid;
-                      }
-                    }
-                    setGoalRequiredExtra(result !== null ? Math.ceil(result) : null);
+                    if (!e.target.value) setGoalRequiredExtra(null);
                   }}
-                  style={{ padding:"7px 10px", borderRadius:7, border:`1.5px solid ${c.border2}`, background:c.surf, color:c.tx, fontSize:13, outline:"none" }}
+                  style={{ width:isMobile ? "100%" : 220, padding:"10px 12px", borderRadius:9, border:`1.5px solid ${c.border2}`, background:c.surf, color:c.tx, fontSize:13, outline:"none" }}
                 />
-                {goalRequiredExtra !== null && (
-                  <div style={{ background:c.acD, border:`1px solid ${c.ac}40`, borderRadius:8, padding:"8px 16px", fontSize:13, color:c.ac, fontWeight:700 }}>
-                    Requires <span style={{ fontFamily:"'DM Mono',monospace" }}>{fx(goalRequiredExtra)}</span>/mo extra
-                  </div>
-                )}
-                {goalDate && goalRequiredExtra === null && (
-                  <div style={{ fontSize:12, color:c.muted }}>Computing...</div>
-                )}
+                <div style={{ display:"flex", gap:8, flexWrap:"wrap", justifyContent:isMobile ? "flex-start" : "flex-end" }}>
+                  {goalPlanner?.valid && goalPlanner.additionalNeeded !== null && (
+                    <div style={{ background:goalPlanner.additionalNeeded > 0 ? c.acD : c.surf2, border:`1px solid ${goalPlanner.additionalNeeded > 0 ? `${c.ac}40` : c.border2}`, borderRadius:8, padding:"8px 14px", fontSize:13, color:goalPlanner.additionalNeeded > 0 ? c.ac : c.tx2, fontWeight:700 }}>
+                      {goalPlanner.additionalNeeded > 0 ? `+${fx(goalPlanner.additionalNeeded)}/mo needed` : "✓ On track"}
+                    </div>
+                  )}
+                  {goalPlanner?.valid && goalPlanner.proposedTotalMonthlyPayment !== null && (
+                    <div style={{ background:c.surf2, border:`1px solid ${c.border2}`, borderRadius:8, padding:"8px 14px", fontSize:13, color:c.tx2, fontWeight:700 }}>
+                      Total <span style={{ fontFamily:"'DM Mono',monospace", color:c.tx }}>{fx(goalPlanner.proposedTotalMonthlyPayment)}</span>/mo
+                    </div>
+                  )}
+                </div>
               </div>
-              {goalDate && goalRequiredExtra !== null && (
-                <div style={{ marginTop:10, fontSize:12, color:c.tx2 }}>
-                  Set your extra monthly payment to <span style={{ color:c.ac, fontWeight:700 }}>{fx(goalRequiredExtra)}/mo</span> to pay off all selected debts by <span style={{ fontWeight:700, color:c.tx }}>{new Date(goalDate+"-01").toLocaleString("default",{month:"long",year:"numeric"})}</span>.
+              {goalDate && !goalPlanner?.valid && (
+                <div style={{ marginTop:10, fontSize:12, color:c.muted }}>
+                  Pick a month from {MONTHS[selMonth - 1]} {selYear} onward to run the payoff projection.
                 </div>
               )}
+              {goalPlanner?.valid && (
+                <>
+                  <div style={{ display:"grid", gridTemplateColumns:isMobile ? "1fr" : goalPlanner.whatIfApplied ? "repeat(4, minmax(0, 1fr))" : "repeat(3, minmax(0, 1fr))", gap:10, marginTop:12 }}>
+                    {goalPlanner.whatIfApplied ? (
+                      <>
+                        <div style={{ background:c.surf2, border:`1px solid ${c.border}`, borderRadius:10, padding:12 }}>
+                          <div style={lblStyle}>Without extra</div>
+                          <div style={{ fontFamily:"'DM Mono',monospace", fontSize:20, fontWeight:800, color:goalPlanner.baselineFinishesOnTime ? c.ac : c.da, lineHeight:1.1 }}>
+                            {goalPlanner.baselineFinishesOnTime ? "On time" : fx(goalPlanner.baselineRemainingAtGoal)}
+                          </div>
+                          <div style={{ fontSize:12, color:c.tx2, marginTop:6 }}>
+                            {goalPlanner.baselineFinishesOnTime
+                              ? `Your base plan already finishes by ${goalPlanner.targetLabel}.`
+                              : `Still owed by ${goalPlanner.targetLabel} without the extra payment.`}
+                          </div>
+                        </div>
+                        <div style={{ background:c.surf2, border:`1.5px solid ${c.ac}44`, borderRadius:10, padding:12 }}>
+                          <div style={lblStyle}>With +{fx(Number(whatIfExtra))} extra</div>
+                          <div style={{ fontFamily:"'DM Mono',monospace", fontSize:20, fontWeight:800, color:goalPlanner.configuredFinishesOnTime ? c.ac : c.da, lineHeight:1.1 }}>
+                            {goalPlanner.configuredFinishesOnTime ? "On time" : fx(goalPlanner.configuredRemainingAtGoal)}
+                          </div>
+                          <div style={{ fontSize:12, color:c.tx2, marginTop:6 }}>
+                            {goalPlanner.configuredFinishesOnTime
+                              ? `The extra payment gets you there by ${goalPlanner.targetLabel}.`
+                              : `Still owed at your goal date even with the extra.`}
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ background:c.surf2, border:`1px solid ${c.border}`, borderRadius:10, padding:12 }}>
+                        <div style={lblStyle}>At goal date</div>
+                        <div style={{ fontFamily:"'DM Mono',monospace", fontSize:20, fontWeight:800, color:goalPlanner.configuredFinishesOnTime ? c.ac : c.da, lineHeight:1.1 }}>
+                          {goalPlanner.configuredFinishesOnTime ? "On time" : fx(goalPlanner.configuredRemainingAtGoal)}
+                        </div>
+                        <div style={{ fontSize:12, color:c.tx2, marginTop:6 }}>
+                          {goalPlanner.configuredFinishesOnTime
+                            ? `Your current plan finishes by ${goalPlanner.targetLabel}.`
+                            : `Still left by ${goalPlanner.targetLabel} on your current plan.`}
+                        </div>
+                      </div>
+                    )}
+                    <div style={{ background:c.surf2, border:`1px solid ${goalPlanner.additionalNeeded > 0 ? `${c.ac}44` : c.border}`, borderRadius:10, padding:12 }}>
+                      <div style={lblStyle}>{goalPlanner.whatIfApplied ? "Still needed on top" : "Monthly needed"}</div>
+                      <div style={{ fontFamily:"'DM Mono',monospace", fontSize:20, fontWeight:800, color:goalPlanner.additionalNeeded > 0 ? c.ac : c.tx }}>
+                        {goalPlanner.additionalNeeded === null ? "n/a" : goalPlanner.additionalNeeded > 0 ? `+${fx(goalPlanner.additionalNeeded)}` : "Nothing more"}
+                      </div>
+                      <div style={{ fontSize:12, color:c.tx2, marginTop:6 }}>
+                        {goalPlanner.additionalNeeded === null
+                          ? "Cannot compute — try a later date."
+                          : goalPlanner.additionalNeeded > 0
+                            ? `Add this per month${goalPlanner.whatIfApplied ? " on top of your extra payment" : ""} to hit ${goalPlanner.targetLabel}.`
+                            : `No increase needed${goalPlanner.whatIfApplied ? " beyond your extra payment" : ""} to finish on time.`}
+                      </div>
+                    </div>
+                    <div style={{ background:c.surf2, border:`1px solid ${c.border}`, borderRadius:10, padding:12 }}>
+                      <div style={lblStyle}>Will finish</div>
+                      <div style={{ fontSize:20, fontWeight:800, color:c.tx, lineHeight:1.1 }}>
+                        {goalPlanner.additionalNeeded === null ? "n/a" : goalPlanner.additionalNeeded > 0 ? goalPlanner.proposedFinishMonth : goalPlanner.configuredFinishMonth}
+                      </div>
+                      <div style={{ fontSize:12, color:c.tx2, marginTop:6 }}>
+                        {goalPlanner.additionalNeeded > 0
+                          ? `With the suggested +${fx(goalPlanner.additionalNeeded)}/mo — total ~${fx(goalPlanner.proposedTotalMonthlyPayment)}/mo.`
+                          : `Your current plan finishes here.`}
+                      </div>
+                    </div>
+                  </div>
+                  {goalPlanner.additionalNeeded > 0 && (
+                    <div style={{ marginTop:10, display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
+                      <button
+                        type="button"
+                        onClick={() => setPlanMonthlyExtra(String(Number(planMonthlyExtra || 0) + goalPlanner.additionalNeeded))}
+                        style={{ padding:"8px 14px", borderRadius:8, border:`1px solid ${c.ac}`, background:c.ac, color:"#062532", fontSize:12, fontWeight:800, cursor:"pointer" }}
+                      >
+                        Apply +{fx(goalPlanner.additionalNeeded)}/mo to plan
+                      </button>
+                      <span style={{ fontSize:12, color:c.tx2 }}>
+                        Sets monthly extra to {fx(Number(planMonthlyExtra || 0) + goalPlanner.additionalNeeded)}/mo
+                      </span>
+                    </div>
+                  )}
+                  {goalPlanner.additionalNeeded !== null && (
+                    <div style={{ marginTop:10, fontSize:12, color:c.tx2, lineHeight:1.6 }}>
+                      {goalPlanner.additionalNeeded > 0
+                        ? goalPlanner.whatIfApplied
+                          ? `Even with your ${fx(Number(whatIfExtra))}/mo extra payment, you would still have ${fx(goalPlanner.configuredRemainingAtGoal)} left by ${goalPlanner.targetLabel}. Add ${fx(goalPlanner.additionalNeeded)}/mo more (bringing the plan to ~${fx(goalPlanner.proposedTotalMonthlyPayment)}/mo) to finish on time.`
+                          : `On your current plan you would still have ${fx(goalPlanner.configuredRemainingAtGoal)} left by ${goalPlanner.targetLabel}. Add ${fx(goalPlanner.additionalNeeded)}/mo to bring total debt payments to ~${fx(goalPlanner.proposedTotalMonthlyPayment)}/mo and finish by that date.`
+                        : goalPlanner.whatIfApplied
+                          ? `Your ${fx(Number(whatIfExtra))}/mo extra payment is already enough to finish by ${goalPlanner.targetLabel}.`
+                          : `Your current plan is already on track to finish by ${goalPlanner.targetLabel}.`}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : isTablet ? "1fr 1fr" : "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : isTablet ? "1fr 1fr" : "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
               <div style={{ background: c.surf2, border: `1px solid ${c.border}`, borderRadius: 10, padding: 10 }}>
-                <div style={lblStyle}>Debts Included</div>
-                <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 22 }}>{included.length}</div>
+                <div style={lblStyle}>Current Balance</div>
+                <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 22 }}>
+                  {scenarioSelectedDebt ? fx(scenarioSelectedDebt.cur_bal || 0) : "n/a"}
+                </div>
               </div>
               <div style={{ background: c.surf2, border: `1px solid ${c.border}`, borderRadius: 10, padding: 10 }}>
-                <div style={lblStyle}>Time To Finish</div>
-                <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 22 }}>{payoffMonths ? `${payoffMonths} mo` : "n/a"}</div>
+                <div style={lblStyle}>Current Payment</div>
+                <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 22 }}>
+                  {scenarioSelectedDebt ? fx(scenarioCurrentPayment) : "n/a"}
+                </div>
               </div>
               <div style={{ background: c.surf2, border: `1px solid ${c.border}`, borderRadius: 10, padding: 10 }}>
-                <div style={lblStyle}>Projected Finish</div>
-                <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 22 }}>{payoffEnd}</div>
+                <div style={lblStyle}>New Payment</div>
+                <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 22 }}>
+                  {scenarioSelectedDebt ? fx(scenarioCurrentPayment + Number(whatIfExtra || 0)) : "n/a"}
+                </div>
               </div>
               <div style={{ background: c.surf2, border: `1px solid ${c.border}`, borderRadius: 10, padding: 10 }}>
-                <div style={lblStyle}>Total Interest</div>
-                <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 22 }}>{fx(totalInterest)}</div>
+                <div style={lblStyle}>Effect Of Change</div>
+                <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 22 }}>
+                  {scenarioSelectedDebt ? `${scenarioMonthsSaved} mo faster` : "n/a"}
+                </div>
               </div>
             </div>
             {showStrategyCompare && (() => {
-              const avaRows = runSim("avalanche");
-              const snoRows = runSim("snowball");
+              const compareExtraMap = Number(whatIfExtra || 0) > 0 && scenarioSelectedDebt ? scenarioExtraMap : extraMap;
+              const avaRows = runSim("avalanche", Number(planMonthlyExtra || 0), compareExtraMap);
+              const snoRows = runSim("snowball", Number(planMonthlyExtra || 0), compareExtraMap);
               const avaMonths = avaRows.length;
               const snoMonths = snoRows.length;
               const avaInterest = avaRows.reduce((s,r) => s + (Number(r.total_interest)||0), 0);
@@ -494,18 +767,49 @@ export default function PayoffPage(props) {
                 </div>
               );
             })()}
-            {simRows && simRows.length > 1 && (() => {
-              const chartRows = simRows.slice(0, Math.min(simRows.length, MAX_SIMULATION_MONTHS));
-              const W = 460, H = 180, PAD = { t:16, r:16, b:32, l:56 };
+            {scenarioSelectedDebt && scenarioComparisonRows.length > 1 && (() => {
+              const currentChartRows = scenarioBaselineRows.slice(0, Math.min(scenarioBaselineRows.length, MAX_SIMULATION_MONTHS));
+              const newChartRows = scenarioRows.slice(0, Math.min(scenarioRows.length, MAX_SIMULATION_MONTHS));
+              const W = 460, H = 180, PAD = { t:16, r:16, b:isMobile ? 40 : 32, l:56 };
               const cW = W - PAD.l - PAD.r;
               const cH = H - PAD.t - PAD.b;
-              const maxBal = Math.max(...chartRows.map(r=>r.remaining_debt||0), 1);
-              const pts = chartRows.map((r,i)=>`${PAD.l+(i/(chartRows.length-1))*cW},${PAD.t+cH-((r.remaining_debt||0)/maxBal)*cH}`).join(" ");
-              const areaPath = `M${PAD.l},${PAD.t+cH} ` + chartRows.map((r,i)=>`L${PAD.l+(i/(chartRows.length-1))*cW},${PAD.t+cH-((r.remaining_debt||0)/maxBal)*cH}`).join(" ") + ` L${PAD.l+(chartRows.length-1)/(chartRows.length-1)*cW},${PAD.t+cH} Z`;
-              const xLabels = chartRows.reduce((acc,r,i)=>{ if(i===0||i===chartRows.length-1||(i+1)%12===0) acc.push({i,label:`M${i+1}`}); return acc; },[]);
+              const maxBal = Math.max(
+                ...currentChartRows.map((r) => r.remaining_debt || 0),
+                ...newChartRows.map((r) => r.remaining_debt || 0),
+                1
+              );
+              const buildPoints = (rows) => rows.map((r, i) => {
+                const x = PAD.l + ((rows.length === 1 ? 0 : i / (rows.length - 1)) * cW);
+                const y = PAD.t + cH - (((r.remaining_debt || 0) / maxBal) * cH);
+                return `${x},${y}`;
+              }).join(" ");
+              const newPts = buildPoints(newChartRows);
+              const currentPts = buildPoints(currentChartRows);
+              const areaPath = `M${PAD.l},${PAD.t + cH} ` + newChartRows.map((r, i) => {
+                const x = PAD.l + ((newChartRows.length === 1 ? 0 : i / (newChartRows.length - 1)) * cW);
+                const y = PAD.t + cH - (((r.remaining_debt || 0) / maxBal) * cH);
+                return `L${x},${y}`;
+              }).join(" ") + ` L${W - PAD.r},${PAD.t + cH} Z`;
+              const xLabelIndexes = Array.from(new Set([
+                0,
+                Math.max(0, Math.floor((scenarioComparisonRows.length - 1) / 2)),
+                Math.max(0, scenarioComparisonRows.length - 1),
+              ])).sort((a, b) => a - b);
+              const xLabels = xLabelIndexes.map((i) => ({ i, label: scenarioComparisonRows[i]?.month || `Month ${i + 1}` }));
               return (
                 <div style={{ marginBottom:18 }}>
-                  <div style={{ fontSize:11, fontWeight:800, color:c.muted, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:8 }}>Payoff Projection</div>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:isMobile ? "flex-start" : "center", gap:10, marginBottom:8, flexDirection:isMobile ? "column" : "row" }}>
+                    <div>
+                      <div style={{ fontSize:11, fontWeight:800, color:c.muted, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:4 }}>Balance Path</div>
+                      <div style={{ fontSize:13, color:c.tx2 }}>
+                        See how {scenarioSelectedDebt.bank} {scenarioSelectedDebt.name} falls with its current payment versus adding {fx(Number(whatIfExtra || 0))}/mo.
+                      </div>
+                    </div>
+                    <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                      <span style={{padding:"5px 8px",borderRadius:999,background:c.surf2,border:`1px solid ${c.border2}`,fontSize:11,fontWeight:700,color:c.tx2}}>Current payment</span>
+                      <span style={{padding:"5px 8px",borderRadius:999,background:c.acD,border:`1px solid ${c.ac}44`,fontSize:11,fontWeight:700,color:c.ac}}>With extra</span>
+                    </div>
+                  </div>
                   <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ overflow:"visible" }}>
                     <defs>
                       <linearGradient id="payoffGrad" x1="0" y1="0" x2="0" y2="1">
@@ -520,37 +824,50 @@ export default function PayoffPage(props) {
                       <text key={gi} x={PAD.l-6} y={PAD.t+cH*f+4} textAnchor="end" fontSize="9" fill={c.muted} fontFamily="'DM Mono',monospace">{fx(maxBal*(1-f))}</text>
                     ))}
                     <path d={areaPath} fill="url(#payoffGrad)"/>
-                    <polyline points={pts} fill="none" stroke={c.ac} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    <polyline points={currentPts} fill="none" stroke={c.tx} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.7"/>
+                    <polyline points={newPts} fill="none" stroke={c.ac} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
                     {xLabels.map(({i,label})=>{
-                      const x = PAD.l+(i/(chartRows.length-1))*cW;
-                      return <text key={i} x={x} y={H-6} textAnchor="middle" fontSize="9" fill={c.tx2} fontFamily="'Instrument Sans',sans-serif">{label}</text>;
+                      const x = PAD.l + ((scenarioComparisonRows.length === 1 ? 0 : i / (scenarioComparisonRows.length - 1)) * cW);
+                      const isFirst = i === xLabelIndexes[0];
+                      const isLast = i === xLabelIndexes[xLabelIndexes.length - 1];
+                      return <text key={i} x={x} y={H-8} textAnchor={isFirst ? "start" : isLast ? "end" : "middle"} fontSize={isMobile ? "8" : "9"} fill={c.tx2} fontFamily="'Instrument Sans',sans-serif">{label}</text>;
                     })}
                   </svg>
                 </div>
               );
             })()}
             <div style={{ maxHeight: 260, overflowY: "auto", borderTop: `1px solid ${c.border}`, paddingTop: 8 }}>
-              {(showAllSimRows ? simRows : simRows.slice(0, SIM_DISPLAY_ROWS)).map((r, i) => (
-                <div key={`${r.month}-${i}`} style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "160px 1fr 1fr", gap: 8, padding: "6px 0", borderBottom: `1px dashed ${c.border}` }}>
-                  <span>{r.month}</span>
-                  <span style={{ fontFamily: "'DM Mono',monospace" }}>{isMobile ? `Remaining: ${fx(r.remaining_debt)}` : fx(r.remaining_debt)}</span>
-                  <span style={{ fontFamily: "'DM Mono',monospace", color: c.muted }}>{isMobile ? `Interest: ${fx(r.total_interest)}` : fx(r.total_interest)}</span>
-                </div>
-              ))}
+              <div style={{ display:"grid", gridTemplateColumns:isMobile ? "1fr" : "160px 1fr 1fr 1fr", gap:8, padding:"0 0 8px", borderBottom:`1px solid ${c.border}` }}>
+                <span style={lblStyle}>Month</span>
+                <span style={lblStyle}>Current Balance</span>
+                <span style={lblStyle}>New Balance</span>
+                <span style={lblStyle}>Effect Of Change</span>
+              </div>
+              {(showAllSimRows ? scenarioComparisonRows : scenarioComparisonRows.slice(0, SIM_DISPLAY_ROWS)).map((r, i) => {
+                const balanceSaved = Math.max(0, r.currentBalance - r.newBalance);
+                return (
+                  <div key={`${r.month}-${i}`} style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "160px 1fr 1fr 1fr", gap: 8, padding: "8px 0", borderBottom: `1px dashed ${c.border}` }}>
+                    <span>{r.month}</span>
+                    <span style={{ fontFamily: "'DM Mono',monospace" }}>{isMobile ? `Current: ${fx(r.currentBalance)}` : fx(r.currentBalance)}</span>
+                    <span style={{ fontFamily: "'DM Mono',monospace" }}>{isMobile ? `New: ${fx(r.newBalance)}` : fx(r.newBalance)}</span>
+                    <span style={{ fontFamily: "'DM Mono',monospace", color: balanceSaved > 0 ? c.ac : c.muted }}>{isMobile ? `Saved: ${fx(balanceSaved)}` : fx(balanceSaved)}</span>
+                  </div>
+                );
+              })}
               <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop:8 }}>
-                {simRows.length > SIM_DISPLAY_ROWS && !showAllSimRows && (
+                {scenarioComparisonRows.length > SIM_DISPLAY_ROWS && !showAllSimRows && (
                   <button type="button" onClick={() => setShowAllSimRows(true)} style={{ padding: "6px 14px", borderRadius: 8, border: `1px solid ${c.border2}`, background: c.surf2, color: c.tx2, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "'Instrument Sans',sans-serif" }}>
-                    Show all {simRows.length} months
+                    Show all {scenarioComparisonRows.length} months
                   </button>
                 )}
-                {showAllSimRows && simRows.length > SIM_DISPLAY_ROWS && (
+                {showAllSimRows && scenarioComparisonRows.length > SIM_DISPLAY_ROWS && (
                   <button type="button" onClick={() => setShowAllSimRows(false)} style={{ padding: "6px 14px", borderRadius: 8, border: `1px solid ${c.border2}`, background: c.surf2, color: c.tx2, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "'Instrument Sans',sans-serif" }}>
                     Show less
                   </button>
                 )}
-                {simRows.length > 0 && (
+                {scenarioComparisonRows.length > 0 && (
                   <button type="button" onClick={() => {
-                    const rows = simRows || [];
+                    const rows = scenarioComparisonRows || [];
                     const win = window.open("", "_blank");
                     if (!win) return;
                     const html = `<!DOCTYPE html><html><head><title>Payoff Schedule</title><style>
@@ -581,7 +898,7 @@ export default function PayoffPage(props) {
                   </button>
                 )}
               </div>
-              {simRows.length === 0 && <div style={{ color: c.muted }}>No balances selected for simulation.</div>}
+              {scenarioComparisonRows.length === 0 && <div style={{ color: c.muted }}>Pick a debt above to generate the scenario result, slope, and month-by-month breakdown.</div>}
             </div>
           </div>
         </div>

@@ -18,20 +18,29 @@ export default function HouseholdSetupPage(props) {
     selStyle,
     onCreate,
     onSearch,
+    onClearSearchResults,
     onJoin,
     onContinueSolo,
+    inviteLink,
+    onCopyInvite,
+    onShareInvite,
+    onDone,
   } = props;
   const c = palette;
 
+  // "invite" tab is auto-shown after household creation — don't show in the nav
+  const navTabs = [
+    ["choose", "Choose"],
+    ["create", "Create household"],
+    ["join", "Join household"],
+    ["solo", "Continue solo"],
+  ];
+
   return (
     <>
+      {tab !== "invite" && (
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
-        {[
-          ["choose", "Choose"],
-          ["create", "Create household"],
-          ["join", "Join household"],
-          ["solo", "Continue solo"],
-        ].map(([id, label]) => (
+        {navTabs.map(([id, label]) => (
           <button
             key={id}
             type="button"
@@ -51,6 +60,47 @@ export default function HouseholdSetupPage(props) {
           </button>
         ))}
       </div>
+      )}
+
+      {tab === "invite" && (
+        <div style={{ display: "grid", gap: 16 }}>
+          <div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: c.tx, marginBottom: 6 }}>Household ready</div>
+            <div style={{ fontSize: 13, color: c.tx2, lineHeight: 1.6 }}>
+              Share this link or code with anyone you want to bring in. It stays active — come back to it any time from Settings.
+            </div>
+          </div>
+          <div style={{ padding: "14px 16px", borderRadius: 14, background: c.surf2, border: `1px solid ${c.border}` }}>
+            <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", color: c.muted, marginBottom: 6 }}>Share link</div>
+            <div style={{ fontSize: 13, color: c.tx, wordBreak: "break-all", lineHeight: 1.5 }}>
+              {inviteLink || "Link generating..."}
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => onCopyInvite && onCopyInvite(inviteLink)}
+              style={{ padding: "12px 16px", borderRadius: 12, border: "none", background: c.ac, color: "#001014", fontSize: 14, fontWeight: 800, cursor: "pointer" }}
+            >
+              Copy link
+            </button>
+            <button
+              type="button"
+              onClick={() => onShareInvite && onShareInvite(inviteLink)}
+              style={{ padding: "12px 16px", borderRadius: 12, border: `1px solid ${c.border2}`, background: c.surf2, color: c.tx, fontSize: 14, fontWeight: 800, cursor: "pointer" }}
+            >
+              Share
+            </button>
+            <button
+              type="button"
+              onClick={onDone}
+              style={{ padding: "12px 16px", borderRadius: 12, border: `1px solid ${c.border2}`, background: c.surf, color: c.tx2, fontSize: 14, fontWeight: 700, cursor: "pointer" }}
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
 
       {tab === "choose" && (
         <div style={{ display: "grid", gap: 12 }}>
@@ -120,6 +170,7 @@ export default function HouseholdSetupPage(props) {
           actionLoading={actionLoading}
           inputStyle={inputStyle}
           onSearch={onSearch}
+          onClearResults={onClearSearchResults}
           onJoin={onJoin}
         />
       )}

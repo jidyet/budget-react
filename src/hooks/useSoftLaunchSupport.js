@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   patchSoftLaunchState,
   readSoftLaunchState,
@@ -6,12 +6,7 @@ import {
 } from "../services/softLaunchService";
 
 export default function useSoftLaunchSupport() {
-  const [softLaunchState, setSoftLaunchState] = useState(() => readSoftLaunchState());
-
-  useEffect(() => {
-    const next = recordSoftLaunchVisit(readSoftLaunchState());
-    setSoftLaunchState(next);
-  }, []);
+  const [softLaunchState, setSoftLaunchState] = useState(() => recordSoftLaunchVisit(readSoftLaunchState()));
 
   const patchState = (patch) => {
     const next = patchSoftLaunchState(patch);

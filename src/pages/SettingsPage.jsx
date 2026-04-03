@@ -1,5 +1,6 @@
+import { useState } from "react";
 import HouseholdPage from "./HouseholdPage";
-import { fx, pct } from "../utils/budgetUtils";
+import { CURRENCY_OPTIONS, fx, getCurrencyLabel, moneyFieldLabel, pct } from "../utils/budgetUtils";
 import { CAT_ICON, MONTHS } from "../data/mockAccounts";
 import PlanStatusCard from "../components/billing/PlanStatusCard";
 import UpgradeCard from "../components/billing/UpgradeCard";
@@ -12,6 +13,11 @@ export default function SettingsPage(props) {
     isMobile,
     appVersionLabel,
     currentUserId,
+    currentUserEmail,
+    currentUserLabel,
+    userIsLocal,
+    currencyCode,
+    saveCurrencyPreference,
     settingsOverviewRef,
     settingsBillsRef,
     settingsCategoriesRef,
@@ -68,9 +74,19 @@ export default function SettingsPage(props) {
     canManageHousehold,
     handleApproveHouseholdRequest,
     handleRejectHouseholdRequest,
+    handleLeaveHousehold,
+    handleRemoveHouseholdMember,
     handleSaveHouseholdProfile,
     handleCopyHouseholdInvite,
     handleShareHouseholdInvite,
+    handleInviteHouseholdMemberByUserId,
+    householdInviteLink,
+    pendingHouseholdId,
+    pendingHouseholdName,
+    cancelPendingRequest,
+    onForgotPassword,
+    onUpdatePassword,
+    passwordUpdateLoading,
     assets,
     saveAssets,
     allAccts,
@@ -83,6 +99,38 @@ export default function SettingsPage(props) {
     copyToClipboard,
     softLaunchSummary,
   } = props;
+
+  const [passwordDraft, setPasswordDraft] = useState({
+    currentPassword: "",
+    nextPassword: "",
+    confirmPassword: "",
+  });
+
+  const submitPasswordUpdate = async () => {
+    if (userIsLocal) {
+      showToast("Password updates are not available for local preview accounts.", "error");
+      return;
+    }
+    if (!passwordDraft.currentPassword || !passwordDraft.nextPassword) {
+      showToast("Enter your current and new password.", "error");
+      return;
+    }
+    if (passwordDraft.nextPassword.length < 6) {
+      showToast("Use a new password with at least 6 characters.", "error");
+      return;
+    }
+    if (passwordDraft.nextPassword !== passwordDraft.confirmPassword) {
+      showToast("New password confirmation does not match.", "error");
+      return;
+    }
+    const updated = await onUpdatePassword?.({
+      currentPassword: passwordDraft.currentPassword,
+      nextPassword: passwordDraft.nextPassword,
+    });
+    if (updated) {
+      setPasswordDraft({ currentPassword: "", nextPassword: "", confirmPassword: "" });
+    }
+  };
 
   return (
     <div style={{ opacity: mounted ? 1 : 0, transition: "opacity .3s", marginTop: 16, maxWidth: 980 }}>
@@ -118,13 +166,119 @@ export default function SettingsPage(props) {
         householdRequests={householdRequests}
         userProfile={userProfile}
         canManageHousehold={canManageHousehold}
+        handleLeaveHousehold={handleLeaveHousehold}
+        handleRemoveHouseholdMember={handleRemoveHouseholdMember}
+        householdInviteLink={householdInviteLink}
+        subscription={subscription}
+        openBillingPage={openBillingPage}
         handleApproveHouseholdRequest={handleApproveHouseholdRequest}
         handleRejectHouseholdRequest={handleRejectHouseholdRequest}
         handleSaveHouseholdProfile={handleSaveHouseholdProfile}
         handleCopyHouseholdInvite={handleCopyHouseholdInvite}
         handleShareHouseholdInvite={handleShareHouseholdInvite}
+        handleInviteHouseholdMemberByUserId={handleInviteHouseholdMemberByUserId}
+        pendingHouseholdId={pendingHouseholdId}
+        pendingHouseholdName={pendingHouseholdName}
+        cancelPendingRequest={cancelPendingRequest}
       />
       <div ref={settingsOverviewRef} style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: c.muted, margin: "2px 0 8px" }}>This app</div>
+      <div style={{ background: c.surf, border: `1px solid ${c.border}`, borderRadius: 12, padding: "16px 20px", marginBottom: 12 }}>
+        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>Account & security</div>
+        {[
+          ["Signed in as", currentUserEmail ? `${currentUserLabel || "Unknown"} (${currentUserEmail})` : (currentUserLabel || "Unknown")],
+          ["Logged in email", currentUserEmail || "Not available"],
+          ["User ID", currentUserId || "Not available"],
+          ["Sign-in type", userIsLocal ? "Local preview" : "Firebase email/password"],
+        ].map(([k, v]) => (
+          <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "6px 0", borderBottom: `1px solid ${c.border}`, fontSize: 13, flexWrap: "wrap" }}>
+            <span style={{ color: c.muted, fontWeight: 600 }}>{k}</span>
+            <span style={{ color: c.tx }}>{v}</span>
+          </div>
+        ))}
+        {!!currentUserId && (
+          <div style={{ marginTop: 10 }}>
+            <button
+              type="button"
+              onClick={() => copyToClipboard?.(currentUserId, "User ID copied")}
+              style={{ padding: "8px 12px", borderRadius: 10, border: `1px solid ${c.border2}`, background: c.surf2, color: c.tx, fontSize: 12, fontWeight: 800, cursor: "pointer" }}
+            >
+              Copy user ID
+            </button>
+          </div>
+        )}
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 8, marginTop: 14 }}>
+          <div>
+            <div style={lblStyle}>Current password</div>
+            <input
+              type="password"
+              value={passwordDraft.currentPassword}
+              onChange={(e) => setPasswordDraft((prev) => ({ ...prev, currentPassword: e.target.value }))}
+              style={inputStyle}
+              placeholder="Enter current password"
+            />
+          </div>
+          <div>
+            <div style={lblStyle}>New password</div>
+            <input
+              type="password"
+              value={passwordDraft.nextPassword}
+              onChange={(e) => setPasswordDraft((prev) => ({ ...prev, nextPassword: e.target.value }))}
+              style={inputStyle}
+              placeholder="At least 6 characters"
+            />
+          </div>
+          <div style={{ gridColumn: isMobile ? "auto" : "1 / span 2" }}>
+            <div style={lblStyle}>Confirm new password</div>
+            <input
+              type="password"
+              value={passwordDraft.confirmPassword}
+              onChange={(e) => setPasswordDraft((prev) => ({ ...prev, confirmPassword: e.target.value }))}
+              style={inputStyle}
+              placeholder="Re-enter new password"
+            />
+          </div>
+        </div>
+        <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={submitPasswordUpdate}
+            disabled={passwordUpdateLoading || userIsLocal}
+            style={{ padding: "9px 14px", borderRadius: 999, border: "none", background: c.ac, color: "#001014", fontSize: 12, fontWeight: 800, cursor: passwordUpdateLoading || userIsLocal ? "not-allowed" : "pointer", opacity: passwordUpdateLoading || userIsLocal ? 0.65 : 1 }}
+          >
+            {passwordUpdateLoading ? "Updating password..." : "Update password"}
+          </button>
+          <button
+            type="button"
+            onClick={() => onForgotPassword?.()}
+            disabled={!currentUserEmail || userIsLocal}
+            style={{ padding: "9px 14px", borderRadius: 999, border: `1px solid ${c.border2}`, background: c.surf2, color: c.tx, fontSize: 12, fontWeight: 800, cursor: !currentUserEmail || userIsLocal ? "not-allowed" : "pointer", opacity: !currentUserEmail || userIsLocal ? 0.65 : 1 }}
+          >
+            Send reset email
+          </button>
+        </div>
+        <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${c.border}` }}>
+          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>Currency</div>
+          <div style={{ fontSize: 12, color: c.tx2, marginBottom: 10 }}>
+            Choose how money should display across your app.
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(220px, 320px) auto", gap: 8, alignItems: "center" }}>
+            <select
+              value={currencyCode || "USD"}
+              onChange={(e) => saveCurrencyPreference?.(e.target.value)}
+              style={selStyle}
+            >
+              {CURRENCY_OPTIONS.map((option) => (
+                <option key={option.code} value={option.code}>
+                  {option.code} - {option.label}
+                </option>
+              ))}
+            </select>
+            <div style={{ fontSize: 12, color: c.muted }}>
+              Current choice: {getCurrencyLabel(currencyCode)}
+            </div>
+          </div>
+        </div>
+      </div>
       <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: c.muted, margin: "2px 0 8px" }}>Quick look</div>
       <div style={{ background: c.surf, border: `1px solid ${c.border}`, borderRadius: 12, padding: "16px 20px", marginBottom: 12 }}>
         <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>Your setup</div>
@@ -133,6 +287,7 @@ export default function SettingsPage(props) {
           ["Database", firebaseStatus.configured ? "Firestore (cloud)" : "Local preview"],
           ["Accounts", `${baseAccounts.length} loaded`],
           ["Month", `${MONTHS[selMonth - 1]} ${selYear}`],
+          ["Currency", `${currencyCode || "USD"} - ${getCurrencyLabel(currencyCode)}`],
           ["Theme", theme === "dark" ? "Dark" : "Light"],
           ["Today", today.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })],
         ].map(([k, v]) => (
@@ -281,9 +436,9 @@ export default function SettingsPage(props) {
         )}
         {addAcctStep === 2 && (
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 1fr", gap: 8, marginBottom: 8 }}>
-            <div><div style={lblStyle}>Balance ($)</div><input type="number" step="0.01" style={inputStyle} value={newAcct.bal} onChange={(e) => setNewAcct((v) => ({ ...v, bal: e.target.value }))} /></div>
+            <div><div style={lblStyle}>{moneyFieldLabel("Balance", currencyCode)}</div><input type="number" step="0.01" style={inputStyle} value={newAcct.bal} onChange={(e) => setNewAcct((v) => ({ ...v, bal: e.target.value }))} /></div>
             <div><div style={lblStyle}>Due day</div><input type="number" min="0" max="31" style={inputStyle} value={newAcct.due} onChange={(e) => setNewAcct((v) => ({ ...v, due: e.target.value }))} /></div>
-            <div><div style={lblStyle}>Min due ($)</div><input type="number" step="0.01" style={inputStyle} value={newAcct.min} onChange={(e) => setNewAcct((v) => ({ ...v, min: e.target.value }))} /></div>
+            <div><div style={lblStyle}>{moneyFieldLabel("Min due", currencyCode)}</div><input type="number" step="0.01" style={inputStyle} value={newAcct.min} onChange={(e) => setNewAcct((v) => ({ ...v, min: e.target.value }))} /></div>
           </div>
         )}
         {addAcctStep === 3 && (
@@ -330,14 +485,14 @@ export default function SettingsPage(props) {
                 <div style={{ borderTop: `1px solid ${c.border}`, padding: "12px", display: "grid", gap: 8 }}>
                   <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 8 }}>
                     <div><div style={{ fontSize: 11, color: c.muted, marginBottom: 3 }}>CATEGORY</div><select value={editAcct.category} onChange={(e) => setEditAcct((p) => ({ ...p, category: e.target.value }))} style={{ width: "100%", padding: "7px 8px", borderRadius: 7, border: `1px solid ${c.border}`, background: c.surf, color: c.tx, fontSize: 13 }}>{allCategories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}</select></div>
-                    <div><div style={{ fontSize: 11, color: c.muted, marginBottom: 3 }}>BALANCE ($)</div><input type="number" step="0.01" value={editAcct.balance ?? ""} onChange={(e) => setEditAcct((p) => ({ ...p, balance: e.target.value }))} style={{ width: "100%", padding: "7px 8px", borderRadius: 7, border: `1px solid ${c.border}`, background: c.surf, color: c.ac, fontSize: 13, boxSizing: "border-box" }} /></div>
-                    <div><div style={{ fontSize: 11, color: c.muted, marginBottom: 3 }}>MIN DUE ($)</div><input type="number" value={editAcct.min} onChange={(e) => setEditAcct((p) => ({ ...p, min: e.target.value }))} style={{ width: "100%", padding: "7px 8px", borderRadius: 7, border: `1px solid ${c.border}`, background: c.surf, color: c.tx, fontSize: 13, boxSizing: "border-box" }} /></div>
+                    <div><div style={{ fontSize: 11, color: c.muted, marginBottom: 3 }}>{moneyFieldLabel("Balance", currencyCode).toUpperCase()}</div><input type="number" step="0.01" value={editAcct.balance ?? ""} onChange={(e) => setEditAcct((p) => ({ ...p, balance: e.target.value }))} style={{ width: "100%", padding: "7px 8px", borderRadius: 7, border: `1px solid ${c.border}`, background: c.surf, color: c.ac, fontSize: 13, boxSizing: "border-box" }} /></div>
+                    <div><div style={{ fontSize: 11, color: c.muted, marginBottom: 3 }}>{moneyFieldLabel("Min Due", currencyCode).toUpperCase()}</div><input type="number" value={editAcct.min} onChange={(e) => setEditAcct((p) => ({ ...p, min: e.target.value }))} style={{ width: "100%", padding: "7px 8px", borderRadius: 7, border: `1px solid ${c.border}`, background: c.surf, color: c.tx, fontSize: 13, boxSizing: "border-box" }} /></div>
                     <div><div style={{ fontSize: 11, color: c.muted, marginBottom: 3 }}>DUE DAY</div><input type="number" min="0" max="31" value={editAcct.due} onChange={(e) => setEditAcct((p) => ({ ...p, due: e.target.value }))} style={{ width: "100%", padding: "7px 8px", borderRadius: 7, border: `1px solid ${c.border}`, background: c.surf, color: c.tx, fontSize: 13, boxSizing: "border-box" }} /></div>
                     <div><div style={{ fontSize: 11, color: c.muted, marginBottom: 3 }}>CURRENT APR</div><input type="number" step="0.0001" value={editAcct.apr} onChange={(e) => setEditAcct((p) => ({ ...p, apr: e.target.value }))} style={{ width: "100%", padding: "7px 8px", borderRadius: 7, border: `1px solid ${c.border}`, background: c.surf, color: c.tx, fontSize: 13, boxSizing: "border-box" }} /></div>
                     <div><div style={{ fontSize: 11, color: c.muted, marginBottom: 3 }}>PROMO APR</div><input type="number" step="0.0001" value={editAcct.promoApr ?? ""} onChange={(e) => setEditAcct((p) => ({ ...p, promoApr: e.target.value }))} style={{ width: "100%", padding: "7px 8px", borderRadius: 7, border: `1px solid ${c.border}`, background: c.surf, color: c.tx, fontSize: 13, boxSizing: "border-box" }} /></div>
                     <div><div style={{ fontSize: 11, color: c.muted, marginBottom: 3 }}>PROMO ENDS</div><input type="month" value={editAcct.promoUntil ?? ""} onChange={(e) => setEditAcct((p) => ({ ...p, promoUntil: e.target.value }))} style={{ width: "100%", padding: "7px 8px", borderRadius: 7, border: `1px solid ${c.border}`, background: c.surf, color: c.tx, fontSize: 13, boxSizing: "border-box" }} /></div>
                     <div><div style={{ fontSize: 11, color: c.muted, marginBottom: 3 }}>APR AFTER PROMO</div><input type="number" step="0.0001" value={editAcct.aprAfterPromo ?? ""} onChange={(e) => setEditAcct((p) => ({ ...p, aprAfterPromo: e.target.value }))} style={{ width: "100%", padding: "7px 8px", borderRadius: 7, border: `1px solid ${c.border}`, background: c.surf, color: c.tx, fontSize: 13, boxSizing: "border-box" }} /></div>
-                    <div><div style={{ fontSize: 11, color: c.muted, marginBottom: 3 }}>AMOUNT PAID ($)</div><input type="number" step="0.01" value={editAcct.paid ?? ""} onChange={(e) => setEditAcct((p) => ({ ...p, paid: e.target.value }))} style={{ width: "100%", padding: "7px 8px", borderRadius: 7, border: `1px solid ${c.border}`, background: c.surf, color: c.tx, fontSize: 13, boxSizing: "border-box" }} /></div>
+                    <div><div style={{ fontSize: 11, color: c.muted, marginBottom: 3 }}>{moneyFieldLabel("Amount Paid", currencyCode).toUpperCase()}</div><input type="number" step="0.01" value={editAcct.paid ?? ""} onChange={(e) => setEditAcct((p) => ({ ...p, paid: e.target.value }))} style={{ width: "100%", padding: "7px 8px", borderRadius: 7, border: `1px solid ${c.border}`, background: c.surf, color: c.tx, fontSize: 13, boxSizing: "border-box" }} /></div>
                   </div>
                   {!!normalizeMonthInput(editAcct.promoUntil) && <div style={{ fontSize: 12, color: c.muted, lineHeight: 1.5 }}>Promo debt will use {pct(normalizeAprDecimal(editAcct.promoApr || 0))} through {normalizeMonthInput(editAcct.promoUntil)}, then switch to {pct(normalizeAprDecimal(editAcct.aprAfterPromo === "" ? editAcct.apr : editAcct.aprAfterPromo || 0))}.</div>}
                   {!!editAcct.balance && <div style={{ fontSize: 12, color: c.tx2 }}>Current balance in Settings now saves to the same live record as Bills.</div>}

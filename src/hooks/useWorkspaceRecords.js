@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { loadIncome, saveRecord, saveRecordAndSettings, subscribeRecords } from "../firebase";
+import { loadIncome, loadRecords, saveRecord, saveRecordAndSettings, subscribeRecords } from "../firebase";
 import {
   AUTH_TIMEOUT_MS,
   defaultRecord,
@@ -34,33 +34,68 @@ export default function useWorkspaceRecords({
   const [loading, setLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
 
+  const getPrevMonthKey = useCallback((key) => {
+    const [year, month] = String(key || "").split("-").map(Number);
+    if (!year || !month) return "";
+    const prevDate = new Date(year, month - 2, 1);
+    return `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, "0")}`;
+  }, []);
+
+  const buildCarryoverRecord = useCallback((account, previousRecord) => {
+    const prev = previousRecord || {};
+    const carriedBalance = Number(
+      prev.cur_bal ??
+      prev.base_bal_v ??
+      account?.starting_bal ??
+      0
+    ) || 0;
+    return {
+      ...defaultRecord(account),
+      paid_v: 0,
+      is_paid: false,
+      purch_v: 0,
+      interest_paid_v: 0,
+      min_due_v: Number(prev.min_due_v ?? account?.budgeted_min ?? 0) || 0,
+      base_bal_v: carriedBalance,
+      cur_bal: carriedBalance,
+      apr_v: normalizeAprDecimal(prev.apr_v ?? account?.apr ?? 0),
+    };
+  }, []);
+
   // --- Reset when user/mode changes ---
   useEffect(() => {
-    setRecords({});
-    setIncome([]);
-    setIncomeReceipts({});
+    queueMicrotask(() => {
+      setRecords({});
+      setIncome([]);
+      setIncomeReceipts({});
+    });
   }, [user?.uid, isLocalUser]);
 
   // --- Subscribe / load for current month ---
   useEffect(() => {
     if (!user) {
-      setRecords({});
-      setIncome([]);
-      setIncomeReceipts({});
-      setLoading(false);
-      setMounted(false);
+      queueMicrotask(() => {
+        setRecords({});
+        setIncome([]);
+        setIncomeReceipts({});
+        setLoading(false);
+        setMounted(false);
+      });
       return;
     }
 
     // Local user — read from localStorage
     if (user.isLocal || isLocalUser) {
       const lr = localData.loadRecords(user.uid, monthKey);
+      const prevMonthKey = getPrevMonthKey(monthKey);
+      const prevRecords = prevMonthKey ? (localData.loadRecords(user.uid, prevMonthKey) || {}) : {};
       const merged = {};
       recordSeedAccounts.forEach((a) => {
+        const carryover = buildCarryoverRecord(a, prevRecords[String(a.id)]);
         const saved = lr[String(a.id)];
-        merged[a.id] = saved ? { ...defaultRecord(a), ...saved } : defaultRecord(a);
+        merged[a.id] = saved ? { ...carryover, ...saved } : carryover;
       });
-      setRecords(merged);
+      queueMicrotask(() => setRecords(merged));
 
       const lim = localData.loadIncome(user.uid, monthKey);
       const normalized = Array.isArray(lim)
@@ -69,34 +104,67 @@ export default function useWorkspaceRecords({
             entries: Array.isArray(lim?.entries) ? lim.entries : [],
             receipts: lim?.receipts && typeof lim.receipts === "object" ? lim.receipts : {},
           };
-      setIncome(
-        normalizeIncomeEntries(normalized.entries)
-          .filter((e) => !isSystemIncomeSource(e.src))
-      );
-      setIncomeReceipts(normalized.receipts);
-      setMounted(true);
-      setLoading(false);
+      queueMicrotask(() => {
+        setIncome(
+          normalizeIncomeEntries(normalized.entries)
+            .filter((e) => !isSystemIncomeSource(e.src))
+        );
+        setIncomeReceipts(normalized.receipts);
+        setMounted(true);
+        setLoading(false);
+      });
       return;
     }
 
     // Cloud user — subscribe to Firestore
-    setLoading(true);
-    setIncomeReceipts({});
-    setMounted(false);
+    queueMicrotask(() => {
+      setLoading(true);
+      setIncomeReceipts({});
+      setMounted(false);
+    });
 
-    const unsub = subscribeRecords(user.uid, monthKey, (fbRecords) => {
-      const merged = {};
-      recordSeedAccounts.forEach((a) => {
-        const fbData = fbRecords[String(a.id)];
-        merged[a.id] = fbData ? { ...defaultRecord(a), ...fbData } : defaultRecord(a);
-      });
-      setRecords(merged);
-      setMounted(true);
+    let incomeAlive = true;
+    let recordSubAlive = true;
+    const prevMonthKey = getPrevMonthKey(monthKey);
+
+    const startRecords = async () => {
+      let prevRecords = {};
+      try {
+        if (prevMonthKey) {
+          prevRecords = await loadRecords(user.uid, prevMonthKey, workspaceScope);
+        }
+      } catch (error) {
+        console.error("load previous month records error:", error);
+      }
+
+      const unsubInner = subscribeRecords(user.uid, monthKey, (fbRecords) => {
+        if (!recordSubAlive) return;
+        const merged = {};
+        recordSeedAccounts.forEach((a) => {
+          const carryover = buildCarryoverRecord(a, prevRecords[String(a.id)]);
+          const fbData = fbRecords[String(a.id)];
+          merged[a.id] = fbData ? { ...carryover, ...fbData } : carryover;
+        });
+        setRecords(merged);
+        setMounted(true);
+        setLoading(false);
+      }, workspaceScope);
+
+      return unsubInner;
+    };
+
+    let unsub = () => {};
+    startRecords().then((inner) => {
+      unsub = inner || (() => {});
+    }).catch((error) => {
+      console.error("startRecords error:", error);
       setLoading(false);
-    }, workspaceScope);
+      setMounted(true);
+    });
 
     loadIncome(user.uid, monthKey, workspaceScope)
       .then((loadedIncome) => {
+        if (!incomeAlive) return;
         const normalized = Array.isArray(loadedIncome)
           ? { entries: loadedIncome, receipts: {} }
           : {
@@ -113,6 +181,7 @@ export default function useWorkspaceRecords({
         setIncomeReceipts(normalized.receipts);
       })
       .catch((e) => {
+        if (!incomeAlive) return;
         console.error("loadIncome error:", e);
         setIncome([]);
         setIncomeReceipts({});
@@ -125,12 +194,14 @@ export default function useWorkspaceRecords({
     }, AUTH_TIMEOUT_MS);
 
     return () => {
+      incomeAlive = false;
       clearTimeout(fallback);
+      recordSubAlive = false;
       unsub();
     };
   // workspaceScope?.householdId — not the full object — so member-metadata snapshots
   // (same household, different array reference) don't restart the subscription.
-  }, [monthKey, user, isLocalUser, workspaceScope?.householdId, recordSeedAccounts, localData]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [monthKey, user, isLocalUser, workspaceScope, recordSeedAccounts, localData, getPrevMonthKey, buildCarryoverRecord]);
 
   // --- buildAutoBalanceUpdates ---
   const buildAutoBalanceUpdates = useCallback((account, nextVals) => {
@@ -217,7 +288,7 @@ export default function useWorkspaceRecords({
         localData.saveSettings(user.uid, settingsData);
       }
     }
-  }, [records, monthKey, user, isLocalUser, workspaceScope?.householdId, allAccounts, localData]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [records, monthKey, user, isLocalUser, workspaceScope, allAccounts, localData]);
 
   return {
     records, setRecords,

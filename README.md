@@ -40,3 +40,20 @@ service cloud.firestore {
 
 ## Build
 - `npm run build`
+
+## CI
+GitHub Actions runs the core web verification path on pushes and pull requests:
+
+- `npx eslint src --format stylish`
+- `npm test`
+- `npm run build`
+
+Maintainer notes live in [docs/maintainer-runbook.md](docs/maintainer-runbook.md).
+
+## Performance
+Bundle budgets are documented in [docs/performance-budgets.md](docs/performance-budgets.md).
+
+Current local check:
+
+- `npm run build`
+- `npm run perf:check`

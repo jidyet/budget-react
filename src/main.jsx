@@ -12,12 +12,19 @@ import './index.css'
 import AppErrorBoundary from './components/ui/AppErrorBoundary.jsx'
 
 function showStartupError(err) {
+  const message = err?.message || String(err)
+  const stack = typeof err?.stack === "string" ? err.stack : ""
+  const fingerprint = `${message}\n${stack}`
+  window.__startupErrorCache = window.__startupErrorCache || new Set()
+  if (window.__startupErrorCache.has(fingerprint)) return
+  window.__startupErrorCache.add(fingerprint)
+
   console.error('Startup error:', err)
   const pre = document.createElement('pre')
   pre.style.whiteSpace = 'pre-wrap'
   pre.style.color = 'red'
   pre.style.padding = '12px'
-  pre.textContent = `Startup error: ${err?.message || String(err)}`
+  pre.textContent = `Startup error: ${message}${stack ? `\n${stack}` : ""}`
   document.body.appendChild(pre)
 }
 
@@ -51,17 +58,14 @@ start()
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    if (import.meta.env.PROD) {
-      navigator.serviceWorker.register("/sw.js").catch((err) => {
-        console.error("Service worker registration failed:", err)
-      })
-      return
-    }
+    const register = navigator.serviceWorker && typeof navigator.serviceWorker.register === "function"
+      ? navigator.serviceWorker.register.bind(navigator.serviceWorker)
+      : null
 
-    navigator.serviceWorker.getRegistrations().then((registrations) => {
-      registrations.forEach((registration) => {
-        registration.unregister().catch(() => {})
-      })
-    }).catch(() => {})
+    if (!register) return
+
+    register("/sw.js").catch((error) => {
+      console.error("service worker registration error", error)
+    })
   })
 }

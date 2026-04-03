@@ -9,7 +9,13 @@ export default defineConfig({
     assetsDir: 'assets',
     rollupOptions: {
       output: {
-        manualChunks: undefined,
+        manualChunks(id) {
+          if (id.includes('node_modules/pdfjs-dist')) return 'pdfjs'
+          if (id.includes('node_modules/xlsx')) return 'xlsx'
+          if (id.includes('node_modules/tesseract.js')) return 'ocr'
+          if (id.includes('node_modules')) return 'vendor'
+          return undefined
+        },
       },
     },
   },

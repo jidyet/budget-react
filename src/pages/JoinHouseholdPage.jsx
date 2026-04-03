@@ -10,19 +10,39 @@ export default function JoinHouseholdPage({
   actionLoading,
   inputStyle,
   onSearch,
+  onClearResults,
   onJoin,
 }) {
   const c = palette;
-  const updateSearch = (value) => setForm((prev) => ({ ...prev, search: value }));
+  const updateSearch = (value) => {
+    setForm((prev) => ({ ...prev, search: value }));
+    if (onClearResults) onClearResults();
+  };
+  const runSearch = (value) => onSearch(value ?? form.search);
 
   return (
     <div style={{ display:'grid', gap:14 }}>
       <div style={{ fontSize:13, color:c.tx2, lineHeight:1.6 }}>
-        Search by code or name. Open households let you in right away. Approval households send a quick request.
+        Search by code, name, or paste a share link. Open households let you in right away. Approval households send a quick request.
       </div>
       <div style={{ display:'grid', gridTemplateColumns:isMobile ? '1fr' : '1fr auto', gap:10 }}>
-        <input style={inputStyle} value={form.search} onChange={(event) => updateSearch(event.target.value)} placeholder='Enter a join code or name' />
-        <button type='button' onClick={onSearch} disabled={searchLoading} style={{ padding:'12px 16px', borderRadius:12, border:'none', background:c.ac, color:'#001014', fontSize:14, fontWeight:800, cursor:'pointer', opacity:searchLoading ? 0.72 : 1 }}>
+        <input
+          style={inputStyle}
+          value={form.search}
+          onChange={(event) => updateSearch(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") runSearch();
+          }}
+          onPaste={(event) => {
+            const pasted = (event.clipboardData?.getData("text") || "").trim();
+            if (pasted) {
+              event.preventDefault();
+              updateSearch(pasted);
+            }
+          }}
+          placeholder='Enter a join code, name, or link'
+        />
+        <button type='button' onClick={runSearch} disabled={searchLoading} style={{ padding:'12px 16px', borderRadius:12, border:'none', background:c.ac, color:'#001014', fontSize:14, fontWeight:800, cursor:'pointer', opacity:searchLoading ? 0.72 : 1 }}>
           {searchLoading ? 'Searching...' : 'Search'}
         </button>
       </div>

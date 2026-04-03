@@ -37,7 +37,7 @@ export default function FeedbackModal({
           transform: "translate(-50%,-50%)",
           zIndex: 231,
           width: isMobile ? "94vw" : 560,
-          maxHeight: "88vh",
+          maxHeight: "min(88vh, 88dvh)",
           overflowY: "auto",
           background: c.surf,
           border: `1px solid ${c.border}`,

@@ -7,11 +7,13 @@ export default function useHouseholdDashboard(householdId, monthKey) {
 
   useEffect(() => {
     if (!householdId || !monthKey) {
-      setDashboard(null);
-      setLoading(false);
+      queueMicrotask(() => {
+        setDashboard(null);
+        setLoading(false);
+      });
       return () => {};
     }
-    setLoading(true);
+    queueMicrotask(() => setLoading(true));
     const unsub = subscribeSharedDashboardSnapshot(householdId, monthKey, (snapshot) => {
       setDashboard(snapshot);
       setLoading(false);

@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { LAUNCH_COPY } from "./config/launchCopy";
+import { fx } from "./utils/budgetUtils";
 
 const BANK_RE = {
   discover: {
@@ -134,19 +135,19 @@ const EXTRACTION_RE = {
     /amount remaining[^\d$]*\$([\d,]+\.\d{2})/i,
   ],
   previousBalance: [
-    /(?:previous balance|prior balance|last statement balance)[^\d\-]*\$?([\d,]+\.\d{2})/i,
+    /(?:previous balance|prior balance|last statement balance)[^\d-]*\$?([\d,]+\.\d{2})/i,
   ],
   newPurchases: [
-    /(?:new purchases?|purchases and other charges|new charges|purchase amount)[^\d\-]*\$?([\d,]+\.\d{2})/i,
-    /(?:^|\s)purchases\s*[+\-]?\$?([\d,]+\.\d{2})/i,
+    /(?:new purchases?|purchases and other charges|new charges|purchase amount)[^\d-]*\$?([\d,]+\.\d{2})/i,
+    /(?:^|\s)purchases\s*[+-]?\$?([\d,]+\.\d{2})/i,
   ],
   interestCharged: [
-    /(?:interest charged|finance charge|interest this period|total interest charged)[^\d\-]*\$?([\d,]+\.\d{2})/i,
-    /total interest for this period[^\d\-+]*[+\-]?\$?([\d,]+\.\d{2})/i,
+    /(?:interest charged|finance charge|interest this period|total interest charged)[^\d-]*\$?([\d,]+\.\d{2})/i,
+    /total interest for this period[^\d-+]*[+-]?\$?([\d,]+\.\d{2})/i,
   ],
   fees: [
-    /(?:fees charged|returned payment fee|total fees)[^\d\-]*\$?([\d,]+\.\d{2})/i,
-    /total fees for this period[^\d\-+]*[+\-]?\$?([\d,]+\.\d{2})/i,
+    /(?:fees charged|returned payment fee|total fees)[^\d-]*\$?([\d,]+\.\d{2})/i,
+    /total fees for this period[^\d-+]*[+-]?\$?([\d,]+\.\d{2})/i,
   ],
 };
 
@@ -209,7 +210,7 @@ function parseNumericInput(value) {
 }
 
 function formatCurrency(value) {
-  return value == null ? "-" : `$${Number(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return value == null ? "-" : fx(value);
 }
 
 function extractDay(dateStr) {
@@ -426,7 +427,7 @@ function getFileType(file) {
   return "unknown";
 }
 
-export default function StatementUpload({ accounts, theme, onSaved, onUpload, sourceMode = "pdf" }) {
+export default function StatementUpload({ accounts = [], theme, onSaved, onUpload, sourceMode = "pdf" }) {
   const [status, setStatus] = useState("idle");
   const [parsed, setParsed] = useState(null);
   const [matches, setMatches] = useState([]);
@@ -590,9 +591,16 @@ export default function StatementUpload({ accounts, theme, onSaved, onUpload, so
 
   const handleSave = async () => {
     if (!selectedId) return;
+    setErrorMsg("");
     setStatus("saving");
 
     const account = accounts.find((item) => item.id === selectedId);
+    if (!account) {
+      setErrorMsg("Please choose a valid account before saving.");
+      setStatus("error");
+      return;
+    }
+
     const nextBalance = parseNumericInput(overrides.remaining_balance) ?? parseNumericInput(overrides.balance) ?? account.cur_bal;
     const nextMinDue = parseNumericInput(overrides.min_due) ?? account.min_due_v;
     const nextPurchases = parseNumericInput(overrides.new_purchases) ?? account.purch_v ?? 0;
@@ -630,23 +638,23 @@ export default function StatementUpload({ accounts, theme, onSaved, onUpload, so
     };
 
     const before = account || null;
-    await (onSaved ? onSaved(selectedId, updates) : Promise.resolve());
-    setSavedList((current) => [...current, account.name]);
+    try {
+      await (onSaved ? onSaved(selectedId, updates) : Promise.resolve());
+      setSavedList((current) => [...current, account.name]);
 
-    if (typeof onUpload === "function") {
-      try {
+      if (typeof onUpload === "function") {
         onUpload({
           fileName,
           type: getFileType({ name: fileName }),
           rows: [{ accountId: selectedId, name: account.name, before, after: uploadAfter }],
           parsed: parsedSnapshot,
         });
-      } catch (error) {
-        console.error("onUpload error", error);
       }
+      setStatus("done");
+    } catch (error) {
+      setErrorMsg(`We could not save that statement: ${error?.message || error}`);
+      setStatus("error");
     }
-
-    setStatus("done");
   };
 
   const reset = () => {
@@ -657,6 +665,7 @@ export default function StatementUpload({ accounts, theme, onSaved, onUpload, so
     setOverrides({});
     setFileName("");
     setErrorMsg("");
+    setSavedList([]);
     if (fileRef.current) fileRef.current.value = "";
   };
 

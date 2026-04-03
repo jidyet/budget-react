@@ -636,6 +636,20 @@ export default function PayoffPage(props) {
               )}
               {goalPlanner?.valid && (
                 <>
+                  {(() => {
+                    const excludedTotal = scopedAccounts.reduce((sum, a) => {
+                      const key = String(a.id);
+                      return (!planItems[key]?.include && Number(a.cur_bal || 0) > 0.01)
+                        ? sum + Number(a.cur_bal || 0)
+                        : sum;
+                    }, 0);
+                    if (excludedTotal < 0.01) return null;
+                    return (
+                      <div style={{ marginTop:12, padding:"10px 14px", borderRadius:8, background:c.waD || c.surf2, border:`1px solid ${c.wa || c.border}`, fontSize:12, color:c.tx2, lineHeight:1.6 }}>
+                        <strong style={{ color:c.wa || c.tx }}>Heads up:</strong> {fx(excludedTotal)} in debt is not included in this plan and won't be covered by this projection. Go to <strong>Pick what goes in</strong> below to add those debts.
+                      </div>
+                    );
+                  })()}
                   <div style={{ display:"grid", gridTemplateColumns:isMobile ? "1fr" : goalPlanner.whatIfApplied ? "repeat(4, minmax(0, 1fr))" : "repeat(3, minmax(0, 1fr))", gap:10, marginTop:12 }}>
                     {goalPlanner.whatIfApplied ? (
                       <>

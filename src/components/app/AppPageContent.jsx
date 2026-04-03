@@ -246,6 +246,7 @@ export default function AppPageContent(props) {
               selStyle={props.selStyle}
               inputStyle={props.inputStyle}
               savePlan={props.savePlan}
+              saveRawPlan={props.saveRawPlan}
               saveBtnStyle={props.saveBtnStyle}
               buildDefaultPlanItems={props.buildDefaultPlanItems}
               createPlanDraft={props.createPlanDraft}

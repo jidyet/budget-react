@@ -195,6 +195,31 @@ const usePlans = ({
     }
   }, [user, isLocalUser, allAccts, deletedAccountIds, workspaceScope, showToast, localData]);
 
+  // Save a fully-formed payload directly (bypasses refs — safe to call immediately after setState)
+  const saveRawPlan = useCallback(async (payload, targetId = "") => {
+    if (!user) return null;
+    if (user.isLocal || isLocalUser) {
+      const id = localData.savePlan(user.uid, payload, targetId);
+      const updated = localData.loadPlans(user.uid);
+      setPlans(updated);
+      setPlanId(id);
+      showToast("Plan saved locally");
+      return id;
+    }
+    try {
+      const id = await upsertPayoffPlan(user.uid, payload, targetId || null, workspaceScope);
+      const updated = await loadPayoffPlans(user.uid, workspaceScope);
+      setPlans(updated);
+      setPlanId(id);
+      showToast("Plan saved");
+      return id;
+    } catch (e) {
+      console.error("saveRawPlan error", e);
+      showToast("Plan save failed", "error");
+      return null;
+    }
+  }, [user, isLocalUser, workspaceScope, showToast, localData]);
+
   const removePlan = useCallback(async (targetId = "") => {
     if (!user || !targetId) return;
     if (user.isLocal || isLocalUser) {
@@ -232,6 +257,7 @@ const usePlans = ({
     goalRequiredExtra, setGoalRequiredExtra,
     whatIfExtraTimerRef,
     savePlan,
+    saveRawPlan,
     removePlan,
     createPlanDraft,
     buildDefaultPlanItems,

@@ -165,10 +165,11 @@ export const normalizeMonthInput = (value) => {
 
 export const defaultRecord = (a) => {
   if (a == null) {
-    return { paid_v: 0, min_due_v: 0, base_bal_v: 0, cur_bal: 0, is_paid: false, purch_v: 0, apr_v: 0 };
+    return { paid_v: 0, planned_v: 0, min_due_v: 0, base_bal_v: 0, cur_bal: 0, is_paid: false, purch_v: 0, apr_v: 0 };
   }
   return {
     paid_v: 0,
+    planned_v: 0,
     min_due_v: a.budgeted_min,
     base_bal_v: a.starting_bal,
     cur_bal: a.starting_bal,

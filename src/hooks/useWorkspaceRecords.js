@@ -220,6 +220,9 @@ export default function useWorkspaceRecords({
       cur_bal:    Math.max(0, baseBal - nextPaid + nextPurch),
       purch_v:    nextPurch,
     };
+    if (nextVals?.planned_v !== undefined) {
+      result.planned_v = Number(nextVals.planned_v) || 0;
+    }
     if (nextVals?.interest_paid_v !== undefined) {
       result.interest_paid_v = Number(nextVals.interest_paid_v) || 0;
     }

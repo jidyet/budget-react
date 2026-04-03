@@ -62,6 +62,7 @@ export default function useAccounts({
     promoApr: "",
     promoUntil: "",
     aprAfterPromo: "",
+    interest_type: "variable_apr",
     min: "",
     bal: "",
     due: "",
@@ -254,6 +255,7 @@ export default function useAccounts({
       promo_apr: promoAprVal,
       promo_until: promoUntil,
       apr_after_promo: aprAfterPromoVal,
+      interest_type: newAcct.interest_type || "variable_apr",
       budgeted_min: Number(newAcct.min || 0),
       due_day: Number(newAcct.due || 0),
       starting_bal: Number(newAcct.bal || 0),
@@ -272,6 +274,7 @@ export default function useAccounts({
       promoApr: "",
       promoUntil: "",
       aprAfterPromo: "",
+      interest_type: newAcct.interest_type || "variable_apr",
       min: "",
       bal: "",
       due: "",
@@ -343,6 +346,7 @@ export default function useAccounts({
       promoApr: account.promo_apr ?? "",
       promoUntil: normalizeMonthInput(account.promo_until),
       aprAfterPromo: account.apr_after_promo ?? account.apr ?? "",
+      interest_type: account.interest_type || "variable_apr",
       paid: account.paid_v ?? "",
     });
   };
@@ -373,6 +377,7 @@ export default function useAccounts({
         promo_apr: promoAprVal,
         promo_until: promoUntil,
         apr_after_promo: aprAfterPromoVal,
+        interest_type: editAcct.interest_type || "variable_apr",
       },
     };
     const cats = getCategories();

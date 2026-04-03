@@ -304,6 +304,7 @@ export default function BudgetApp() {
     incomingHouseholdInvites,
     createCurrentHousehold,
     searchForHouseholds,
+    clearHouseholdSearchResults,
     joinSelectedHousehold,
     continueSoloMode,
     pendingHouseholdId,
@@ -679,8 +680,9 @@ export default function BudgetApp() {
   const markPaid = async (a) => {
     const prevPaid = a.is_paid;
     const newPaid = !a.is_paid;
+    const plannedOrMin = Number(a.planned_v || 0) > 0 ? a.planned_v : a.min_due_v;
     await updateRecord(a.id, {
-      ...buildAutoBalanceUpdates(a, { paid_v: newPaid ? a.min_due_v : 0 }),
+      ...buildAutoBalanceUpdates(a, { paid_v: newPaid ? plannedOrMin : 0 }),
       is_paid: newPaid,
     });
     if (newPaid) showToast(`Saved: ${a.name}`);
@@ -688,7 +690,7 @@ export default function BudgetApp() {
       `${a.name} ${newPaid ? "marked paid" : "marked unpaid"}`,
       async () => {
         await updateRecord(a.id, {
-          ...buildAutoBalanceUpdates(a, { paid_v: prevPaid ? a.min_due_v : 0 }),
+          ...buildAutoBalanceUpdates(a, { paid_v: prevPaid ? plannedOrMin : 0 }),
           is_paid: prevPaid,
         });
       }
@@ -1000,6 +1002,7 @@ export default function BudgetApp() {
     goalRequiredExtra, setGoalRequiredExtra,
     whatIfExtraTimerRef,
     savePlan,
+    saveRawPlan,
     removePlan,
     createPlanDraft,
     buildDefaultPlanItems,
@@ -1520,6 +1523,7 @@ export default function BudgetApp() {
             setShowStrategyCompare={setShowStrategyCompare}
             showStrategyCompare={showStrategyCompare}
             savePlan={savePlan}
+            saveRawPlan={saveRawPlan}
             saveBtnStyle={saveBtnStyle}
             buildDefaultPlanItems={buildDefaultPlanItems}
             createPlanDraft={createPlanDraft}
@@ -1598,15 +1602,24 @@ export default function BudgetApp() {
             completeOnboarding={completeOnboarding}
             householdSetupOpen={householdSetupOpen}
             householdSetupTab={householdSetupTab}
+            setHouseholdSetupTab={setHouseholdSetupTab}
+            setHouseholdSetupOpen={setHouseholdSetupOpen}
             householdForm={householdForm}
             setHouseholdForm={setHouseholdForm}
             householdActionLoading={householdActionLoading}
             householdSearchLoading={householdSearchLoading}
             householdSearchResults={householdSearchResults}
+            clearHouseholdSearchResults={clearHouseholdSearchResults}
             createCurrentHousehold={createCurrentHousehold}
             searchForHouseholds={searchForHouseholds}
             joinSelectedHousehold={joinSelectedHousehold}
             continueSoloMode={continueSoloMode}
+            householdInviteLink={householdInviteLink}
+            handleCopyHouseholdInvite={handleCopyHouseholdInvite}
+            handleShareHouseholdInvite={handleShareHouseholdInvite}
+            lblStyle={lblStyle}
+            inputStyle={inputStyle}
+            selStyle={selStyle}
           />
         </div>
         <AppOverlays

@@ -68,6 +68,7 @@ export default function EditPanelModal({
                 apr_after_promo: aprAfterPromoDecimal,
                 ...(category ? { category } : {}),
                 ...(dueDay > 0 ? { due_day: dueDay } : {}),
+                ...(vals.interest_type ? { interest_type: vals.interest_type } : {}),
               },
             };
 
@@ -90,6 +91,7 @@ export default function EditPanelModal({
             await updateRecord(
               acct.id,
               buildAutoBalanceUpdates(acct, {
+                planned_v: parseFloat(vals.planned_v) || 0,
                 paid_v: parseFloat(vals.paid_v) || 0,
                 min_due_v: parseFloat(vals.min_due_v) || 0,
                 cur_bal: parseFloat(vals.cur_bal) || 0,

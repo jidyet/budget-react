@@ -293,29 +293,85 @@ export default function AccountsPage(props) {
                                 )}
                               </div>
 
-                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                                <div style={{ borderRadius: 12, border: `1px solid ${c.border}`, background: c.surf, padding: "9px 10px" }}>
-                                  <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: c.muted, marginBottom: 4 }}>Balance</div>
-                                  <div style={{ fontSize: 15, fontWeight: 900, color: c.ac, fontFamily: "'DM Mono',monospace" }}>{fx(a.cur_bal)}</div>
-                                  {Math.abs(delta) >= 0.01 && (
-                                    <div style={{ fontSize: 10, color: delta < 0 ? c.go : c.da, fontWeight: 800, marginTop: 3 }}>
-                                      {delta < 0 ? "▼" : "▲"} {fx(Math.abs(delta))}
+                              {(() => {
+                                const aprDec = a.apr_v ?? (Number(a.apr ?? 0) > 1 ? Number(a.apr) / 100 : Number(a.apr ?? 0));
+                                const bal = Number(a.cur_bal || 0);
+                                const monthlyInterest = bal > 0 && aprDec > 0 ? (aprDec / 12) * bal : 0;
+                                const planned = Number(a.planned_v || 0);
+                                const actualPaid = Number(a.paid_v || 0);
+                                const effectivePayment = planned > 0 ? planned : actualPaid > 0 ? actualPaid : Number(a.min_due_v || 0);
+                                const principalApplied = effectivePayment > 0 ? Math.max(0, effectivePayment - monthlyInterest) : 0;
+                                const interestApplied = effectivePayment > 0 ? Math.min(effectivePayment, monthlyInterest) : monthlyInterest;
+                                const dangerMode = monthlyInterest > 0 && effectivePayment <= monthlyInterest;
+                                const showPaymentRow = true;
+                                const showBreakdownRow = true;
+                                return (
+                                  <div style={{ display: "grid", gap: 6 }}>
+                                    {/* Row 1: Balance | Min Due */}
+                                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                                      <div style={{ borderRadius: 10, border: `1px solid ${c.border}`, background: c.surf, padding: "9px 10px" }}>
+                                        <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: c.muted, marginBottom: 3 }}>Balance</div>
+                                        <div style={{ fontSize: 15, fontWeight: 900, color: c.ac, fontFamily: "'DM Mono',monospace" }}>{fx(a.cur_bal)}</div>
+                                        {Math.abs(delta) >= 0.01 && (
+                                          <div style={{ fontSize: 10, color: delta < 0 ? c.go : c.da, fontWeight: 800, marginTop: 2 }}>
+                                            {delta < 0 ? "▼" : "▲"} {fx(Math.abs(delta))}
+                                          </div>
+                                        )}
+                                      </div>
+                                      <div style={{ borderRadius: 10, border: `1px solid ${c.border}`, background: c.surf, padding: "9px 10px" }}>
+                                        <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: c.muted, marginBottom: 3 }}>Min Due</div>
+                                        <div style={{ fontSize: 15, fontWeight: 900, color: c.tx, fontFamily: "'DM Mono',monospace" }}>{fx(a.min_due_v)}</div>
+                                      </div>
                                     </div>
-                                  )}
-                                </div>
-                                <div style={{ borderRadius: 12, border: `1px solid ${c.border}`, background: c.surf, padding: "9px 10px" }}>
-                                  <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: c.muted, marginBottom: 4 }}>Min Due</div>
-                                  <div style={{ fontSize: 15, fontWeight: 900, color: c.tx, fontFamily: "'DM Mono',monospace" }}>{fx(a.min_due_v)}</div>
-                                </div>
-                                <div style={{ borderRadius: 12, border: `1px solid ${c.border}`, background: c.surf, padding: "9px 10px" }}>
-                                  <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: c.muted, marginBottom: 4 }}>Paid</div>
-                                  <div style={{ fontSize: 15, fontWeight: 900, color: c.go, fontFamily: "'DM Mono',monospace" }}>{fx(a.paid_v)}</div>
-                                </div>
-                                <div style={{ borderRadius: 12, border: `1px solid ${c.border}`, background: c.surf, padding: "9px 10px" }}>
-                                  <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: c.muted, marginBottom: 4 }}>APR</div>
-                                  <div style={{ fontSize: 15, fontWeight: 900, color: c.tx, fontFamily: "'DM Mono',monospace" }}>{apr}</div>
-                                </div>
-                              </div>
+                                    {/* Row 2: Planned | Actual */}
+                                    {showPaymentRow && (
+                                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                                        <div style={{ borderRadius: 10, border: `1px solid ${c.ac}30`, background: `${c.ac}08`, padding: "9px 10px" }}>
+                                          <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: c.muted, marginBottom: 3 }}>Planned</div>
+                                          <div style={{ fontSize: 15, fontWeight: 900, color: planned > 0 ? c.ac : c.muted, fontFamily: "'DM Mono',monospace" }}>{fx(planned)}</div>
+                                        </div>
+                                        <div style={{ borderRadius: 10, border: `1px solid ${c.border}`, background: c.surf, padding: "9px 10px" }}>
+                                          <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: c.muted, marginBottom: 3 }}>Actual</div>
+                                          <div style={{ fontSize: 15, fontWeight: 900, color: actualPaid > 0 ? c.go : c.muted, fontFamily: "'DM Mono',monospace" }}>{fx(actualPaid)}</div>
+                                        </div>
+                                      </div>
+                                    )}
+                                    {/* Row 3: Interest / Principal */}
+                                    {showBreakdownRow && (
+                                      <div style={{ borderRadius: 10, border: `1px solid ${dangerMode ? c.da + "55" : c.border}`, background: dangerMode ? `${c.da}08` : c.surf, padding: "9px 10px" }}>
+                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                                          <div style={{ flex: 1 }}>
+                                            <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: c.muted, marginBottom: 5 }}>Interest / Principal</div>
+                                            <div style={{ display: "flex", gap: 14, alignItems: "baseline", flexWrap: "wrap" }}>
+                                              <div>
+                                                <span style={{ fontSize: 14, fontWeight: 900, color: dangerMode ? c.da : c.wa, fontFamily: "'DM Mono',monospace" }}>{fx(interestApplied)}</span>
+                                                <span style={{ fontSize: 10, color: c.muted, marginLeft: 3 }}>int</span>
+                                              </div>
+                                              <div>
+                                                <span style={{ fontSize: 14, fontWeight: 900, color: principalApplied > 0 ? c.go : c.muted, fontFamily: "'DM Mono',monospace" }}>{fx(principalApplied)}</span>
+                                                <span style={{ fontSize: 10, color: c.muted, marginLeft: 3 }}>principal</span>
+                                              </div>
+                                            </div>
+                                            {effectivePayment > 0 && (
+                                              <div style={{ marginTop: 6, height: 4, borderRadius: 2, overflow: "hidden", background: c.border, display: "flex" }}>
+                                                <div style={{ width: `${Math.round((principalApplied / effectivePayment) * 100)}%`, background: principalApplied > 0 ? c.go : "transparent" }} />
+                                                <div style={{ width: `${Math.round((interestApplied / effectivePayment) * 100)}%`, background: dangerMode ? c.da : c.wa }} />
+                                              </div>
+                                            )}
+                                          </div>
+                                          <div style={{ textAlign: "right", flexShrink: 0 }}>
+                                            <div style={{ fontSize: 10, color: c.muted, marginBottom: 2 }}>APR</div>
+                                            <div style={{ fontSize: 13, fontWeight: 900, color: c.tx, fontFamily: "'DM Mono',monospace" }}>{apr}</div>
+                                          </div>
+                                        </div>
+                                        {dangerMode && (
+                                          <div style={{ fontSize: 10, color: c.da, fontWeight: 800, marginTop: 4 }}>Min due doesn't cover interest</div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()}
 
                               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                                 {!a.is_paid && a.d_left != null && a.d_left >= 0 && a.d_left <= 7 && (
@@ -666,7 +722,8 @@ export default function AccountsPage(props) {
                           const apr = a.effectiveApr ?? getEffectiveApr(a);
                           const bal = Number(a.cur_bal || 0);
                           const minDue = Number(a.min_due_v || a.budgeted_min || 0);
-                          const paymentBasis = Number(a.paid_v || 0) > 0 ? Number(a.paid_v || 0) : minDue;
+                          const planned = Number(a.planned_v || 0);
+                          const paymentBasis = planned > 0 ? planned : Number(a.paid_v || 0) > 0 ? Number(a.paid_v || 0) : minDue;
                           if (apr <= 0 || bal <= 0 || paymentBasis <= 0) return null;
                           const monthlyInterest = (apr / 12) * bal;
                           const interestApplied = Math.min(paymentBasis, monthlyInterest);
@@ -685,7 +742,12 @@ export default function AccountsPage(props) {
                           );
                         })()}
                       </td>
-                      <td style={{padding:"9px 10px",fontFamily:"'DM Mono',monospace"}}>{fx(a.min_due_v)}</td>
+                      <td style={{padding:"9px 10px",fontFamily:"'DM Mono',monospace"}}>
+                        {fx(a.min_due_v)}
+                        {Number(a.planned_v || 0) > 0 && Number(a.planned_v) !== Number(a.min_due_v || 0) && (
+                          <div style={{ fontSize: 10, color: c.ac, fontWeight: 800, marginTop: 1 }}>Plan {fx(a.planned_v)}</div>
+                        )}
+                      </td>
                       <td style={{padding:"9px 10px",fontFamily:"'DM Mono',monospace",color:c.go}}>{fx(a.paid_v)}</td>
                       <td style={{padding:"9px 10px"}}>
                         <div style={{display:"flex",alignItems:"center",gap:6}}>

@@ -105,6 +105,8 @@ export default function SettingsPage(props) {
     nextPassword: "",
     confirmPassword: "",
   });
+  const [addBillOpen, setAddBillOpen] = useState(false);
+  const [manageBillsOpen, setManageBillsOpen] = useState(false);
 
   const submitPasswordUpdate = async () => {
     if (userIsLocal) {
@@ -410,13 +412,21 @@ export default function SettingsPage(props) {
           ))}
         </div>
       </div>
-      <div ref={addBillSectionRef} style={{ background: c.surf, border: `1px solid ${c.border}`, borderRadius: 12, padding: "16px 20px", marginBottom: 12 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
+      <div ref={addBillSectionRef} style={{ background: c.surf, border: `1px solid ${c.border}`, borderRadius: 12, marginBottom: 12, overflow: "hidden" }}>
+        <button
+          type="button"
+          onClick={() => setAddBillOpen((v) => !v)}
+          style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "16px 20px", background: "transparent", border: "none", cursor: "pointer", textAlign: "left" }}
+        >
           <div>
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Add Bill</div>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2, color: c.tx }}>Add Bill</div>
             <div style={{ fontSize: 12, color: c.muted }}>Set the normal APR and any promo deadline up front so the app can plan payoff timing correctly.</div>
           </div>
-          <div style={{ fontSize: 12, color: c.muted }}>3-step setup</div>
+          <span style={{ color: c.muted, fontSize: 13, fontWeight: 900, flexShrink: 0 }}>{addBillOpen ? "▲" : "▼"}</span>
+        </button>
+        {addBillOpen && <div style={{ padding: "0 20px 20px", borderTop: `1px solid ${c.border}` }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 14, marginBottom: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: c.muted }}>3-step setup</div>
         </div>
         <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
           {[1, 2, 3].map((s) => <div key={s} style={{ flex: 1, height: 4, borderRadius: 2, background: s <= addAcctStep ? c.ac : c.border2, transition: "background 0.25s" }} />)}
@@ -443,6 +453,16 @@ export default function SettingsPage(props) {
         )}
         {addAcctStep === 3 && (
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 8, marginBottom: 8 }}>
+            <div><div style={lblStyle}>Interest Type</div>
+              <select style={selStyle} value={newAcct.interest_type || "variable_apr"} onChange={(e) => setNewAcct((v) => ({ ...v, interest_type: e.target.value }))}>
+                <option value="variable_apr">Variable APR (Credit Cards)</option>
+                <option value="fixed_apr">Fixed APR (Student / Personal Loans)</option>
+                <option value="simple">Simple Interest (Auto Loans)</option>
+                <option value="fixed_monthly">Fixed Monthly Fee</option>
+                <option value="promo_zero">0% Promotional</option>
+                <option value="interest_free">Interest-Free</option>
+              </select>
+            </div>
             <div><div style={lblStyle}>Current APR</div><input type="number" step="0.0001" style={inputStyle} value={newAcct.apr} onChange={(e) => setNewAcct((v) => ({ ...v, apr: e.target.value }))} /></div>
             <div><div style={lblStyle}>Provider</div><input style={inputStyle} value={newAcct.bank} onChange={(e) => setNewAcct((v) => ({ ...v, bank: e.target.value }))} /></div>
             <div><div style={lblStyle}>Promo APR</div><input type="number" step="0.0001" style={inputStyle} value={newAcct.promoApr} onChange={(e) => setNewAcct((v) => ({ ...v, promoApr: e.target.value }))} placeholder="0 for a 0% promo" /></div>
@@ -459,16 +479,22 @@ export default function SettingsPage(props) {
             <button type="button" onClick={() => { addCustomAccount(); setAddAcctStep(1); }} style={{ padding: "9px 20px", borderRadius: 8, border: "none", background: c.ac, color: "#000", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Add Bill</button>
           )}
         </div>
+        </div>}
       </div>
-      <div style={{ background: c.surf, border: `1px solid ${c.border}`, borderRadius: 12, padding: "16px 20px", marginBottom: 12 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+      <div style={{ background: c.surf, border: `1px solid ${c.border}`, borderRadius: 12, marginBottom: 12, overflow: "hidden" }}>
+        <button
+          type="button"
+          onClick={() => setManageBillsOpen((v) => !v)}
+          style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "16px 20px", background: "transparent", border: "none", cursor: "pointer", textAlign: "left" }}
+        >
           <div>
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Manage Bills</div>
-            <div style={{ fontSize: 12, color: c.muted }}>Edit balance, due day, APR, promo window, or delete bills you no longer track.</div>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2, color: c.tx }}>Manage Bills</div>
+            <div style={{ fontSize: 12, color: c.muted }}>Edit balance, due day, APR, interest type, or delete bills you no longer track. {baseAccounts.length} active bills.</div>
           </div>
-          <div style={{ fontSize: 12, color: c.muted }}>{baseAccounts.length} active bills</div>
-        </div>
-        <div style={{ display: "grid", gap: 8 }}>
+          <span style={{ color: c.muted, fontSize: 13, fontWeight: 900, flexShrink: 0 }}>{manageBillsOpen ? "▲" : "▼"}</span>
+        </button>
+        {manageBillsOpen && <div style={{ padding: "0 20px 20px", borderTop: `1px solid ${c.border}` }}>
+        <div style={{ display: "grid", gap: 8, paddingTop: 14 }}>
           {baseAccounts.map((account) => (
             <div key={account.id} style={{ borderRadius: 10, border: `1px solid ${editingAccountId === account.id ? c.ac : c.border}`, background: c.surf2, overflow: "hidden" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "10px 12px", flexWrap: "wrap" }}>
@@ -493,6 +519,16 @@ export default function SettingsPage(props) {
                     <div><div style={{ fontSize: 11, color: c.muted, marginBottom: 3 }}>PROMO ENDS</div><input type="month" value={editAcct.promoUntil ?? ""} onChange={(e) => setEditAcct((p) => ({ ...p, promoUntil: e.target.value }))} style={{ width: "100%", padding: "7px 8px", borderRadius: 7, border: `1px solid ${c.border}`, background: c.surf, color: c.tx, fontSize: 13, boxSizing: "border-box" }} /></div>
                     <div><div style={{ fontSize: 11, color: c.muted, marginBottom: 3 }}>APR AFTER PROMO</div><input type="number" step="0.0001" value={editAcct.aprAfterPromo ?? ""} onChange={(e) => setEditAcct((p) => ({ ...p, aprAfterPromo: e.target.value }))} style={{ width: "100%", padding: "7px 8px", borderRadius: 7, border: `1px solid ${c.border}`, background: c.surf, color: c.tx, fontSize: 13, boxSizing: "border-box" }} /></div>
                     <div><div style={{ fontSize: 11, color: c.muted, marginBottom: 3 }}>{moneyFieldLabel("Amount Paid", currencyCode).toUpperCase()}</div><input type="number" step="0.01" value={editAcct.paid ?? ""} onChange={(e) => setEditAcct((p) => ({ ...p, paid: e.target.value }))} style={{ width: "100%", padding: "7px 8px", borderRadius: 7, border: `1px solid ${c.border}`, background: c.surf, color: c.tx, fontSize: 13, boxSizing: "border-box" }} /></div>
+                    <div style={{ gridColumn: "1 / -1" }}><div style={{ fontSize: 11, color: c.muted, marginBottom: 3 }}>INTEREST TYPE</div>
+                      <select value={editAcct.interest_type || "variable_apr"} onChange={(e) => setEditAcct((p) => ({ ...p, interest_type: e.target.value }))} style={{ width: "100%", padding: "7px 8px", borderRadius: 7, border: `1px solid ${c.border}`, background: c.surf, color: c.tx, fontSize: 13 }}>
+                        <option value="variable_apr">Variable APR (Credit Cards)</option>
+                        <option value="fixed_apr">Fixed APR (Student / Personal Loans)</option>
+                        <option value="simple">Simple Interest (Auto Loans)</option>
+                        <option value="fixed_monthly">Fixed Monthly Fee</option>
+                        <option value="promo_zero">0% Promotional</option>
+                        <option value="interest_free">Interest-Free</option>
+                      </select>
+                    </div>
                   </div>
                   {!!normalizeMonthInput(editAcct.promoUntil) && <div style={{ fontSize: 12, color: c.muted, lineHeight: 1.5 }}>Promo debt will use {pct(normalizeAprDecimal(editAcct.promoApr || 0))} through {normalizeMonthInput(editAcct.promoUntil)}, then switch to {pct(normalizeAprDecimal(editAcct.aprAfterPromo === "" ? editAcct.apr : editAcct.aprAfterPromo || 0))}.</div>}
                   {!!editAcct.balance && <div style={{ fontSize: 12, color: c.tx2 }}>Current balance in Settings now saves to the same live record as Bills.</div>}
@@ -503,6 +539,7 @@ export default function SettingsPage(props) {
           ))}
           {!baseAccounts.length && <div style={{ fontSize: 13, color: c.muted }}>No active bills found.</div>}
         </div>
+        </div>}
       </div>
       <div ref={settingsDataRef} style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: c.muted, margin: "2px 0 8px" }}>Save & backup</div>
       <div style={{ background: firebaseStatus.configured ? c.acD : c.daD, border: `1px solid ${firebaseStatus.configured ? c.ac : c.da}`, borderRadius: 12, padding: "14px 16px", fontSize: 13, color: c.tx, marginBottom: 20 }}>

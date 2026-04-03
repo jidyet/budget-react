@@ -3,9 +3,10 @@ import { getEffectiveApr } from "./budgetUtils";
 export const MAX_SIMULATION_MONTHS = 240;
 
 const getScheduledPayment = (account) => {
+  const planned = Math.max(0, Number(account?.planned_v || 0));
   const paid = Math.max(0, Number(account?.paid_v || 0));
   const minimum = Math.max(0, Number(account?.min_due_v || 0));
-  return paid > 0 ? paid : minimum;
+  return planned > 0 ? planned : paid > 0 ? paid : minimum;
 };
 
 /**

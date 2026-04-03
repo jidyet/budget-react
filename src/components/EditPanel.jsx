@@ -24,8 +24,9 @@ export default function EditPanel({ a, theme, allCategories, onSave, onClose }) 
   const aprAfterPromoDecimal = normalizeAprDecimal(a.apr_after_promo ?? a.apr ?? 0);
 
   const buildInitialVals = () => ({
-    paid_v: String(a.paid_v ?? 0),
     min_due_v: String(a.min_due_v ?? 0),
+    planned_v: String(a.planned_v ?? 0),
+    paid_v: String(a.paid_v ?? 0),
     cur_bal: String(a.cur_bal ?? 0),
     purch_v: String(a.purch_v ?? 0),
     interest_paid_v: String(a.interest_paid_v ?? 0),
@@ -33,6 +34,7 @@ export default function EditPanel({ a, theme, allCategories, onSave, onClose }) 
     // account metadata
     category: String(a.category ?? ""),
     due_day: String(a.due_day ?? 0),
+    interest_type: String(a.interest_type ?? "variable_apr"),
     promo_apr_pct: String((promoAprDecimal * 100).toFixed(4).replace(/\.?0+$/, "") || "0"),
     promo_until: normalizeMonthInput(a.promo_until ?? ""),
     apr_after_promo_pct: String((aprAfterPromoDecimal * 100).toFixed(4).replace(/\.?0+$/, "") || "0"),
@@ -44,10 +46,13 @@ export default function EditPanel({ a, theme, allCategories, onSave, onClose }) 
   const projectedBal = Math.max(0, baseBalance - (Number(vals.paid_v) || 0) + (Number(vals.purch_v) || 0));
   const effectiveCurBal = manualBalEdited ? vals.cur_bal : projectedBal.toFixed(2);
   const currentAprDec = (parseFloat(vals.apr_pct) || 0) / 100;
-  const paymentAmount = Number(vals.paid_v) || 0;
+  const plannedAmount = Number(vals.planned_v) || 0;
+  const actualPaidAmount = Number(vals.paid_v) || 0;
+  // Breakdown always shows planned; actual only affects balance when explicitly set
+  const breakdownPayment = plannedAmount > 0 ? plannedAmount : actualPaidAmount;
   const monthlyInterest = (currentAprDec / 12) * (Number(effectiveCurBal) || 0);
-  const interestApplied = Math.min(paymentAmount, monthlyInterest);
-  const principalApplied = Math.max(0, paymentAmount - interestApplied);
+  const interestApplied = Math.min(breakdownPayment, monthlyInterest);
+  const principalApplied = Math.max(0, breakdownPayment - interestApplied);
   const minCoversInterest = (Number(vals.min_due_v) || 0) >= monthlyInterest;
 
   const D = theme === "dark";
@@ -95,14 +100,7 @@ export default function EditPanel({ a, theme, allCategories, onSave, onClose }) 
     if (key === "cur_bal") setManualBalEdited(true);
   };
 
-  const recordFields = [
-    { key: "paid_v",    label: moneyFieldLabel("Actual Paid") },
-    { key: "min_due_v", label: moneyFieldLabel("Min Due") },
-    { key: "cur_bal",   label: moneyFieldLabel("Updated Balance") },
-    { key: "purch_v",   label: moneyFieldLabel("New Purchases") },
-    { key: "interest_paid_v", label: moneyFieldLabel("Interest Paid") },
-    { key: "apr_pct",   label: "APR (%)", step: "0.001" },
-  ];
+  // recordFields no longer used — replaced by structured sections below
 
   const sectionLabel = (text) => (
     <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: c.muted, marginBottom: 3, fontFamily: "'Instrument Sans',sans-serif" }}>
@@ -129,45 +127,62 @@ export default function EditPanel({ a, theme, allCategories, onSave, onClose }) 
         </button>
       </div>
 
-      {/* Monthly record fields */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
-        {recordFields.map(({ key, label, step = "0.01" }) => (
-          <div key={key}>
-            {sectionLabel(label)}
-            <input
-              type="number"
-              step={step}
-              style={{
-                ...inp,
-                ...(key === "cur_bal"  ? { color: c.ac }    : {}),
-                ...(key === "apr_pct"  ? { color: c.amber }  : {}),
-              }}
-              value={key === "cur_bal" ? effectiveCurBal : vals[key]}
-              onChange={(e) => updateField(key, e.target.value)}
-            />
+      {/* ── Payment fields ── */}
+      <div style={{ borderRadius: 8, border: `1px solid ${c.border2}`, background: c.surf2, padding: "10px 12px", marginBottom: 8 }}>
+        <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: c.muted, marginBottom: 10, fontFamily: "'Instrument Sans',sans-serif" }}>
+          Payments
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+          <div>
+            {sectionLabel(moneyFieldLabel("Minimum Due"))}
+            <input type="number" step="0.01" style={inp} value={vals.min_due_v} onChange={(e) => updateField("min_due_v", e.target.value)} />
+            <div style={{ fontSize: 10, color: c.muted, marginTop: 3 }}>Required by lender — constant</div>
           </div>
-        ))}
+          <div>
+            {sectionLabel(moneyFieldLabel("Planned Payment"))}
+            <input type="number" step="0.01" style={{ ...inp, color: c.ac }} value={vals.planned_v} onChange={(e) => updateField("planned_v", e.target.value)} />
+            <div style={{ fontSize: 10, color: c.muted, marginTop: 3 }}>What you intend to pay — drives projections</div>
+          </div>
+        </div>
+        <div>
+          {sectionLabel(moneyFieldLabel("Actual Paid (optional)"))}
+          <input type="number" step="0.01" style={{ ...inp, color: actualPaidAmount > 0 ? c.ac : undefined }} value={vals.paid_v} onChange={(e) => updateField("paid_v", e.target.value)} />
+          <div style={{ fontSize: 10, color: c.muted, marginTop: 3 }}>
+            Only set if different from planned — overrides balance calc.
+            {actualPaidAmount === 0 && plannedAmount > 0 && <span style={{ color: c.ac }}> System will use {fx(plannedAmount)} as paid.</span>}
+          </div>
+        </div>
+      </div>
 
-        {/* Auto Balance Preview */}
+      {/* ── Balance fields ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+        <div>
+          {sectionLabel(moneyFieldLabel("Updated Balance"))}
+          <input type="number" step="0.01" style={{ ...inp, color: c.ac }} value={effectiveCurBal} onChange={(e) => updateField("cur_bal", e.target.value)} />
+        </div>
+        <div>
+          {sectionLabel(moneyFieldLabel("New Purchases"))}
+          <input type="number" step="0.01" style={inp} value={vals.purch_v} onChange={(e) => updateField("purch_v", e.target.value)} />
+        </div>
+        <div>
+          {sectionLabel(moneyFieldLabel("Interest Paid"))}
+          <input type="number" step="0.01" style={inp} value={vals.interest_paid_v} onChange={(e) => updateField("interest_paid_v", e.target.value)} />
+        </div>
+        <div>
+          {sectionLabel("APR (%)")}
+          <input type="number" step="0.001" style={{ ...inp, color: c.amber }} value={vals.apr_pct} onChange={(e) => updateField("apr_pct", e.target.value)} />
+        </div>
         <div>
           {sectionLabel(moneyFieldLabel("Auto Balance Preview"))}
-          <input
-            type="number"
-            step="0.01"
-            style={{ ...inp, background: c.surf, color: c.ac }}
-            value={projectedBal.toFixed(2)}
-            readOnly
-          />
-          <div style={{ fontSize: 11, color: c.muted, marginTop: 4, lineHeight: 1.4 }}>
-            Edit "Updated Balance" directly for a manual override.
-          </div>
+          <input type="number" step="0.01" style={{ ...inp, background: c.surf, color: c.ac }} value={projectedBal.toFixed(2)} readOnly />
+          <div style={{ fontSize: 10, color: c.muted, marginTop: 3 }}>Edit "Updated Balance" to override.</div>
         </div>
       </div>
 
       {/* Payment Breakdown */}
       <div style={{ borderRadius: 8, border: `1px solid ${c.border2}`, background: c.surf2, padding: "10px 12px", marginBottom: 8 }}>
         <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: c.muted, marginBottom: 8, fontFamily: "'Instrument Sans',sans-serif" }}>
-          Payment Breakdown
+          Payment Breakdown {breakdownPayment > 0 ? `(based on ${fx(breakdownPayment)} planned)` : ""}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
           <div style={{ textAlign: "center" }}>
@@ -223,6 +238,21 @@ export default function EditPanel({ a, theme, allCategories, onSave, onClose }) 
               value={vals.due_day}
               onChange={(e) => updateField("due_day", e.target.value)}
             />
+          </div>
+          <div style={{ gridColumn: "1 / -1" }}>
+            {sectionLabel("Interest Type")}
+            <select
+              style={sel}
+              value={vals.interest_type}
+              onChange={(e) => updateField("interest_type", e.target.value)}
+            >
+              <option value="variable_apr">Variable APR (Credit Cards)</option>
+              <option value="fixed_apr">Fixed APR (Student / Personal Loans)</option>
+              <option value="simple">Simple Interest (Auto Loans)</option>
+              <option value="fixed_monthly">Fixed Monthly Fee</option>
+              <option value="promo_zero">0% Promotional</option>
+              <option value="interest_free">Interest-Free</option>
+            </select>
           </div>
           <div>
             {sectionLabel("Promo APR (%)")}

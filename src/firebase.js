@@ -435,6 +435,12 @@ export const subscribeHouseholdForUser = (uid, callback) => {
                   console.error("subscribeHouseholdForUser directory backfill error:", writeError);
                 }
               }
+              // Stamp active:true on old household roots that predate the field —
+              // required for the non-member list query fallback in searchHouseholds.
+              if (item.active !== true) {
+                setDoc(householdRootRef(item.id), { active: true, updatedAt: serverTimestamp() }, { merge: true })
+                  .catch(() => {});
+              }
               return item;
             }
             const directoryData = directorySnap.data() || {};
@@ -645,9 +651,11 @@ export const searchHouseholds = async (term) => {
 
     // Fallback: search directly against active household roots so join-by-code/link
     // still works even if the directory mirror is missing or stale.
+    // Note: activeByCode needs a composite index (active, joinCode) — keep it in its
+    // own try-catch so a missing-index error doesn't kill the broader activeRoots scan.
     const activeRootMatches = [];
-    try {
-      if (parsed.joinCode) {
+    if (parsed.joinCode) {
+      try {
         const activeByCode = await getDocs(
           query(
             householdsRef(),
@@ -661,8 +669,11 @@ export const searchHouseholds = async (term) => {
             activeByCode.docs.map((d) => hydrateHousehold({ id: d.id, householdId: d.id, ...d.data() }))
           )).filter(Boolean)
         );
+      } catch {
+        // Composite index may not exist yet — fall through to full active-roots scan
       }
-
+    }
+    try {
       const activeRoots = await getDocs(query(householdsRef(), where("active", "==", true), fsLimit(200)));
       activeRootMatches.push(
         ...(await Promise.all(

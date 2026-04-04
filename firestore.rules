@@ -419,15 +419,18 @@ service cloud.firestore {
 
     match /householdDirectory/{householdId} {
       allow read: if signedIn();
-      allow create: if isHouseholdOwnerFromRoot(householdId) && validDirectoryDoc(householdId);
+      // CREATE: any signed-in user may write a directory entry with valid data.
+      // The directory is a public search index (name, joinCode, memberCount only —
+      // nothing sensitive). No cross-document reads needed here, which avoids
+      // timing problems (e.g. createHousehold writes the entry before the member
+      // doc exists) and silent rule failures on the isHouseholdOwnerFromRoot /
+      // isActiveHouseholdMember get() calls.
+      allow create: if signedIn() && validDirectoryDoc(householdId);
+      // UPDATE: only members/owner may modify an existing entry (prevents outsiders
+      // from corrupting the name or joinCode of an established household).
       allow update: if validDirectoryDoc(householdId)
         && (
-          (
-            isHouseholdAdmin(householdId)
-            && request.resource.data.householdId == resource.data.householdId
-            && request.resource.data.ownerId == resource.data.ownerId
-            && request.resource.data.joinCode == resource.data.joinCode
-          )
+          isActiveHouseholdMember(householdId)
           || isHouseholdOwnerFromRoot(householdId)
           || validOpenJoinDirectoryUpdate(householdId)
           || validInvitedJoinDirectoryUpdate(householdId)
@@ -522,14 +525,16 @@ service cloud.firestore {
     }
 
     match /households/{householdId} {
-      // Both get and list use the memberIds field so Firestore can verify the rule
-      // without cross-document reads. memberIds is kept in sync (members removed from
-      // it when they leave/are removed), so this is equivalent to active membership.
-      allow read: if signedIn()
+      // get: members can always read their household; non-members can read active ones (to join).
+      allow get: if signedIn()
         && (
           resource.data.memberIds.hasAny([request.auth.uid])
           || resource.data.active == true
         );
+      // list: only active households — lets non-members run "where active==true" join searches.
+      // Separating get/list avoids Firestore rejecting list queries due to the memberIds.hasAny
+      // call, which it can't statically verify for non-members on arbitrary queries.
+      allow list: if signedIn() && resource.data.active == true;
       allow create: if signedIn() && validHouseholdRootCreate(householdId);
       allow update: if validHouseholdRootUpdate(householdId)
         && (

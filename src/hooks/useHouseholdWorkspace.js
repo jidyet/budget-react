@@ -654,6 +654,7 @@ export default function useHouseholdWorkspace({
     joinSelectedHousehold,
     continueSoloMode,
     handleSaveHouseholdProfile,
+    syncDirectoryBeforeInvite,
     handleCopyHouseholdInvite,
     handleShareHouseholdInvite,
     handleApproveHouseholdRequest,

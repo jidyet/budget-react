@@ -21,6 +21,11 @@ functions/.env.local
 android/.gradle/
 android/app/build/
 android/app/src/main/assets/
+scripts/service-account-key.json
+scripts/*service-account*.json
+*.pem
+*.p12
+*.key.json
 firestore-debug.log
 .claude/
 .tmp_streamlit_review/

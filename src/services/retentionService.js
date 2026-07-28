@@ -3,7 +3,7 @@ export function buildCelebrationState({ milestones = [], progressScore, workspac
     const first = milestones[0];
     return {
       title: first.title || "Nice work",
-      detail: first.detail || "You moved forward.",
+      detail: first.detail || first.body || "You made progress this month.",
       tone: "success",
     };
   }
@@ -38,4 +38,3 @@ export function buildReturnPrompt({ reminderPreferences, pwaInstalled, offlineRe
   }
   return null;
 }
-

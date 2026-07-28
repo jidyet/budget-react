@@ -8,12 +8,14 @@ export default function useHouseholdMembers(householdId) {
 
   useEffect(() => {
     if (!householdId) {
-      setMembers([]);
-      setRequests([]);
-      setLoading(false);
+      queueMicrotask(() => {
+        setMembers([]);
+        setRequests([]);
+        setLoading(false);
+      });
       return () => {};
     }
-    setLoading(true);
+    queueMicrotask(() => setLoading(true));
     const unsubMembers = subscribeMembers(householdId, (items) => {
       setMembers(items);
       setLoading(false);

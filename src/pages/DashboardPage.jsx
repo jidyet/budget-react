@@ -1,36 +1,32 @@
 import { MONTHS } from "../data/mockAccounts";
+import { useState, useCallback } from "react";
 import HouseholdHomePage from "./HouseholdHomePage";
 import useDebtProgress from "../hooks/useDebtProgress";
 import useMilestones from "../hooks/useMilestones";
 import useNextMove from "../hooks/useNextMove";
-import useProgressScore from "../hooks/useProgressScore";
-import useHeadsUp from "../hooks/useHeadsUp";
-import useProgressNotes from "../hooks/useProgressNotes";
 import useHouseholdActivity from "../hooks/useHouseholdActivity";
-import useMomentum from "../hooks/useMomentum";
-import useNudges from "../hooks/useNudges";
-import useWeeklySummary from "../hooks/useWeeklySummary";
-import useDailyCheckIn from "../hooks/useDailyCheckIn";
-import ProgressHeroCard from "../components/progress/ProgressHeroCard";
-import DebtLeftCard from "../components/progress/DebtLeftCard";
-import PaidThisMonthCard from "../components/progress/PaidThisMonthCard";
 import AlmostDoneCard from "../components/progress/AlmostDoneCard";
 import MonthsSoonerCard from "../components/progress/MonthsSoonerCard";
 import MilestoneCard from "../components/progress/MilestoneCard";
 import ProgressDebtList from "../components/progress/ProgressDebtList";
-import DailyCheckInCard from "../components/habit/DailyCheckInCard";
-import NudgeRow from "../components/habit/NudgeRow";
-import MomentumCard from "../components/habit/MomentumCard";
-import WeeklySummaryCard from "../components/habit/WeeklySummaryCard";
-import HouseholdEncouragementCard from "../components/habit/HouseholdEncouragementCard";
-import UpgradeCard from "../components/billing/UpgradeCard";
-import GuidanceStack from "../components/guidance/GuidanceStack";
-import CelebrationBanner from "../components/ui/CelebrationBanner";
-import LaunchSupportCard from "../components/ui/LaunchSupportCard";
 import EmptyStateCard from "../components/ui/EmptyStateCard";
-import { canUseFeature, getUpgradeMessage } from "../utils/planLimits";
-import { buildCelebrationState } from "../services/retentionService";
-import { buildSoftLaunchPrompt } from "../services/softLaunchService";
+import GuidanceCard from "../components/ui/GuidanceCard";
+import HouseholdActivityStrip from "../components/household/HouseholdActivityStrip";
+import { canUseFeature } from "../utils/planLimits";
+import { fx } from "../utils/budgetUtils";
+import HomepageHero from "../components/progress/HomepageHero";
+import FocusDebtCard from "../components/progress/FocusDebtCard";
+import DueNextCard from "../components/progress/DueNextCard";
+import AICoachCard from "../components/ai/AICoachCard";
+import {
+  buildCoachState,
+  summarizeCoachBillMix,
+  buildCoachHouseholdSummary,
+  buildCoachMonthKey,
+  summarizeCoachAccounts,
+  summarizeLargestBalances,
+} from "../services/aiCoachPayload";
+import { canAccessAICoach } from "../config/launchFlags";
 
 export default function DashboardPage(props) {
   const {
@@ -43,37 +39,45 @@ export default function DashboardPage(props) {
     setSelYear,
     lblStyle,
     selStyle,
-    totalBal,
     totalPaid,
     totalDue,
     remaining,
     dueSoon,
-    showDueSoon,
-    setShowDueSoon,
+    homeDueBills = [],
     allAccts,
     getPrevRecord,
     openDueNextView,
     setPage,
     workspaceMode,
     activeHouseholdId,
-    monthKey,
-    householdProfile,
     householdMembers,
     householdRequests,
     canManageHousehold,
+    incomingHouseholdInvites = [],
     handleApproveHouseholdRequest,
     handleRejectHouseholdRequest,
+    handleAcceptHouseholdInvite,
+    handleDeclineHouseholdInvite,
     payoffSimulate,
     subscription,
     openBillingPage,
     reducedMotion,
     openFeedback,
-    reminderPreferences,
-    pwaInstalled,
+    onOpenHouseholdSetupCreate,
+    onOpenHouseholdSetupJoin,
+    householdInviteLink,
+    onCopyInvite,
+    onShareInvite,
+    totalInc,
+    receivedIncomeTotal,
+    netAfterBills,
+    recurringIncomeEntries,
+    recurringPayPeriods,
+    incomeReceipts,
+    setShowIncome,
+    markPaid,
     launchFlags,
-    softLaunchState,
-    patchSoftLaunchState,
-    onInstallApp,
+    founderAccount,
   } = props;
 
   const progress = useDebtProgress({
@@ -87,34 +91,79 @@ export default function DashboardPage(props) {
     workspaceMode,
     householdMembers,
   });
+
+  // Shared classification helper — used by Fix 1 and Fix 4
+  const isMonthlyAccount = (a) => {
+    if (a?.startsOverMonthly === true) return true;
+    if (String(a?.billType || "").toLowerCase() === "monthly") return true;
+    if (String(a?.type || "").toLowerCase() === "monthly") return true;
+    return false;
+  };
+  const debtOnly   = (progress.progressByDebt || []).filter((a) => !isMonthlyAccount(a));
+  // Fix 4: lowest-balance debt not yet paid off
+  const closestAccount =
+    debtOnly
+      .filter((a) => Number(a.cur_bal ?? 0) > 0.01)
+      .sort((a, b) => Number(a.cur_bal) - Number(b.cur_bal))[0] ?? null;
+
   const milestones = useMilestones({ progress, accounts: allAccts, getPrevRecord });
   const nextMove = useNextMove({ progress, accounts: allAccts, dueSoon, getPrevRecord, workspaceMode });
-  const { activity, loading: activityLoading } = useHouseholdActivity(activeHouseholdId, 8);
-  const momentum = useMomentum({ accounts: allAccts, activity, progress, getPrevRecord });
-  const weeklySummary = useWeeklySummary({ workspaceMode, progress, momentum, dueSoon, activity });
-  const nudges = useNudges({ dueSoon, progress, momentum, activity, workspaceMode });
-  const checkIn = useDailyCheckIn({ workspaceMode, dueSoon, progress, nextMove, momentum, weeklySummary, activity });
-  const progressScore = useProgressScore({ accounts: allAccts, progress, momentum, activity, workspaceMode, getPrevRecord });
-  const headsUps = useHeadsUp({ accounts: allAccts, progress, dueSoon, momentum, getPrevRecord });
-  const progressNotes = useProgressNotes({ progress, milestones, momentum, workspaceMode, activity });
-  const celebration = buildCelebrationState({ milestones, progressScore, workspaceMode, activity });
-  const softLaunchPrompt = buildSoftLaunchPrompt({
-    softLaunchState,
-    reminderPreferences,
-    pwaInstalled,
-    progress,
-    milestones,
-    momentum,
-    launchFlags,
-  });
-  const periodLabel = `${MONTHS[selMonth - 1]} ${selYear}`;
-  const dueSoonItems = dueSoon.slice(0, isMobile ? 4 : 6);
+  const { activity } = useHouseholdActivity(activeHouseholdId, 8);
+
+  const allDueSoon = homeDueBills.length ? homeDueBills : dueSoon;
+
+  // Due soon list — all upcoming bills excluding the one already shown in DueNextCard
+  const dueSoonList = allDueSoon.slice(1, isMobile ? 7 : 13);
+
   const canSeeAdvancedProgress = canUseFeature(subscription, "advancedProgress");
-  const canSeeWeeklySummaries = canUseFeature(subscription, "weeklySummaries");
-  const canSeeReminders = canUseFeature(subscription, "reminders");
   const hasAccounts = allAccts.length > 0;
-  const pendingHouseholdRequests = (householdRequests || []).filter((request) => request?.status === "pending");
+  const isHouseholdDashboard = hasAccounts && workspaceMode === "household" && activeHouseholdId;
+  const shouldShowHouseholdEntry = !activeHouseholdId;
+  const dueWithinThreeDaysCount = dueSoon.filter((item) => Number(item?.d_left) <= 3).length;
+  const pendingHouseholdRequests = (householdRequests || []).filter((r) => r?.status === "pending");
   const homepageJoinRequest = canManageHousehold ? pendingHouseholdRequests[0] : null;
+  const homepageInvite = !activeHouseholdId
+    ? (incomingHouseholdInvites || []).find((item) => item?.status === "pending")
+    : null;
+  const homepageInviteRequest = !activeHouseholdId
+    ? (incomingHouseholdInvites || []).find((item) => item?.status === "requested")
+    : null;
+  const [inviteCopied, setInviteCopied] = useState(false);
+  const handleInviteCopy = useCallback(() => {
+    if (!householdInviteLink) return;
+    onCopyInvite?.(householdInviteLink);
+    setInviteCopied(true);
+    setTimeout(() => setInviteCopied(false), 2400);
+  }, [householdInviteLink, onCopyInvite]);
+
+  const aiCoachPayload = hasAccounts ? {
+    askType: "overview",
+    monthKey: buildCoachMonthKey(selMonth, selYear),
+    workspaceMode,
+    householdSummary: buildCoachHouseholdSummary({ workspaceMode, householdMembers }),
+    accounts: summarizeCoachAccounts(progress.progressByDebt, 6),
+    largestBalances: summarizeLargestBalances(allAccts, 3),
+    billMix: summarizeCoachBillMix(allAccts),
+    overviewSummary: {
+      totalDebtLeft: progress.totalDebtLeft,
+      paidThisMonth: progress.paidThisMonth,
+      totalDue: progress.totalDue,
+      totalReduction: progress.totalReduction,
+      monthsSooner: progress.monthsSooner,
+      projectedPayoffDate: progress.projectedPayoffDate,
+      nextFocusDebt: progress.nextFocusDebt ? { name: progress.nextFocusDebt.name } : null,
+      almostDoneDebt: progress.almostDoneDebt ? { name: progress.almostDoneDebt.name, balance: progress.almostDoneDebt.currentBalance } : null,
+      nextMove: nextMove ? { body: nextMove.body, detail: nextMove.detail, action: nextMove.action } : null,
+      dueWithinThreeDaysCount,
+    },
+    coachState: buildCoachState({
+      askType: "overview",
+      accounts: allAccts,
+    }),
+  } : null;
+
+  const aiCoachVisible = canAccessAICoach({ founderAccount });
+
   const heroButtonStyle = {
     padding: "11px 15px",
     borderRadius: 999,
@@ -126,114 +175,316 @@ export default function DashboardPage(props) {
     cursor: "pointer",
     boxShadow: `0 10px 24px rgba(0,0,0,0.08)`,
   };
-  const openCheckInAction = () => {
-    if (checkIn?.action === "due-next") {
-      openDueNextView();
-      return;
-    }
-    setPage(checkIn?.action === "payoff" ? "payoff" : "bills");
+  const billingTextLinkStyle = {
+    background: "none",
+    border: "none",
+    padding: 0,
+    color: c.ac,
+    fontSize: 12,
+    fontWeight: 800,
+    cursor: "pointer",
+    textDecoration: "underline",
+    textUnderlineOffset: "2px",
+    whiteSpace: "nowrap",
   };
-  const handleLaunchPrimary = async () => {
-    if (!softLaunchPrompt) return;
-    if (softLaunchPrompt.kind === "welcome" && !pwaInstalled) {
-      const installed = await onInstallApp?.();
-      if (!installed) return;
-      patchSoftLaunchState({ welcomeDismissed: true, lastPromptAt: new Date().toISOString() });
-      return;
+  const openAddBillPage = useCallback(() => {
+    if (typeof window !== "undefined") {
+      window.sessionStorage.setItem("__tracktozero_open_add_bill__", "1");
     }
-    if (softLaunchPrompt.kind === "review") {
-      patchSoftLaunchState({ reviewCompleted: true, lastPromptAt: new Date().toISOString() });
-      openFeedback("soft-launch");
-      return;
-    }
-    if (softLaunchPrompt.kind === "return") {
-      patchSoftLaunchState({ lastPromptAt: new Date().toISOString() });
-      setPage("bills");
-      return;
-    }
-    patchSoftLaunchState({ lastPromptAt: new Date().toISOString() });
+    setPage("settings");
+  }, [setPage]);
+
+  // Shared small-card style for monthly summary
+  const monthCardStyle = {
+    padding: isMobile ? "12px 14px" : "14px 16px",
+    borderRadius: 16,
+    background: c.surf,
+    border: `1px solid ${c.border}`,
+    display: "grid",
+    gap: 4,
   };
-  const handleLaunchSecondary = () => {
-    if (!softLaunchPrompt) return;
-    if (softLaunchPrompt.kind === "review") {
-      patchSoftLaunchState({ reviewDismissed: true, lastPromptAt: new Date().toISOString() });
-      return;
-    }
-    if (softLaunchPrompt.kind === "welcome") {
-      patchSoftLaunchState({ welcomeDismissed: true, lastPromptAt: new Date().toISOString() });
-      return;
-    }
-    patchSoftLaunchState({ lastPromptAt: new Date().toISOString() });
+  const monthLabelStyle = {
+    fontSize: 10,
+    fontWeight: 900,
+    textTransform: "uppercase",
+    letterSpacing: "0.09em",
+    fontFamily: "'Instrument Sans',sans-serif",
+  };
+  const monthValueStyle = {
+    fontFamily: "'DM Mono',monospace",
+    fontSize: isMobile ? 18 : 20,
+    fontWeight: 700,
+    lineHeight: 1.1,
   };
 
   return (
     <div style={{ opacity: mounted ? 1 : 0, transition: "opacity .3s" }}>
-      <CelebrationBanner palette={c} celebration={celebration} reducedMotion={reducedMotion} />
-      <div style={{ marginBottom: 14 }}>
-        <LaunchSupportCard
-          palette={c}
-          prompt={softLaunchPrompt}
-          onPrimary={handleLaunchPrimary}
-          onSecondary={handleLaunchSecondary}
-        />
-      </div>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "stretch",
-          gap: 14,
-          flexWrap: "wrap",
-          marginBottom: 16,
-          background: `linear-gradient(135deg, ${c.ac}12, ${c.surf} 38%, ${c.surf2} 82%, ${c.wa}10)`,
-          border: `1px solid ${c.border}`,
-          borderRadius: 22,
-          padding: isMobile ? "16px 16px" : "18px 20px",
-          boxShadow: `0 18px 40px ${c.ac}10`,
-        }}
-      >
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: c.muted, marginBottom: 4 }}>
-            Overview
-          </div>
-          <div style={{ fontSize: isMobile ? 24 : 28, fontWeight: 900, color: c.tx, marginBottom: 4 }}>
-            {workspaceMode === "household" ? "Shared progress" : "Your progress"}
-          </div>
-          <div style={{ fontSize: 13, color: c.tx2, lineHeight: 1.5 }}>
-            Where you are now, what changed, and what to do next.
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", background: `${c.surf}C8`, border: `1px solid ${c.border}`, borderRadius: 18, padding: "10px 12px" }}>
-          <div style={{ minWidth: isMobile ? 110 : 120 }}>
-            <div style={lblStyle}>Month</div>
-            <select style={selStyle} value={selMonth} onChange={(event) => setSelMonth(Number(event.target.value))}>
-              {MONTHS.map((month, index) => (
-                <option key={month} value={index + 1}>
-                  {month}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div style={{ minWidth: 90 }}>
-            <div style={lblStyle}>Year</div>
-            <select style={selStyle} value={selYear} onChange={(event) => setSelYear(Number(event.target.value))}>
-              {[2024, 2025, 2026, 2027].map((year) => (
-                <option key={year} value={year}>
-                  {year}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </div>
 
-      {!!dueSoonItems.length && (
+      {/* ── 1. HERO — Total debt ─────────────────────────────────────────────── */}
+      <HomepageHero
+        palette={c}
+        isMobile={isMobile}
+        isHousehold={!!isHouseholdDashboard}
+        progress={progress}
+        selMonth={selMonth}
+        setSelMonth={setSelMonth}
+        selYear={selYear}
+        setSelYear={setSelYear}
+        lblStyle={lblStyle}
+        selStyle={selStyle}
+        reducedMotion={reducedMotion}
+      />
+
+      {/* ── 2. AI COACH ─────────────────────────────────────────────────────── */}
+      <AICoachCard
+        palette={c}
+        isMobile={isMobile}
+        requestPayload={aiCoachPayload}
+        featureEnabled={launchFlags?.aiCoachEnabled}
+        accessAllowed={aiCoachVisible}
+        scopeLabel="your current monthly overview"
+        testerOnly={launchFlags?.aiCoachTesterOnly}
+        quickPrompts={[
+          { key: "overview_focus", label: "What should I focus on?" },
+          { key: "overview_change", label: "What changed this month?" },
+          { key: "overview_track", label: "Am I on track?" },
+        ]}
+      />
+
+      {/* ── 3. NO ACCOUNTS EMPTY STATE ──────────────────────────────────────── */}
+      {!hasAccounts && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ marginBottom: 10 }}>
+            <GuidanceCard
+              palette={c}
+              icon="i"
+              title="Start your dashboard"
+              instruction="Go to Settings → Bills & Budget to add a bill, or open Import or upload."
+              result="This screen will start showing progress, due items, and your next move."
+            />
+          </div>
+          <EmptyStateCard
+            palette={c}
+            title="Start your progress here"
+            message="Add your first bill or upload a statement. Once you do, this screen will show what changed and what to do next."
+            action={
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button type="button" style={heroButtonStyle} onClick={openAddBillPage}>Add a bill</button>
+                <button type="button" style={heroButtonStyle} onClick={() => setPage("upload")}>Import or upload</button>
+              </div>
+            }
+          />
+        </div>
+      )}
+
+      {/* ── 4. HOUSEHOLD ALERTS ─────────────────────────────────────────────── */}
+      {!!homepageJoinRequest && (
+        <div
+          style={{
+            marginBottom: 14,
+            background: `linear-gradient(135deg, ${c.ac}14, ${c.surf} 34%, ${c.surf2} 84%, ${c.wa}12)`,
+            border: `1px solid ${c.border}`,
+            borderRadius: 20,
+            padding: isMobile ? "14px 14px" : "16px 18px",
+            boxShadow: `0 14px 30px rgba(0,0,0,0.06)`,
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: c.muted, marginBottom: 4 }}>Heads up</div>
+              <div style={{ fontSize: 22, fontWeight: 900, color: c.tx, marginBottom: 4 }}>
+                {pendingHouseholdRequests.length > 1 ? `${pendingHouseholdRequests.length} people want to join` : "Someone wants to join"}
+              </div>
+              <div style={{ fontSize: 13, color: c.tx2, lineHeight: 1.5 }}>
+                {homepageJoinRequest.displayName || homepageJoinRequest.email || "A new member"} is waiting for your yes.
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button type="button" style={{ ...heroButtonStyle, background: c.ac, border: "none" }} onClick={() => handleApproveHouseholdRequest?.(homepageJoinRequest.uid || homepageJoinRequest.id)}>Let them in</button>
+              <button type="button" style={{ ...heroButtonStyle, background: c.surf, color: c.tx }} onClick={() => handleRejectHouseholdRequest?.(homepageJoinRequest.uid || homepageJoinRequest.id)}>Not now</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!!homepageInvite && (
+        <div
+          style={{
+            marginBottom: 14,
+            background: `linear-gradient(135deg, ${c.ok}12, ${c.surf} 34%, ${c.surf2} 84%, ${c.ac}10)`,
+            border: `1px solid ${c.border}`,
+            borderRadius: 20,
+            padding: isMobile ? "14px 14px" : "16px 18px",
+            boxShadow: `0 14px 30px rgba(0,0,0,0.06)`,
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: c.muted, marginBottom: 4 }}>Invite</div>
+              <div style={{ fontSize: 22, fontWeight: 900, color: c.tx, marginBottom: 4 }}>{homepageInvite.householdName || "Shared home"} invited you</div>
+              <div style={{ fontSize: 13, color: c.tx2, lineHeight: 1.5 }}>{homepageInvite.invitedByName || homepageInvite.invitedByEmail || "Someone"} wants to share progress with you.</div>
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button type="button" style={{ ...heroButtonStyle, background: c.ac, border: "none" }} onClick={() => handleAcceptHouseholdInvite?.(homepageInvite.householdId || homepageInvite.id)}>Accept invite</button>
+              <button type="button" style={{ ...heroButtonStyle, background: c.surf, color: c.tx }} onClick={() => handleDeclineHouseholdInvite?.(homepageInvite.householdId || homepageInvite.id)}>Dismiss</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!!homepageInviteRequest && (
+        <div
+          style={{
+            marginBottom: 14,
+            background: `linear-gradient(135deg, ${c.wa}12, ${c.surf} 34%, ${c.surf2} 84%, ${c.ac}10)`,
+            border: `1px solid ${c.border}`,
+            borderRadius: 20,
+            padding: isMobile ? "14px 14px" : "16px 18px",
+            boxShadow: `0 14px 30px rgba(0,0,0,0.06)`,
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: c.muted, marginBottom: 4 }}>Request sent</div>
+            <div style={{ fontSize: 22, fontWeight: 900, color: c.tx, marginBottom: 4 }}>Waiting on {homepageInviteRequest.householdName || "household"} to reply</div>
+            <div style={{ fontSize: 13, color: c.tx2, lineHeight: 1.5 }}>Your join request is in. This will switch over as soon as it gets approved.</div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 5. MONTHLY SUMMARY ──────────────────────────────────────────────── */}
+      {hasAccounts && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr",
+            gap: 10,
+            marginBottom: 14,
+          }}
+        >
+          <div style={monthCardStyle}>
+            <div style={{ ...monthLabelStyle, color: c.muted }}>Due this month</div>
+            <div style={{ ...monthValueStyle, color: c.tx }}>{fx(totalDue)}</div>
+          </div>
+          <div style={monthCardStyle}>
+            <div style={{ ...monthLabelStyle, color: c.go }}>Paid this month</div>
+            <div style={{ ...monthValueStyle, color: c.go }}>{fx(totalPaid)}</div>
+          </div>
+          <div
+            style={{
+              ...monthCardStyle,
+              ...(isMobile ? { gridColumn: "1 / -1" } : {}),
+            }}
+          >
+            <div style={{ ...monthLabelStyle, color: remaining > 0 ? c.wa : c.go }}>
+              Left this month
+            </div>
+            <div style={{ ...monthValueStyle, color: remaining > 0 ? c.wa : c.go }}>
+              {fx(remaining)}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 6. MAIN ACTION CARDS — Due next + Focus debt ────────────────────── */}
+      {hasAccounts && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+            gap: 12,
+            marginBottom: 14,
+          }}
+        >
+          <DueNextCard
+            palette={c}
+            allDueSoon={allDueSoon}
+            isMobile={isMobile}
+            onMarkPaid={markPaid}
+            onOpenBill={(id) => openDueNextView(id)}
+          />
+          <FocusDebtCard
+            palette={c}
+            allAccts={allAccts}
+            progress={progress}
+            isMobile={isMobile}
+            onOpenBill={() => setPage("bills")}
+          />
+        </div>
+      )}
+
+      {/* ── 7. SECONDARY CARDS — Closest to gone + Finishing early ──────────── */}
+      {hasAccounts && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr",
+            gap: 12,
+            marginBottom: 14,
+          }}
+        >
+          <AlmostDoneCard palette={c} debt={closestAccount} reducedMotion={reducedMotion} />
+          <MonthsSoonerCard
+            palette={c}
+            monthsSooner={progress.monthsSooner}
+            label={progress.monthsSooner > 0 ? progress.monthsSoonerLabel : "Nice work"}
+            detail={progress.monthsSooner > 0 ? `Projected finish ${progress.projectedPayoffDate}` : `${progress.totalReductionLabel} down this month`}
+          />
+        </div>
+      )}
+
+      {/* ── 8. PROGRESS BY DEBT + MILESTONES ────────────────────────────────── */}
+      {hasAccounts && (
+        <div style={{ marginBottom: 16 }}>
+          {!canSeeAdvancedProgress && (
+            <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginBottom: 10 }}>
+              <button type="button" onClick={openBillingPage} style={billingTextLinkStyle}>
+                See billing
+              </button>
+            </div>
+          )}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: isMobile ? "1fr" : "1.1fr .9fr",
+              gap: 12,
+            }}
+          >
+            <ProgressDebtList palette={c} debts={debtOnly} activity={activity} reducedMotion={reducedMotion} />
+            <MilestoneCard
+              palette={c}
+              milestones={milestones}
+              reducedMotion={reducedMotion}
+              isMobile={isMobile}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ── 9. HOUSEHOLD ACTIVITY STRIP ─────────────────────────────────────── */}
+      {isHouseholdDashboard && (
+        <HouseholdActivityStrip
+          palette={c}
+          isMobile={isMobile}
+          members={householdMembers}
+          activity={activity}
+          pendingRequests={pendingHouseholdRequests}
+          canManageHousehold={canManageHousehold}
+          inviteLink={householdInviteLink}
+          onShareInvite={onShareInvite}
+          onOpenSetup={onOpenHouseholdSetupCreate}
+          onApprove={handleApproveHouseholdRequest}
+          onReject={handleRejectHouseholdRequest}
+        />
+      )}
+
+      {/* ── 10. DUE SOON — remaining bills after the Due next card ──────────── */}
+      {dueSoonList.length > 0 && (
         <div style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: c.muted, marginBottom: 8 }}>
-            Coming up
+          <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: c.muted, marginBottom: 8, fontFamily: "'Instrument Sans',sans-serif" }}>
+            Due soon
           </div>
           <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4, scrollbarWidth: "none" }}>
-            {dueSoonItems.map((item) => (
+            {dueSoonList.map((item) => (
               <button
                 key={item.id}
                 type="button"
@@ -249,246 +500,36 @@ export default function DashboardPage(props) {
                   boxShadow: `0 14px 28px ${c.ac}10`,
                 }}
               >
-                <div style={{ fontSize: 11, fontWeight: 900, color: c.ac, marginBottom: 6 }}>
-                  {item.d_left === 0 ? "Due today" : `Due in ${item.d_left}d`}
+                <div style={{ fontSize: 11, fontWeight: 900, color: c.ac, marginBottom: 6, fontFamily: "'Instrument Sans',sans-serif" }}>
+                  {item.d_left === 0 ? "Due today" : `Due in ${item.daysUntilDue ?? item.d_left}d`}
                 </div>
                 <div style={{ fontSize: 14, fontWeight: 900, color: c.tx, marginBottom: 6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {item.name}
                 </div>
-                <div style={{ fontSize: 12, color: c.tx2 }}>
-                  {item.owner}
-                </div>
+                <div style={{ fontSize: 12, color: c.tx2, fontFamily: "'Instrument Sans',sans-serif" }}>{item.owner}</div>
               </button>
             ))}
           </div>
         </div>
       )}
 
-      {!!homepageJoinRequest && (
-        <div
-          style={{
-            marginBottom: 14,
-            background: `linear-gradient(135deg, ${c.ac}14, ${c.surf} 34%, ${c.surf2} 84%, ${c.wa}12)`,
-            border: `1px solid ${c.border}`,
-            borderRadius: 20,
-            padding: isMobile ? "14px 14px" : "16px 18px",
-            boxShadow: `0 14px 30px rgba(0,0,0,0.06)`,
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: c.muted, marginBottom: 4 }}>
-                Heads up
-              </div>
-              <div style={{ fontSize: 22, fontWeight: 900, color: c.tx, marginBottom: 4 }}>
-                {pendingHouseholdRequests.length > 1 ? `${pendingHouseholdRequests.length} people want to join` : "Someone wants to join"}
-              </div>
-              <div style={{ fontSize: 13, color: c.tx2, lineHeight: 1.5 }}>
-                {homepageJoinRequest.displayName || homepageJoinRequest.email || "A new member"} is waiting for your yes.
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                style={{
-                  ...heroButtonStyle,
-                  background: c.ac,
-                  border: "none",
-                }}
-                onClick={() => handleApproveHouseholdRequest?.(homepageJoinRequest.uid || homepageJoinRequest.id)}
-              >
-                Let them in
-              </button>
-              <button
-                type="button"
-                style={{
-                  ...heroButtonStyle,
-                  background: c.surf,
-                  color: c.tx,
-                }}
-                onClick={() => handleRejectHouseholdRequest?.(homepageJoinRequest.uid || homepageJoinRequest.id)}
-              >
-                Not now
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* ── 11. HOUSEHOLD INCOME CONTENT ────────────────────────────────────── */}
+      {hasAccounts && isHouseholdDashboard && (
+        <HouseholdHomePage
+          palette={c}
+          householdId={activeHouseholdId}
+          totalIncome={totalInc}
+          receivedIncomeTotal={receivedIncomeTotal}
+          netAfterBills={netAfterBills}
+          recurringIncomeEntries={recurringIncomeEntries}
+          recurringPayPeriods={recurringPayPeriods}
+          incomeReceipts={incomeReceipts}
+          onOpenIncome={() => setShowIncome(true)}
+        />
       )}
 
-      {!hasAccounts && (
-        <div style={{ marginBottom: 16 }}>
-          <EmptyStateCard
-            palette={c}
-            title="Start your progress here"
-            message="Add your first bill, import a sheet, or upload a statement. Once you do, this home screen will show what changed and what to do next."
-            action={
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <button type="button" style={heroButtonStyle} onClick={() => setPage("settings")}>
-                  Add a bill
-                </button>
-                <button type="button" style={heroButtonStyle} onClick={() => setPage("upload")}>
-                  Import or upload
-                </button>
-              </div>
-            }
-          />
-        </div>
-      )}
-
-      {hasAccounts && <div style={{ display:"grid", gridTemplateColumns:isMobile ? "1fr" : "1.1fr .9fr", gap:12, marginBottom:16 }}>
-        <DailyCheckInCard palette={c} checkIn={checkIn} onAction={openCheckInAction} />
-        <div style={{ display:"grid", gap:12 }}>
-          <MomentumCard palette={c} momentum={momentum} />
-          {canSeeReminders ? (
-            <NudgeRow palette={c} nudges={nudges} />
-          ) : (
-            <UpgradeCard
-              palette={c}
-              compact
-              title={getUpgradeMessage("reminders")}
-              detail="Add calm reminders and gentle nudges when you want a little more support."
-              cta="See billing"
-              onClick={openBillingPage}
-            />
-          )}
-        </div>
-      </div>}
-
-      {hasAccounts && <GuidanceStack
-        palette={c}
-        isMobile={isMobile}
-        score={progressScore}
-        headsUps={headsUps}
-        nextMove={nextMove}
-        notes={progressNotes}
-      />}
-
-      {hasAccounts && (workspaceMode === "household" && activeHouseholdId ? (
-        <>
-          <HouseholdHomePage
-            palette={c}
-            householdId={activeHouseholdId}
-            monthKey={monthKey}
-            householdProfile={householdProfile}
-            householdMembers={householdMembers}
-            householdRequests={householdRequests}
-            canManageHousehold={canManageHousehold}
-            handleApproveHouseholdRequest={handleApproveHouseholdRequest}
-            handleRejectHouseholdRequest={handleRejectHouseholdRequest}
-            dueSoon={dueSoon}
-            totalBal={totalBal}
-            totalPaid={totalPaid}
-            totalDue={totalDue}
-            remaining={remaining}
-            progress={progress}
-            activity={activity}
-            activityLoading={activityLoading}
-            momentum={momentum}
-            weeklySummary={weeklySummary}
-          />
-          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.1fr .9fr", gap: 12, marginBottom: 16 }}>
-            {canSeeAdvancedProgress ? (
-              <ProgressDebtList palette={c} debts={progress.progressByDebt} />
-            ) : (
-              <UpgradeCard
-                palette={c}
-                title={getUpgradeMessage("advancedProgress")}
-                detail="See richer debt rings and deeper shared momentum when you want the fuller picture."
-                cta="See billing"
-                onClick={openBillingPage}
-              />
-            )}
-            <div style={{ display:"grid", gap:12 }}>
-              <HouseholdEncouragementCard palette={c} activity={activity} memberCount={householdMembers.length} momentum={momentum} />
-              {canSeeWeeklySummaries ? (
-                <MilestoneCard palette={c} milestones={milestones} />
-              ) : (
-                <UpgradeCard
-                  palette={c}
-                  compact
-                  title={getUpgradeMessage("weeklySummaries")}
-                  detail="Weekly recaps and milestone moments land here when you want more shared momentum."
-                  cta="See billing"
-                  onClick={openBillingPage}
-                />
-              )}
-            </div>
-          </div>
-        </>
-      ) : (
-        <>
-          <ProgressHeroCard palette={c} progress={progress} workspaceMode={workspaceMode} />
-          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, minmax(0, 1fr))", gap: 12, marginBottom: 14 }}>
-            <DebtLeftCard palette={c} value={progress.totalDebtLeftLabel} detail="Debt left" />
-            <PaidThisMonthCard palette={c} value={progress.paidThisMonthLabel} detail="Paid this month" />
-            <AlmostDoneCard palette={c} debt={progress.almostDoneDebt} />
-            {canSeeAdvancedProgress ? (
-              <MonthsSoonerCard
-                palette={c}
-                label={progress.monthsSooner > 0 ? progress.monthsSoonerLabel : "Nice work"}
-                detail={progress.monthsSooner > 0 ? `Projected finish ${progress.projectedPayoffDate}` : `${progress.totalReductionLabel} down this month`}
-              />
-            ) : (
-              <UpgradeCard
-                palette={c}
-                compact
-                title="See your full plan"
-                detail="Projected finish dates and payoff acceleration live here when you want more detail."
-                cta="See billing"
-                onClick={openBillingPage}
-              />
-            )}
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.1fr .9fr", gap: 12, marginBottom: 16 }}>
-            {canSeeAdvancedProgress ? (
-              <ProgressDebtList palette={c} debts={progress.progressByDebt} />
-            ) : (
-              <UpgradeCard
-                palette={c}
-                title={getUpgradeMessage("advancedProgress")}
-                detail="Richer progress visuals, closer wins, and deeper payoff cues show up here with premium."
-                cta="See billing"
-                onClick={openBillingPage}
-              />
-            )}
-            <div style={{ display: "grid", gap: 12 }}>
-              {canSeeWeeklySummaries ? (
-                <WeeklySummaryCard palette={c} summary={weeklySummary} />
-              ) : (
-                <UpgradeCard
-                  palette={c}
-                  compact
-                  title={getUpgradeMessage("weeklySummaries")}
-                  detail="Weekly recaps and momentum snapshots stay ready here when you want them."
-                  cta="See billing"
-                  onClick={openBillingPage}
-                />
-              )}
-              {canSeeAdvancedProgress ? (
-                <MilestoneCard palette={c} milestones={milestones} />
-              ) : (
-                <UpgradeCard
-                  palette={c}
-                  compact
-                  title="Go a little deeper"
-                  detail="Milestones and richer progress moments open up here when you decide to upgrade."
-                  cta="See billing"
-                  onClick={openBillingPage}
-                />
-              )}
-            </div>
-          </div>
-        </>
-      ))}
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr",
-          gap: 12,
-          marginBottom: 12,
-        }}
-      >
+      {/* ── 12. INCOME + NAVIGATION ─────────────────────────────────────────── */}
+      {hasAccounts && (
         <div
           style={{
             background: `linear-gradient(135deg, ${c.ac}10, ${c.surf} 36%, ${c.surf2} 86%, ${c.wa}10)`,
@@ -496,62 +537,158 @@ export default function DashboardPage(props) {
             borderRadius: 22,
             padding: "18px 20px",
             display: "grid",
-            gap: 12,
+            gap: 10,
+            marginBottom: 14,
             boxShadow: `0 16px 36px rgba(0,0,0,0.08)`,
           }}
         >
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: c.muted, marginBottom: 4 }}>
-              This month
-            </div>
-            <div style={{ fontSize: 24, fontWeight: 900, color: c.tx, marginBottom: 4 }}>
-              {periodLabel}
-            </div>
-            <div style={{ fontSize: 13, color: c.tx2 }}>
-              Keep it simple. One next move is enough.
+          {/* Income row */}
+          <div
+            onClick={() => setShowIncome(true)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+              padding: "12px 14px",
+              borderRadius: 12,
+              background: c.surf2,
+              border: `1px solid ${c.border}`,
+              cursor: "pointer",
+              flexWrap: "wrap",
+            }}
+          >
+            {totalInc > 0 ? (
+              <div style={{ display: "flex", gap: 18, flexWrap: "wrap", flex: 1 }}>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: c.muted, marginBottom: 2, fontFamily: "'Instrument Sans',sans-serif" }}>Income</div>
+                  <div style={{ fontSize: 16, fontWeight: 900, color: c.tx, fontFamily: "'DM Mono',monospace" }}>{fx(totalInc)}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: c.muted, marginBottom: 2, fontFamily: "'Instrument Sans',sans-serif" }}>Bills</div>
+                  <div style={{ fontSize: 16, fontWeight: 900, color: c.tx, fontFamily: "'DM Mono',monospace" }}>{fx(totalDue)}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: c.muted, marginBottom: 2, fontFamily: "'Instrument Sans',sans-serif" }}>Left over</div>
+                  <div style={{ fontSize: 16, fontWeight: 900, color: netAfterBills >= 0 ? c.go : c.da, fontFamily: "'DM Mono',monospace" }}>{fx(netAfterBills)}</div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: c.tx, marginBottom: 2 }}>Add your income</div>
+                <div style={{ fontSize: 11, color: c.muted, fontFamily: "'Instrument Sans',sans-serif" }}>See what's left after bills each month.</div>
+              </div>
+            )}
+            <div style={{ fontSize: 11, fontWeight: 700, color: c.ac, whiteSpace: "nowrap", fontFamily: "'Instrument Sans',sans-serif" }}>
+              {totalInc > 0 ? "Edit ›" : "Add ›"}
             </div>
           </div>
+
+          {totalInc <= 0 && (
+            <GuidanceCard
+              palette={c}
+              icon="$"
+              title="Set up paycheck tracking"
+              instruction="Go to Settings → Bills & Budget, then add your paycheck amount and schedule."
+              result="Once set up, you'll see income, bills, and what's left after payments."
+            />
+          )}
+
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button type="button" style={heroButtonStyle} onClick={() => setPage("bills")}>
-              Open bills
-            </button>
-            <button type="button" style={heroButtonStyle} onClick={() => setPage("payoff")}>
-              Open payoff
-            </button>
-            <button type="button" style={heroButtonStyle} onClick={() => openDueNextView()}>
-              Open due next
-            </button>
+            <button type="button" style={heroButtonStyle} onClick={() => setPage("bills")}>Open bills</button>
+            <button type="button" style={heroButtonStyle} onClick={() => setPage("payoff")}>Open payoff</button>
+            <button type="button" style={heroButtonStyle} onClick={() => openDueNextView()}>Open due next</button>
           </div>
         </div>
+      )}
+
+      {/* ── 13. HOUSEHOLD / INVITE STRIP ────────────────────────────────────── */}
+      {(shouldShowHouseholdEntry || (canManageHousehold && householdMembers.length < 3)) && (
         <div
           style={{
+            display: "flex",
+            gap: 12,
+            alignItems: "center",
+            padding: "14px 18px",
+            borderRadius: 16,
             background: c.surf,
             border: `1px solid ${c.border}`,
-            borderRadius: 18,
-            padding: "16px 18px",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 12,
             flexWrap: "wrap",
+            marginBottom: 14,
           }}
         >
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: c.muted, marginBottom: 4 }}>
-              Help shape this
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 900, color: c.tx, marginBottom: 2 }}>
+              Bring someone in
             </div>
-            <div style={{ fontSize: 14, fontWeight: 800, color: c.tx, marginBottom: 4 }}>
-              Tell us what felt helpful or off
-            </div>
-            <div style={{ fontSize: 12, color: c.tx2, lineHeight: 1.5 }}>
-              Short notes help us smooth the daily flow.
+            <div style={{ fontSize: 12, color: c.tx2, lineHeight: 1.5, fontFamily: "'Instrument Sans',sans-serif" }}>
+              {shouldShowHouseholdEntry
+                ? "Create a shared household or join one — your data stays private until you choose to share it."
+                : "They'll see the same progress and can add their own bills alongside yours."}
             </div>
           </div>
-          <button type="button" style={heroButtonStyle} onClick={() => openFeedback("overview")}>
-            Send feedback
-          </button>
+          <div style={{ display: "flex", gap: 8, flexShrink: 0, alignItems: "center", flexWrap: "wrap" }}>
+            {shouldShowHouseholdEntry && (
+              <>
+                <button
+                  type="button"
+                  onClick={onOpenHouseholdSetupCreate}
+                  style={{ padding: "10px 14px", borderRadius: 10, border: "none", background: c.ac, color: "#001014", fontSize: 12, fontWeight: 900, cursor: "pointer" }}
+                >
+                  Create
+                </button>
+                <button
+                  type="button"
+                  onClick={onOpenHouseholdSetupJoin}
+                  style={{ padding: "10px 14px", borderRadius: 10, border: `1px solid ${c.border2}`, background: c.surf2, color: c.tx, fontSize: 12, fontWeight: 900, cursor: "pointer" }}
+                >
+                  Join
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={shouldShowHouseholdEntry ? handleInviteCopy : (onShareInvite ? () => onShareInvite(householdInviteLink) : handleInviteCopy)}
+              style={{
+                padding: "10px 16px",
+                borderRadius: 10,
+                border: shouldShowHouseholdEntry ? `1px solid ${c.border2}` : "none",
+                background: inviteCopied ? c.go : (shouldShowHouseholdEntry ? c.surf2 : c.ac),
+                color: shouldShowHouseholdEntry ? c.tx : "#001014",
+                fontSize: 12,
+                fontWeight: 900,
+                cursor: "pointer",
+                transition: "background 0.2s ease",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {inviteCopied ? "Link copied ✓" : "Share"}
+            </button>
+          </div>
         </div>
+      )}
+
+      {/* ── 14. FEEDBACK ────────────────────────────────────────────────────── */}
+      <div style={{ paddingTop: 12, paddingBottom: 4, textAlign: "center", opacity: 0.5 }}>
+        <button
+          type="button"
+          onClick={() => openFeedback("overview")}
+          style={{
+            background: "none",
+            border: "none",
+            color: c.muted,
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: "pointer",
+            textDecoration: "underline",
+            textDecorationStyle: "dotted",
+            fontFamily: "'Instrument Sans',sans-serif",
+          }}
+        >
+          Something feel off? Send a note
+        </button>
       </div>
+
     </div>
   );
 }

@@ -1,8 +1,8 @@
-export default function OverviewPage({ showDueSoon, dueNextSectionRef, renderDashboard, renderDueNext }) {
+export default function OverviewPage({ showDueSoon, dueNextSectionRef, dashboard, dueNext }) {
   return (
     <>
-      {renderDashboard()}
-      {showDueSoon && <div ref={dueNextSectionRef}>{renderDueNext()}</div>}
+      {dashboard}
+      {showDueSoon && <div ref={dueNextSectionRef}>{dueNext}</div>}
     </>
   );
 }

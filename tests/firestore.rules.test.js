@@ -1,5 +1,4 @@
 import test from "node:test";
-import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
@@ -47,6 +46,7 @@ function householdRoot({
 }
 
 function householdDirectory({
+  householdId = "home-1",
   ownerId,
   joinMode = "approval",
   memberCount = 1,
@@ -56,12 +56,15 @@ function householdDirectory({
 } = {}) {
   const now = new Date();
   return {
+    householdId,
     ownerId,
     name,
+    nameLower: String(name || "").toLowerCase(),
     description,
     joinMode,
     joinCode,
     memberCount,
+    active: true,
     updatedAt: now,
   };
 }
@@ -176,7 +179,7 @@ test("users cannot read another user's private data", async () => {
   await assertFails(db.doc("users/alice/profile/main").get());
 });
 
-test("non-members cannot read household data", async () => {
+test("non-members can read active household roots but not member docs", async () => {
   await seedData(async (db) => {
     await db.doc("households/home-1").set(householdRoot({ ownerId: "owner-1" }));
     await db
@@ -185,7 +188,7 @@ test("non-members cannot read household data", async () => {
   });
 
   const db = testEnv.authenticatedContext("outsider").firestore();
-  await assertFails(db.doc("households/home-1").get());
+  await assertSucceeds(db.doc("households/home-1").get());
   await assertFails(db.doc("households/home-1/members/owner-1").get());
 });
 
@@ -222,7 +225,7 @@ test("open join lets a user create only their own member doc", async () => {
       .set(memberDoc({ uid: "owner-1", role: "owner", label: "Owner User", displayName: "Owner User" }));
     await db
       .doc("householdDirectory/open-home")
-      .set(householdDirectory({ ownerId: "owner-1", joinMode: "open", joinCode: "OPEN12" }));
+      .set(householdDirectory({ householdId: "open-home", ownerId: "owner-1", joinMode: "open", joinCode: "OPEN12" }));
   });
 
   const joinerDb = testEnv.authenticatedContext("joiner-1").firestore();
@@ -237,6 +240,174 @@ test("open join lets a user create only their own member doc", async () => {
     joinerDb
       .doc("households/open-home/members/someone-else")
       .set(memberDoc({ uid: "someone-else", role: "member", label: "Wrong User", displayName: "Wrong User" }))
+  );
+});
+
+test("pending invite lets a user join an approval household", async () => {
+  await seedData(async (db) => {
+    await db.doc("households/invite-home").set(
+      householdRoot({
+        ownerId: "owner-1",
+        joinMode: "approval",
+        memberIds: ["owner-1"],
+        memberCount: 1,
+        joinCode: "INV123",
+        updatedByLabel: "Owner User",
+      })
+    );
+    await db
+      .doc("households/invite-home/members/owner-1")
+      .set(memberDoc({ uid: "owner-1", role: "owner", label: "Owner User", displayName: "Owner User" }));
+    await db
+      .doc("householdDirectory/invite-home")
+      .set(householdDirectory({ householdId: "invite-home", ownerId: "owner-1", joinMode: "approval", joinCode: "INV123" }));
+    await db
+      .doc("users/joiner-1/invites/invite-home")
+      .set({
+        householdId: "invite-home",
+        householdName: "Test household",
+        householdDescription: "Shared budget",
+        joinCode: "INV123",
+        joinMode: "approval",
+        invitedByUid: "owner-1",
+        invitedByEmail: "owner-1@example.com",
+        invitedByName: "Owner User",
+        status: "pending",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+  });
+
+  const joinerDb = testEnv.authenticatedContext("joiner-1").firestore();
+
+  await assertSucceeds(
+    joinerDb.doc("households/invite-home").update({
+      memberIds: ["owner-1", "joiner-1"],
+      memberCount: 2,
+      updatedAt: new Date(),
+      updatedBy: "joiner-1",
+      updatedByLabel: "Joiner User",
+    })
+  );
+
+  await assertSucceeds(
+    joinerDb
+      .doc("householdDirectory/invite-home")
+      .update({
+        householdId: "invite-home",
+        ownerId: "owner-1",
+        name: "Test household",
+        nameLower: "test household",
+        description: "Shared budget",
+        joinCode: "INV123",
+        joinMode: "approval",
+        memberCount: 2,
+        active: true,
+        updatedAt: new Date(),
+      })
+  );
+
+  await assertSucceeds(
+    joinerDb
+      .doc("households/invite-home/members/joiner-1")
+      .set(memberDoc({ uid: "joiner-1", role: "member", label: "Joiner User", displayName: "Joiner User" }))
+  );
+});
+
+test("household owner can approve a join request and switch the requester into the household workspace", async () => {
+  const requestCreatedAt = new Date("2026-04-09T00:00:00.000Z");
+  await seedData(async (db) => {
+    await db.doc("households/approval-home").set(
+      householdRoot({
+        ownerId: "owner-1",
+        memberIds: ["owner-1"],
+        memberCount: 1,
+        joinMode: "approval",
+        joinCode: "APPR01",
+        updatedByLabel: "Owner User",
+      })
+    );
+    await db
+      .doc("households/approval-home/members/owner-1")
+      .set(memberDoc({ uid: "owner-1", role: "owner", label: "Owner User", displayName: "Owner User" }));
+    await db
+      .doc("householdDirectory/approval-home")
+      .set(householdDirectory({ householdId: "approval-home", ownerId: "owner-1", joinMode: "approval", joinCode: "APPR01" }));
+    await db
+      .doc("households/approval-home/joinRequests/joiner-1")
+      .set({
+        uid: "joiner-1",
+        email: "joiner-1@example.com",
+        label: "Joiner User",
+        displayName: "Joiner User",
+        photoURL: "",
+        avatarColor: "#3b82f6",
+        status: "pending",
+        createdAt: requestCreatedAt,
+        updatedAt: requestCreatedAt,
+      });
+  });
+
+  const ownerDb = testEnv.authenticatedContext("owner-1").firestore();
+  const approvalNow = new Date();
+
+  await assertSucceeds(
+    ownerDb
+      .doc("households/approval-home/members/joiner-1")
+      .set(memberDoc({ uid: "joiner-1", role: "member", label: "Joiner User", displayName: "Joiner User" }))
+  );
+
+  await assertSucceeds(
+    ownerDb
+      .doc("households/approval-home/joinRequests/joiner-1")
+      .set({
+        status: "approved",
+        updatedAt: approvalNow,
+        reviewedAt: approvalNow,
+        reviewedBy: "owner-1",
+      }, { merge: true })
+  );
+
+  await assertSucceeds(
+    ownerDb
+      .doc("householdDirectory/approval-home")
+      .set({
+        householdId: "approval-home",
+        ownerId: "owner-1",
+        name: "Test household",
+        nameLower: "test household",
+        description: "Shared budget",
+        joinCode: "APPR01",
+        joinMode: "approval",
+        memberCount: 2,
+        active: true,
+        updatedAt: approvalNow,
+      }, { merge: true })
+  );
+
+  await assertSucceeds(
+    ownerDb
+      .doc("households/approval-home")
+      .update({
+        memberIds: ["owner-1", "joiner-1"],
+        memberCount: 2,
+        updatedAt: approvalNow,
+        updatedBy: "owner-1",
+        updatedByLabel: "Owner User",
+      })
+  );
+
+  await assertSucceeds(
+    ownerDb
+      .doc("users/joiner-1/meta/app")
+      .set({
+        activeHouseholdId: "approval-home",
+        householdSetupDone: true,
+        workspaceMode: "household",
+        pendingHouseholdId: "",
+        pendingHouseholdName: "",
+        updatedAt: approvalNow,
+      })
   );
 });
 

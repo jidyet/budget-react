@@ -1,13 +1,8 @@
-const money = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 0,
-});
+import { fx0 } from "./budgetUtils";
 
 const dateLabel = new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric" });
 
-export const asMoney = (value) => money.format(Number(value || 0));
+export const asMoney = (value) => fx0(Number(value || 0));
 
 export const safeNumber = (value) => {
   const parsed = Number(value);
@@ -60,7 +55,7 @@ export const getMonthChange = (accounts, getPrevRecord) => {
 export const getProgressLabel = (monthsSooner) => {
   if (monthsSooner >= 2) return `${monthsSooner} months sooner`;
   if (monthsSooner === 1) return "1 month sooner";
-  return "You moved forward";
+  return "Balance went down";
 };
 
 export const getProjectedMonthLabel = (rows) => {

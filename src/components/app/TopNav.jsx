@@ -1,8 +1,11 @@
-export default function TopNav({ navItems, page, palette, isMobile, showMoreDrawer, setShowMoreDrawer, navigateTo }) {
+import { hasPremiumAccess } from "../../utils/planLimits";
+
+export default function TopNav({ navItems, page, palette, isMobile, showMoreDrawer, setShowMoreDrawer, navigateTo, subscription, onOpenBilling }) {
   const c = palette;
+  const isPremium = hasPremiumAccess(subscription);
 
   return (
-    <div className="top-nav" style={{ display: 'flex', gap: 4, padding: '10px 0 0', borderBottom: `1.5px solid ${c.border}`, overflowX: 'auto', whiteSpace: 'nowrap' }}>
+    <div className="top-nav" style={{ display: 'flex', gap: 4, padding: '10px 0 0', borderBottom: `2px solid ${c.ac}55`, overflowX: 'auto', whiteSpace: 'nowrap' }}>
       {navItems.map(({ id, label, sub, icon, isMore }) => {
         const morePageActive = ['upload', 'history', 'settings'].includes(page);
         const active = isMore ? (showMoreDrawer || morePageActive) : page === id;
@@ -17,15 +20,15 @@ export default function TopNav({ navItems, page, palette, isMobile, showMoreDraw
             style={{
               padding: isMobile ? '7px 11px' : '8px 16px',
               borderRadius: '10px 10px 0 0',
-              border: `1px solid ${active ? c.ac : c.border}`,
-              borderBottom: active ? `1px solid ${c.surf}` : `1px solid ${c.border}`,
+              border: `1.5px solid ${active ? c.ac : c.border}`,
+              borderBottom: active ? `2px solid ${c.surf}` : `1.5px solid ${c.border}`,
               cursor: 'pointer',
               fontFamily: "'Instrument Sans',sans-serif",
-              fontWeight: active ? 700 : 600,
+              fontWeight: active ? 800 : 600,
               fontSize: isMobile ? 11 : 12,
-              background: active ? c.surf : c.surf2,
+              background: active ? `linear-gradient(180deg, ${c.ac}18, ${c.surf})` : c.surf2,
               color: active ? c.ac : c.tx2,
-              boxShadow: active ? `0 -4px 16px ${c.acD}` : 'none',
+              boxShadow: active ? `0 -6px 20px ${c.acD}` : 'none',
               marginBottom: active ? '-1.5px' : 0,
               position: 'relative',
               zIndex: active ? 2 : 1,
@@ -41,6 +44,29 @@ export default function TopNav({ navItems, page, palette, isMobile, showMoreDraw
           </button>
         );
       })}
+      {!isPremium && onOpenBilling && (
+        <button
+          onClick={onOpenBilling}
+          style={{
+            marginLeft: 'auto',
+            padding: '6px 12px',
+            borderRadius: 8,
+            border: `1px solid ${c.ac}55`,
+            background: `${c.ac}14`,
+            color: c.ac,
+            fontSize: 11,
+            fontWeight: 800,
+            cursor: 'pointer',
+            fontFamily: "'Instrument Sans',sans-serif",
+            letterSpacing: '0.04em',
+            alignSelf: 'center',
+            flexShrink: 0,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          See plans
+        </button>
+      )}
     </div>
   );
 }

@@ -11,10 +11,24 @@ export default function useReducedMotion() {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
     const update = () => setReduced(media.matches);
     update();
-    media.addEventListener?.("change", update);
-    return () => media.removeEventListener?.("change", update);
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", update);
+      return () => {
+        if (typeof media.removeEventListener === "function") {
+          media.removeEventListener("change", update);
+        }
+      };
+    }
+    if (typeof media.addListener === "function") {
+      media.addListener(update);
+      return () => {
+        if (typeof media.removeListener === "function") {
+          media.removeListener(update);
+        }
+      };
+    }
+    return undefined;
   }, []);
 
   return reduced;
 }
-

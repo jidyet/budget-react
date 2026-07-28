@@ -2,6 +2,8 @@ import {
   approveJoinRequest,
   continueSoloWorkspace,
   createHousehold,
+  leaveHousehold,
+  removeHouseholdMember,
   rejectJoinRequest,
   requestJoinHousehold,
   saveHouseholdMemberProfile,
@@ -12,6 +14,7 @@ import {
   subscribeJoinRequests,
   subscribeUserProfile,
 } from "../firebase";
+import { fx } from "../utils/budgetUtils";
 
 export const HOUSEHOLD_ROLES = ["owner", "admin", "member", "viewer"];
 
@@ -30,6 +33,8 @@ export const searchJoinableHouseholds = (term) => searchHouseholds(term);
 export const joinHouseholdWorkspace = ({ user, household }) => requestJoinHousehold(user, household);
 export const approveHouseholdMember = ({ householdId, requestUserId, approver }) => approveJoinRequest(householdId, requestUserId, approver);
 export const rejectHouseholdMember = ({ householdId, requestUserId, approver }) => rejectJoinRequest(householdId, requestUserId, approver);
+export const leaveHouseholdWorkspace = ({ uid, householdId }) => leaveHousehold(uid, householdId);
+export const removeHouseholdMemberFromWorkspace = ({ householdId, targetUid, actor }) => removeHouseholdMember(householdId, targetUid, actor);
 export const subscribeCurrentHousehold = (uid, callback) => subscribeHouseholdForUser(uid, callback);
 export const subscribeMembers = (householdId, callback) => subscribeHouseholdMembers(householdId, callback);
 export const subscribePendingRequests = (householdId, callback) => subscribeJoinRequests(householdId, callback);
@@ -58,7 +63,7 @@ export const buildHouseholdNextMove = ({ dueSoon = [], totalDue = 0, remaining =
     return {
       title: "Next move",
       body: "Keep the month moving forward.",
-      meta: `${new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(totalDue || remaining || 0))} left to cover`,
+      meta: `${fx(Number(totalDue || remaining || 0))} left to cover`,
     };
   }
   return {
@@ -71,5 +76,11 @@ export const buildHouseholdNextMove = ({ dueSoon = [], totalDue = 0, remaining =
 export const buildHouseholdInviteLink = (household, origin = "") => {
   if (!household?.joinCode) return "";
   const base = String(origin || "").replace(/\/$/, "");
-  return `${base}?joinCode=${encodeURIComponent(household.joinCode)}`;
+  // Use hash fragment — never sent to servers, never in Referer headers
+  const params = new URLSearchParams();
+  params.set("join", String(household.joinCode || ""));
+  if (household?.id || household?.householdId) {
+    params.set("household", String(household.id || household.householdId || ""));
+  }
+  return `${base}#${params.toString()}`;
 };

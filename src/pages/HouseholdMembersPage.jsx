@@ -3,15 +3,29 @@ import EmptyState from "../components/feedback/EmptyState";
 import UpgradeCard from "../components/billing/UpgradeCard";
 import { formatHouseholdRole } from "../services/householdService";
 
+const getPeopleHereRoleLabel = (role) => {
+  if (role === "admin") return "Co-owner";
+  return formatHouseholdRole(role);
+};
+
+const getPeopleHereRoleSelectValue = (role) => {
+  if (role === "admin") return "admin";
+  return role;
+};
+
 export default function HouseholdMembersPage({
   palette,
-  householdMembers,
-  householdRequests,
+  householdMembers = [],
+  householdRequests = [],
+  currentHouseholdMember,
   canManageHousehold,
   subscription,
   onOpenBilling,
   onApprove,
   onReject,
+  onLeave,
+  onRemoveMember,
+  onSetRole,
 }) {
   const c = palette;
   const pendingRequests = householdRequests.filter((item) => item.status === "pending");
@@ -56,11 +70,40 @@ export default function HouseholdMembersPage({
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <div style={{ padding: "6px 10px", borderRadius: 999, background: c.acD, border: `1px solid ${c.ac}33`, color: c.ac, fontSize: 11, fontWeight: 800 }}>
-                      {formatHouseholdRole(member.role)}
+                      {getPeopleHereRoleLabel(member.role)}
                     </div>
                     <div style={{ padding: "6px 10px", borderRadius: 999, background: c.surf, border: `1px solid ${c.border}`, color: c.tx2, fontSize: 11, fontWeight: 700 }}>
                       {member.status || "active"}
                     </div>
+                    {String(member.uid || member.id) === String(currentHouseholdMember?.uid || "") && member.role !== "owner" && (
+                      <button
+                        type="button"
+                        onClick={onLeave}
+                        style={{ padding: "6px 10px", borderRadius: 10, border: `1px solid ${c.da}`, background: c.daD, color: c.da, fontSize: 11, fontWeight: 800, cursor: "pointer" }}
+                      >
+                        Leave
+                      </button>
+                    )}
+                    {currentHouseholdMember?.role === "owner" && String(member.uid || member.id) !== String(currentHouseholdMember?.uid || "") && (
+                      <select
+                        value={getPeopleHereRoleSelectValue(member.role)}
+                        onChange={(e) => onSetRole && onSetRole(member.uid || member.id, e.target.value)}
+                        style={{ padding: "5px 8px", borderRadius: 8, border: `1px solid ${c.border2}`, background: c.surf2, color: c.tx, fontSize: 11, fontWeight: 700, cursor: "pointer" }}
+                      >
+                        <option value="member">Member</option>
+                        <option value="admin">Co-owner</option>
+                        <option value="viewer">Viewer</option>
+                      </select>
+                    )}
+                    {canManageHousehold && String(member.uid || member.id) !== String(currentHouseholdMember?.uid || "") && member.role !== "owner" && (
+                      <button
+                        type="button"
+                        onClick={() => onRemoveMember(member.uid || member.id)}
+                        style={{ padding: "6px 10px", borderRadius: 10, border: `1px solid ${c.da}`, background: c.daD, color: c.da, fontSize: 11, fontWeight: 800, cursor: "pointer" }}
+                      >
+                        Remove
+                      </button>
+                    )}
                   </div>
                 </div>
               );

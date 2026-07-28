@@ -1,5 +1,5 @@
 export const LAUNCH_COPY = {
-  supportEmailFallback: "support@householdbudget.app",
+  supportEmailFallback: "support@tracktozero.app",
   privacyHero: {
     eyebrow: "Privacy & security",
     title: "Clear and simple",
@@ -37,7 +37,7 @@ export const LAUNCH_COPY = {
     },
     {
       question: "Do I need bank sync?",
-      answer: "No. Manual entry, spreadsheet import, and statement upload all stay supported.",
+      answer: "No. You can use manual entry, statement upload, and spreadsheet import without bank sync.",
     },
     {
       question: "Can I switch to a household later?",
@@ -57,7 +57,7 @@ export const LAUNCH_COPY = {
   ],
   betaKnownNotes: [
     "Billing stays off for testers",
-    "Some import matches may still need review",
+    "Spreadsheet import supports common CSV and Excel layouts, and you can still review everything before saving",
     "Statement parsing works best with clean files",
   ],
   betaSupportItems: [
@@ -90,20 +90,20 @@ export const LAUNCH_COPY = {
     pdf: {
       title: "PDF statement upload",
       description:
-        "Upload a PDF statement and the app will try to pull balance, minimum due, APR, new purchases, and other helpful details.",
+        "Upload any statement PDF and the app will try to pull balance, minimum due, APR, purchases, owner, and other helpful details.",
       badge: "PDF",
       dropTitle: "Drop your PDF statement here or click to browse",
       dropSubtext:
-        "Works with statement PDFs, card statements, loan statements, and most standard bill statements.",
+        "Works with many banks, lenders, utilities, and standard bill statements. The provider examples below are shortcuts, not limits.",
     },
     image: {
       title: "Other files and images",
       description:
-        "Upload a screenshot, phone photo, or image file and the app will try to pull balance, minimum due, APR, new purchases, and other helpful details.",
+        "Upload a screenshot, phone photo, or other bill document and the app will try to pull balance, minimum due, APR, purchases, owner, and other helpful details.",
       badge: "IMG",
       dropTitle: "Drop your screenshot or image file here or click to browse",
       dropSubtext:
-        "Works with screenshots, phone photos, JPEGs, PNGs, WEBP files, and other clear bill images.",
+        "Works with screenshots, phone photos, JPEGs, PNGs, WEBP files, and other clear bill images or documents.",
     },
   },
 };

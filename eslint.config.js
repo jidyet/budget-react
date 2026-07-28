@@ -5,7 +5,17 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores([
+    'dist',
+    'node_modules',
+    '.git',
+    '.gradle-home/**',
+    '.safety-snapshots/**',
+    'android/app/build/**',
+    'android/app/src/main/assets/**',
+    'android/.gradle/**',
+    'functions/stripeWebhook.example.js',
+  ]),
   {
     files: ['**/*.{js,jsx}'],
     extends: [
@@ -24,6 +34,14 @@ export default defineConfig([
     },
     rules: {
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+    },
+  },
+  // Node.js scripts (tools/, scripts/) use require/process — not browser globals
+  {
+    files: ['tools/**/*.js', 'scripts/**/*.js'],
+    languageOptions: {
+      globals: globals.node,
+      sourceType: 'commonjs',
     },
   },
 ])

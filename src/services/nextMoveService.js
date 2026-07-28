@@ -1,3 +1,4 @@
+import { isBillOverdue } from "./billModel";
 import { asMoney } from "../utils/progressCalculations";
 
 export const buildNextMove = ({ progress, accounts = [], dueSoon = [], getPrevRecord, workspaceMode = "solo", activity = [] }) => {
@@ -11,7 +12,7 @@ export const buildNextMove = ({ progress, accounts = [], dueSoon = [], getPrevRe
     };
   }
 
-  const overdue = accounts.filter((account) => Number(account?.d_left) < 0 && Number(account?.cur_bal || 0) > 0.01);
+  const overdue = accounts.filter((account) => isBillOverdue(account));
   if (overdue.length) {
     return {
       title: "Next move",
@@ -82,7 +83,7 @@ export const buildNextMove = ({ progress, accounts = [], dueSoon = [], getPrevRe
   return {
     title: "Next move",
     body: workspaceMode === "household" && activity.length ? "Check the latest update" : "Pay the next one down",
-    detail: progress.totalDue > progress.paidThisMonth ? `${asMoney(progress.totalDue - progress.paidThisMonth)} still open` : "You moved forward",
+    detail: progress.totalDue > progress.paidThisMonth ? `${asMoney(progress.totalDue - progress.paidThisMonth)} still open` : `${asMoney(progress.paidThisMonth)} paid this month`,
     tone: "default",
     action: "bills",
   };

@@ -1,12 +1,18 @@
+import {
+  getBillDisplayStatus,
+  isBillOpenThisCycle,
+  isBillOverdue,
+  isBillSettledThisCycle,
+} from "../services/billModel";
 import { asMoney, safeNumber } from "./progressCalculations";
 
 export const getOverdueAccounts = (accounts = []) =>
-  accounts.filter((account) => Number(account?.d_left) < 0 && safeNumber(account?.cur_bal) > 0.01);
+  accounts.filter((account) => isBillOverdue(account));
 
 export const getDueSoonAccounts = (accounts = [], days = 5) =>
   accounts.filter((account) => {
     const dueLeft = Number(account?.d_left);
-    return Number.isFinite(dueLeft) && dueLeft >= 0 && dueLeft <= days && safeNumber(account?.cur_bal) > 0.01;
+    return isBillOpenThisCycle(account) && Number.isFinite(dueLeft) && dueLeft >= 0 && dueLeft <= days;
   });
 
 export const getBalancesThatWentUp = (accounts = [], getPrevRecord) =>
@@ -17,7 +23,7 @@ export const getBalancesThatWentUp = (accounts = [], getPrevRecord) =>
   });
 
 export const getPaidCountThisMonth = (accounts = []) =>
-  accounts.filter((account) => safeNumber(account?.paid_v) > 0).length;
+  accounts.filter((account) => isBillSettledThisCycle(account)).length;
 
 export const formatCountLabel = (count, one, many = `${one}s`) =>
   `${count} ${count === 1 ? one : many}`;
@@ -47,3 +53,5 @@ export const summarizeReason = ({ overdueCount = 0, paidCount = 0, reduction = 0
   return "You checked in and stayed aware";
 };
 
+export const getStatusLabel = (account) =>
+  getBillDisplayStatus(account)?.label || "Open";

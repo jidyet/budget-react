@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
-export default function useInstallPrompt() {
+export default function useInstallPrompt(options = {}) {
+  const { enabled = true } = options || {};
   const [installPromptEvent, setInstallPromptEvent] = useState(null);
   const [showInstallPrompt, setShowInstallPrompt] = useState(false);
   const [pwaInstalled, setPwaInstalled] = useState(
@@ -11,9 +12,10 @@ export default function useInstallPrompt() {
   const [offlineReady, setOfflineReady] = useState(false);
 
   useEffect(() => {
-    if (typeof window === "undefined") return undefined;
+    if (typeof window === "undefined" || !enabled) return undefined;
 
     const onBeforeInstallPrompt = (event) => {
+      if (!enabled) return;
       event.preventDefault();
       setInstallPromptEvent(event);
       setShowInstallPrompt(true);
@@ -29,13 +31,18 @@ export default function useInstallPrompt() {
 
     window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
     window.addEventListener("appinstalled", onInstalled);
-    navigator.serviceWorker?.addEventListener?.("controllerchange", onControllerChange);
-    if (navigator.serviceWorker?.controller) setOfflineReady(true);
+    const serviceWorker = navigator.serviceWorker;
+    if (serviceWorker && typeof serviceWorker.addEventListener === "function") {
+      serviceWorker.addEventListener("controllerchange", onControllerChange);
+    }
+    if (serviceWorker?.controller) setOfflineReady(true);
 
     return () => {
       window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
       window.removeEventListener("appinstalled", onInstalled);
-      navigator.serviceWorker?.removeEventListener?.("controllerchange", onControllerChange);
+      if (serviceWorker && typeof serviceWorker.removeEventListener === "function") {
+        serviceWorker.removeEventListener("controllerchange", onControllerChange);
+      }
     };
   }, []);
 
@@ -66,4 +73,3 @@ export default function useInstallPrompt() {
     handleInstallApp,
   };
 }
-

@@ -6,7 +6,6 @@ import {
   createHousehold,
   deleteCurrentHousehold,
   declineHouseholdInvite,
-  ensureHouseholdDirectoryEntry,
   ensureHouseholdInviteReady,
   fetchHouseholdMembership,
   fetchHouseholdById,

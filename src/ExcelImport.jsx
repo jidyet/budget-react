@@ -176,7 +176,7 @@ function analyzeColumnValues(values) {
 
   if (strs.length / n >= 0.4) {
     const avgLen     = strs.reduce((a, b) => a + b.length, 0) / strs.length;
-    const moneyStrs  = strs.filter(v => /^[\$(]?[\d,]+\.?\d{0,2}\)?$/.test(v.replace(/\s/g, "")));
+    const moneyStrs  = strs.filter(v => /^[$(]?[\d,]+\.?\d{0,2}\)?$/.test(v.replace(/\s/g, "")));
     const last4Strs  = strs.filter(v => /^\d{4}$/.test(v));
     const dueDayStrs = strs.filter(v => /^\d{1,2}(st|nd|rd|th)?$/i.test(v.trim()));
 

@@ -21,7 +21,6 @@ const IncomeModal = ({
   addIncome,
   saveCurrentAsIncomeSchedule,
   applyIncomeSchedule,
-  incomeTemplates,
   onClose,
 }) => (
   <>

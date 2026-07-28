@@ -227,6 +227,7 @@ export default function SettingsPage(props) {
       console.error("SettingsPage failed to restore add bill handoff", error);
     }
     if (!shouldOpenAddBill) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setOpenSection("bills");
     setAddBillOpen(true);
     setAddAcctStep?.(1);
@@ -331,6 +332,7 @@ export default function SettingsPage(props) {
   }, [openBillGroups]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedBillIds((current) => current.filter((id) => managedBills.some((bill) => bill.id === id)));
   }, [managedBills]);
 

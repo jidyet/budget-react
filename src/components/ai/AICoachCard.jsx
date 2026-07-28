@@ -7,7 +7,6 @@ export default function AICoachCard({
   requestPayload,
   featureEnabled = false,
   accessAllowed = false,
-  scopeLabel = "this page",
   testerOnly = false,
   quickPrompts = [],
 }) {

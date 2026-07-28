@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import OverviewPage from "../../pages/OverviewPage";
 import DashboardPage from "../../pages/DashboardPage";
 import LoadingState from "../ui/LoadingState";
@@ -66,10 +66,6 @@ export default function AppPageContent(props) {
   } = props;
   const lazyFallback = <LoadingState palette={c} label="Opening page..." />;
   const [pageRetryKey, setPageRetryKey] = useState(0);
-
-  useEffect(() => {
-    setPageRetryKey(0);
-  }, [page]);
 
   return (
     <PageErrorBoundary

@@ -430,7 +430,7 @@ function sanitizeInstitutionHint(value) {
   const raw = String(value || "").trim().replace(/\s+/g, " ");
   if (!raw) return "";
   if (raw.length > 48) return "";
-  if (!/^[A-Za-z0-9&.'()\-\/\s]+$/.test(raw)) return "";
+  if (!/^[A-Za-z0-9&.'()\-/\s]+$/.test(raw)) return "";
   if (HOLDER_NAME_BAD_PHRASE_RE.test(raw)) return "";
   if (!INSTITUTION_HINT_KEYWORDS_RE.test(raw) && !BANK_NAME_RE.test(raw)) return "";
   return raw;
@@ -504,46 +504,6 @@ function matchOwnerOption(holderName, ownerOptions = []) {
     if (top.score === next.score && top.exactLast === next.exactLast) return "";
   }
   return scored[0]?.owner || "";
-}
-
-function extractHolderName(text) {
-  // Explicit label patterns — most reliable, try first
-  const labelPatterns = [
-    /(?:account holder|account owner|name on account|prepared for|statement for)[:\s]+([A-Za-z]+(?:\s+[A-Za-z]+){1,3})/i,
-    /dear\s+([A-Za-z]+(?:\s+[A-Za-z]+){1,2})[,\n]/i,
-    // "payable to NAME" — extract the name, not "payable to"
-    /payable\s+to\s+(?:the\s+order\s+of\s+)?([A-Za-z]+(?:\s+[A-Za-z]+){1,3})/i,
-  ];
-  for (const pattern of labelPatterns) {
-    const match = text.match(pattern);
-    if (match?.[1]) {
-      const cleaned = match[1].trim().replace(/\s+/g, " ");
-      if (cleaned.length >= 4 && !BANK_NAME_RE.test(cleaned)) return cleaned;
-    }
-  }
-
-  // Statement headers often show the cardholder in uppercase on the first lines,
-  // just above the mailing address. Support that layout so uploaded statements
-  // can auto-select the right household owner without relying on one lender format.
-  const topWindow = String(text || "").split(/\n/).slice(0, 18).join("\n");
-  const uppercaseHeaderMatch = topWindow.match(/^\s*([A-Z][A-Z\s]{5,})$/m);
-  if (uppercaseHeaderMatch?.[1]) {
-    const cleaned = uppercaseHeaderMatch[1].trim().replace(/\s+/g, " ");
-    const words = cleaned.split(/\s+/);
-    const isFinancialKeyword = words.some((w) => HOLDER_NAME_BLOCKLIST.test(w));
-    if (cleaned.length >= 5 && !BANK_NAME_RE.test(cleaned) && !isFinancialKeyword) return cleaned;
-  }
-
-  // All-caps name before a street address (e.g. "JOHN SMITH 123 MAIN ST")
-  const addressMatch = text.match(/([A-Z][A-Z]+(?:\s+[A-Z][A-Z]+){1,3})\s+\d{2,5}\s+[A-Z]/);
-  if (addressMatch?.[1]) {
-    const cleaned = addressMatch[1].trim().replace(/\s+/g, " ");
-    const words = cleaned.split(/\s+/);
-    const isFinancialKeyword = words.some((w) => HOLDER_NAME_BLOCKLIST.test(w));
-    if (cleaned.length >= 5 && !BANK_NAME_RE.test(cleaned) && !isFinancialKeyword) return cleaned;
-  }
-
-  return null;
 }
 
 function extractTrustedHolderName(text) {
@@ -626,7 +586,7 @@ function detectProviderName(text) {
     if (regex.test(source)) return label;
   }
 
-  const genericHeaderMatch = source.match(/(?:^|\n)\s*([A-Z][A-Za-z&.,'()\/ -]{2,40})\s+(?:statement|account statement|monthly statement|billing statement)\b/i);
+  const genericHeaderMatch = source.match(/(?:^|\n)\s*([A-Z][A-Za-z&.,'()/ -]{2,40})\s+(?:statement|account statement|monthly statement|billing statement)\b/i);
   const genericLabel = sanitizeInstitutionHint(genericHeaderMatch?.[1] || "");
   if (genericLabel) return genericLabel;
 

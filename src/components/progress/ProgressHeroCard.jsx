@@ -3,7 +3,7 @@ export default function ProgressHeroCard({ palette, progress, workspaceMode }) {
   const heroTone = workspaceMode === "household" ? "Shared progress" : "You're getting closer";
   const subcopy = workspaceMode === "household"
     ? "You're moving this forward together."
-    : "You moved forward. Keep it simple.";
+    : "Your balances are moving in the right direction.";
   const ratioPct = Math.max(6, Math.round((progress?.overallRatio || 0) * 100));
 
   return (

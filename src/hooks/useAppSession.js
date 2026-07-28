@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { onAuth, subscribeUserProfile, upsertUserRegistry } from "../firebase";
-import { canAccessFounderOps, getLaunchFlags, isFounderEmail } from "../config/launchFlags";
+import { getLaunchFlags } from "../config/launchFlags";
 import { readFounderOpsState } from "../services/founderOpsService";
 import { getFirebaseStatus } from "../firebase";
 
@@ -21,6 +21,7 @@ export default function useAppSession() {
   const [authLoading, setAuthLoading] = useState(true);
   const [isLocalUser, setIsLocalUser] = useState(false);
   const [userProfile, setUserProfile] = useState({});
+  const [userClaims, setUserClaims] = useState({});
 
   // --- Firebase auth listener ---
   useEffect(() => {
@@ -29,6 +30,12 @@ export default function useAppSession() {
       if (u && !u.isLocal) {
         setIsLocalUser(false);
         upsertUserRegistry(u.uid, { email: u.email || "" });
+        // Load custom claims (force-refresh so we get the latest)
+        u.getIdTokenResult(true)
+          .then((result) => setUserClaims(result.claims || {}))
+          .catch(() => setUserClaims({}));
+      } else {
+        setUserClaims({});
       }
       setAuthLoading(false);
     });
@@ -46,16 +53,16 @@ export default function useAppSession() {
     });
   }, [user, isLocalUser]);
 
-  // --- Derived identity (stable references, no deps changing) ---
-  const founderAccount = isFounderEmail(user?.email);
-  const founderOpsVisible = canAccessFounderOps(user?.email);
+  // Static config
+  const launchFlags = getLaunchFlags();
+
+  // --- Derived identity ---
+  const founderAccount = Boolean(userClaims.founderAccount);
+  const founderOpsVisible = Boolean(userClaims.founderAccount && launchFlags.founderOpsEnabled);
   const currentUserLabel =
     (userProfile?.displayName || "").trim()
     || (user?.email ? user.email.split("@")[0] : "")
     || "Me";
-
-  // Static config (read once at module level in each getter, effectively stable)
-  const launchFlags = getLaunchFlags();
   const founderOpsState = readFounderOpsState();
   const firebaseStatus = getFirebaseStatus();
 

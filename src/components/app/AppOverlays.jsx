@@ -22,6 +22,8 @@ export default function AppOverlays(props) {
     founderAccount,
     currentUserLabel,
     userProfile,
+    workspaceMode,
+    householdProfile,
     showIncome,
     incomeReceipts,
     boaPayPeriods,
@@ -90,6 +92,7 @@ export default function AppOverlays(props) {
     setCmdkOpen,
     toast,
     reducedMotion,
+    onSignOut,
   } = props;
 
   return (
@@ -103,10 +106,13 @@ export default function AppOverlays(props) {
           safeTop={safeTop}
           currentUserLabel={currentUserLabel}
           userProfile={userProfile}
+          workspaceMode={workspaceMode}
+          householdProfile={householdProfile}
           onClose={() => setShowMoreDrawer(false)}
           navigateTo={navigateTo}
           founderOpsEnabled={founderOpsVisible}
           adminEnabled={founderAccount}
+          onSignOut={onSignOut}
         />
       )}
       {hasAuthenticatedUser && showIncome && (
@@ -116,8 +122,8 @@ export default function AppOverlays(props) {
           incomeReceipts={incomeReceipts}
           boaPayPeriods={boaPayPeriods}
           eagleviewPayPeriods={eagleviewPayPeriods}
-          boaLabel={paySchedule?.boaLabel || "Paycheck A"}
-          eagleviewLabel={paySchedule?.eagleviewLabel || "Paycheck B"}
+          boaLabel={paySchedule?.paycheckALabel || paySchedule?.boaLabel || "Paycheck A"}
+          eagleviewLabel={paySchedule?.paycheckBLabel || paySchedule?.eagleviewLabel || "Paycheck B"}
           updateIncomeReceipt={updateIncomeReceipt}
           recurringIncomeEntries={recurringIncomeEntries}
           manualIncomeEntries={manualIncomeEntries}
@@ -155,7 +161,7 @@ export default function AppOverlays(props) {
         showToast={showToast}
         onClose={() => setEditId(null)}
       />
-      {isMobile && (
+      {isMobile && hasAuthenticatedUser && (
         <>
           {showMobileActionBar && (
             <MobileActionBar

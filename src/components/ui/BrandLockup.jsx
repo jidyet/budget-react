@@ -6,7 +6,7 @@ export default function BrandLockup({
   align = "left",
 }) {
   const isCompact = size === "sm";
-  const wordmarkFontSize = isCompact ? 18 : size === "lg" ? 30 : 22;
+  const wordmarkFontSize = isCompact ? 20 : size === "lg" ? 33 : 24;
   const taglineFontSize = isCompact ? 11 : size === "lg" ? 16 : 13;
 
   return (
@@ -16,6 +16,7 @@ export default function BrandLockup({
         gap: showTagline ? 4 : 0,
         justifyItems: align === "center" ? "center" : "start",
         textAlign: align,
+        padding: "2px 3px",
       }}
       aria-label={BRAND_NAME}
     >
@@ -23,7 +24,7 @@ export default function BrandLockup({
         style={{
           fontFamily: "'Syne',sans-serif",
           fontSize: wordmarkFontSize,
-          fontWeight: 800,
+          fontWeight: 700,
           letterSpacing: "-0.05em",
           display: "flex",
           alignItems: "center",

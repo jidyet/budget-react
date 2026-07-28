@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
-export default function useInstallPrompt() {
+export default function useInstallPrompt(options = {}) {
+  const { enabled = true } = options || {};
   const [installPromptEvent, setInstallPromptEvent] = useState(null);
   const [showInstallPrompt, setShowInstallPrompt] = useState(false);
   const [pwaInstalled, setPwaInstalled] = useState(
@@ -11,9 +12,10 @@ export default function useInstallPrompt() {
   const [offlineReady, setOfflineReady] = useState(false);
 
   useEffect(() => {
-    if (typeof window === "undefined") return undefined;
+    if (typeof window === "undefined" || !enabled) return undefined;
 
     const onBeforeInstallPrompt = (event) => {
+      if (!enabled) return;
       event.preventDefault();
       setInstallPromptEvent(event);
       setShowInstallPrompt(true);

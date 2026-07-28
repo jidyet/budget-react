@@ -1,20 +1,31 @@
 import { lazy, Suspense, useState } from "react";
 import LoadingState from "../components/ui/LoadingState";
+import GuidanceCard from "../components/ui/GuidanceCard";
+import ExcelImport from "../ExcelImport";
 
-const ExcelImport = lazy(() => import("../ExcelImport"));
 const StatementUpload = lazy(() => import("../StatementUpload"));
 
 const TABS = [
-  { id: "excel", label: "From Excel/CSV" },
   { id: "pdf",   label: "From PDF Statement" },
   { id: "other", label: "From Other Files/Docs" },
+  { id: "sheet", label: "From Excel / CSV" },
 ];
 
-export default function UploadPage({ c, allAccts, monthKey, theme, updateRecord, showToast, handleUpload }) {
-  const [uploadTab, setUploadTab] = useState("excel");
+export default function UploadPage({ c, allAccts, monthKey, theme, updateRecord, showToast, handleUpload, addCustomAccount, ownerOptions = [] }) {
+  const [uploadTab, setUploadTab] = useState("pdf");
 
   return (
     <div>
+      <div style={{ marginBottom: 14 }}>
+        <GuidanceCard
+          palette={c}
+          icon="↑"
+          title="Choose how you want to import"
+          instruction="Pick PDF statement, other files, or Excel / CSV, then upload your file below."
+          result="We’ll pull what we can, let you review it, and then save it to the right bill."
+        />
+      </div>
+
       <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
         {TABS.map(({ id, label }) => (
           <button
@@ -38,21 +49,6 @@ export default function UploadPage({ c, allAccts, monthKey, theme, updateRecord,
         ))}
       </div>
 
-      {uploadTab === "excel" && (
-        <Suspense fallback={<LoadingState palette={c} label="Opening import tools..." />}>
-          <ExcelImport
-            accounts={allAccts}
-            monthKey={monthKey}
-            theme={theme}
-            onImported={async (id, updates) => {
-              await updateRecord(id, updates);
-              showToast("Imported from Excel");
-            }}
-            onUpload={handleUpload}
-          />
-        </Suspense>
-      )}
-
       {uploadTab === "pdf" && (
         <Suspense fallback={<LoadingState palette={c} label="Opening PDF reader..." />}>
           <StatementUpload
@@ -60,6 +56,8 @@ export default function UploadPage({ c, allAccts, monthKey, theme, updateRecord,
             monthKey={monthKey}
             theme={theme}
             sourceMode="pdf"
+            ownerOptions={ownerOptions}
+            onCreateAccount={addCustomAccount}
             onSaved={async (id, updates) => {
               await updateRecord(id, updates);
               showToast("Updated from statement");
@@ -76,6 +74,8 @@ export default function UploadPage({ c, allAccts, monthKey, theme, updateRecord,
             monthKey={monthKey}
             theme={theme}
             sourceMode="other"
+            ownerOptions={ownerOptions}
+            onCreateAccount={addCustomAccount}
             onSaved={async (id, updates) => {
               await updateRecord(id, updates);
               showToast("Updated from file");
@@ -83,6 +83,18 @@ export default function UploadPage({ c, allAccts, monthKey, theme, updateRecord,
             onUpload={handleUpload}
           />
         </Suspense>
+      )}
+
+      {uploadTab === "sheet" && (
+        <ExcelImport
+          accounts={allAccts}
+          theme={theme}
+          onImported={async (id, updates) => {
+            await updateRecord(id, updates);
+            showToast("Updated from spreadsheet");
+          }}
+          onUpload={handleUpload}
+        />
       )}
     </div>
   );

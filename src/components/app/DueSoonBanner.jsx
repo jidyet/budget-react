@@ -1,8 +1,10 @@
+import { isBillOpenThisCycle, isBillOverdue } from "../../services/billModel";
+
 export default function DueSoonBanner({ visible, accounts, palette, isMobile = false, onView, onClose }) {
   if (!visible) return null;
   const c = palette;
-  const urgentBills = accounts.filter((account) => !account.is_paid && account.d_left !== null && account.d_left <= 2 && account.d_left >= 0);
-  const overdueBills = accounts.filter((account) => !account.is_paid && account.d_left !== null && account.d_left < 0);
+  const urgentBills = accounts.filter((account) => isBillOpenThisCycle(account) && account.d_left !== null && account.d_left <= 2 && account.d_left >= 0);
+  const overdueBills = accounts.filter((account) => isBillOverdue(account));
   const total = urgentBills.length + overdueBills.length;
   if (total === 0) return null;
 

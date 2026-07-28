@@ -144,7 +144,7 @@ export default function BillingPage({
             </div>
           ) : !stripeReady ? (
             <div style={{ fontSize: 12, color: c.muted, lineHeight: 1.5 }}>
-              Add your Stripe billing URLs and price IDs in <code>.env</code> to turn checkout on.
+              Billing stays off during soft launch while checkout and subscription syncing are being finalized.
             </div>
           ) : null}
         </div>

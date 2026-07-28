@@ -1,6 +1,6 @@
 {
-  "appId": "com.household.budget",
-  "appName": "Household Budget",
+  "appId": "app.tracktozero.mobile",
+  "appName": "TrackToZero",
   "webDir": "dist",
   "android": {
     "allowMixedContent": true,

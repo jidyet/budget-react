@@ -1,3 +1,5 @@
+import { getBillDisplayStatus } from "../services/billModel";
+
 export const CURRENCY_OPTIONS = [
   { code: "USD", label: "US Dollar", symbol: "$" },
   { code: "EUR", label: "Euro", symbol: "EUR" },
@@ -80,24 +82,12 @@ export const daysLeft = (dueDay, month, year) => {
   const d = Math.min(dueDay, daysInMonth);
   const target = new Date(year, month - 1, d);
   if (isNaN(target.getTime())) return null;
-  if (
-    target < TODAY &&
-    year === TODAY.getFullYear() &&
-    month === TODAY.getMonth() + 1
-  ) {
-    const nm = month === 12 ? 1 : month + 1;
-    const ny = month === 12 ? year + 1 : year;
-    const nd = Math.min(dueDay, new Date(ny, nm, 0).getDate());
-    const next = new Date(ny, nm - 1, nd);
-    if (isNaN(next.getTime())) return null;
-    return Math.round((next - TODAY) / (1000 * 60 * 60 * 24));
-  }
   const result = Math.round((target - TODAY) / (1000 * 60 * 60 * 24));
   return isNaN(result) ? null : result;
 };
 
 export function accountViewModel(a) {
-  const org = String(a.bank || a.name || "Account").trim();
+  const org = String(a.displayName || a.bank || a.name || "Account").trim();
   const typeMatch = String(a.name || "").match(/\(([^)]+)\)/);
   const type = (typeMatch?.[1] || a.category || "Account").replace(/\s+/g, " ").trim();
   const owner = String(a.owner || "").trim();
@@ -140,11 +130,16 @@ export const normalizeAprDecimal = (value) => {
   return numeric > 1 ? numeric / 100 : numeric;
 };
 
-export const getBalanceBase = (account) =>
-  Number(
-    account?.base_bal_v ??
-    (Number(account?.cur_bal || 0) + Number(account?.paid_v || 0) - Number(account?.purch_v || 0))
-  );
+export const getBalanceBase = (account) => {
+  const baseV = Number(account?.base_bal_v);
+  // Use base_bal_v only when it is a real positive value.
+  // Treat 0 the same as null/undefined — fall back to reverse-computing from cur_bal.
+  // Rationale: base_bal_v === 0 either means "not set yet" or "truly paid off". In the
+  // paid-off case cur_bal is also 0, so the fallback still produces 0. In the "not set"
+  // case we recover the correct balance from whatever cur_bal holds in Firestore.
+  if (Number.isFinite(baseV) && baseV > 0) return baseV;
+  return Number(account?.cur_bal || 0) + Number(account?.paid_v || 0) - Number(account?.purch_v || 0);
+};
 
 export const normalizeIncomeEntries = (list) => {
   if (!Array.isArray(list)) return [];
@@ -163,10 +158,81 @@ export const normalizeMonthInput = (value) => {
   return `${match[1]}-${match[2]}`;
 };
 
+const normalizeTypeToken = (value) => String(value || "").trim().toLowerCase();
+const isTruthyFlag = (value) =>
+  value === true ||
+  value === 1 ||
+  value === "1" ||
+  String(value || "").trim().toLowerCase() === "true" ||
+  String(value || "").trim().toLowerCase() === "yes";
+const coerceBillType = (value) => {
+  const raw = normalizeTypeToken(value);
+  if (!raw) return "";
+  if (raw === "monthly" || raw === "monthly bill" || raw.includes("monthly")) return "monthly";
+  if (raw === "nointerest" || raw === "no interest" || raw === "no-interest" || raw.includes("no interest")) return "noInterest";
+  if (raw === "paydown" || raw === "pay down" || raw === "pay down over time" || raw.includes("pay down")) return "paydown";
+  return "";
+};
+
+const normalizeCategoryToken = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, " ")
+    .replace(/[^\w\s]/g, "");
+
+const isDebtCategory = (bill = {}) =>
+  /credit cards?|student loans?|personal loans?|line of credit|business/.test(
+    normalizeCategoryToken(bill?.category)
+  );
+
+const hasDebtIndicators = (bill = {}) => {
+  const haystack = [
+    bill?.subtype,
+    bill?.name,
+    bill?.billName,
+    bill?.bank,
+  ]
+    .map(normalizeCategoryToken)
+    .filter(Boolean)
+    .join(" ");
+  return /credit|card|loan|line of credit|loc|student loan|personal loan|mortgage|auto loan|affirm|sofi|aidvantage|mohela|navient|nelnet|firstmark/.test(haystack);
+};
+
+const isRecurringCategory = (bill = {}) => {
+  const category = normalizeCategoryToken(bill?.category);
+  const subtype = normalizeCategoryToken(bill?.subtype);
+  const name = normalizeCategoryToken(bill?.name || bill?.billName);
+  const haystack = `${category} ${subtype} ${name}`.trim();
+  if (!haystack) return false;
+  return /subscription|subscriptions|insurance|utilities|utility|home expense|home expenses|rent|mortgage payment|phone|internet|electric|electricity|water|sewer|trash|gas|groceries|daycare|school fees|streaming|toll|storage/.test(
+    haystack
+  );
+};
+
+export const getBillType = (account = {}) => {
+  const debtLike = isDebtCategory(account) || hasDebtIndicators(account);
+  const recurringLike = isRecurringCategory(account);
+  const primary = coerceBillType(account?.billType);
+  if (primary === "noInterest" || primary === "paydown") return primary;
+  if (primary === "monthly") return debtLike ? "paydown" : "monthly";
+  const fallback = coerceBillType(account?.type);
+  if (fallback === "noInterest" || fallback === "paydown") return fallback;
+  if (fallback === "monthly") return debtLike ? "paydown" : "monthly";
+  if (debtLike) return "paydown";
+  if (isTruthyFlag(account?.startsOverMonthly) && !debtLike) return "monthly";
+  if (recurringLike && !debtLike) return "monthly";
+  return "paydown";
+};
+
+export const startsOverMonthly = (account = {}) =>
+  getBillType(account) === "monthly";
+
 export const defaultRecord = (a) => {
   if (a == null) {
     return { paid_v: 0, planned_v: 0, min_due_v: 0, base_bal_v: 0, cur_bal: 0, is_paid: false, purch_v: 0, apr_v: 0 };
   }
+  const monthly = startsOverMonthly(a);
   return {
     paid_v: 0,
     planned_v: 0,
@@ -175,7 +241,7 @@ export const defaultRecord = (a) => {
     cur_bal: a.starting_bal,
     is_paid: false,
     purch_v: 0,
-    apr_v: a.apr,
+    apr_v: monthly || getBillType(a) === "noInterest" ? 0 : a.apr,
   };
 };
 
@@ -260,6 +326,18 @@ export const getPayWeekHolidayCount = (payDate, holidays) => {
 /** Full promo APR metadata for an account in a given month/year. */
 export const getPromoMeta = (account, month, year) => {
   const mk = (m, y) => `${y}-${String(m).padStart(2, "0")}`;
+  const billType = getBillType(account);
+  if (startsOverMonthly(account) || billType === "noInterest") {
+    return {
+      effectiveApr: 0,
+      baseApr: 0,
+      promoApr: 0,
+      aprAfterPromo: 0,
+      promoUntil: normalizeMonthInput(account?.promo_until),
+      promoActive: false,
+      usingManualApr: false,
+    };
+  }
   const manualApr    = account?.apr_v;
   const baseApr      = normalizeAprDecimal(account?.apr ?? 0);
   const promoApr     = normalizeAprDecimal(account?.promo_apr ?? 0);
@@ -283,11 +361,14 @@ export const getComputedBalance = (account) =>
 
 /** Status badge descriptor for a bill. Requires selMonth/selYear from render context. */
 export const getBadge = (a, selMonth, selYear) => {
-  if (a.is_paid)                            return { type: "paid",    label: "Paid",       cls: "" };
-  if (a.d_left != null && a.d_left < 0)     return { type: "overdue", label: `Overdue by ${Math.abs(a.d_left)}d`, cls: "bill-overdue" };
-  if (a.d_left != null && a.d_left === 0)   return { type: "today",   label: "Due TODAY",  cls: "bill-today" };
-  if (a.d_left != null && a.d_left === 1)   return { type: "soon",    label: "Due Tomorrow", cls: "" };
-  if (a.d_left != null && a.d_left <= 3)    return { type: "soon",    label: `Due in ${a.d_left} days`, cls: "" };
+  const displayStatus = getBillDisplayStatus(a);
+  if (displayStatus?.key === "covered") return { type: "paid", label: "Covered", cls: "" };
+  if (displayStatus?.key === "paid_cycle") return { type: "paid", label: "Paid this cycle", cls: "" };
+  if (displayStatus?.key === "paid_off") return { type: "paid", label: "Paid off", cls: "" };
+  if (displayStatus?.key === "overdue") return { type: "overdue", label: `Overdue by ${Math.abs(Number(a?.d_left) || 0)}d`, cls: "bill-overdue" };
+  if (displayStatus?.key === "due_today") return { type: "today", label: "Due TODAY", cls: "bill-today" };
+  if (displayStatus?.key === "due_soon" && Number(a?.d_left) === 1) return { type: "soon", label: "Due Tomorrow", cls: "" };
+  if (displayStatus?.key === "due_soon") return { type: "soon", label: `Due in ${Number(a?.d_left) || 0} days`, cls: "" };
   if (a.d_left != null && a.d_left <= 7)    return { type: "soon",    label: `${a.d_left} days left`, cls: "" };
   if (a.d_left != null) {
     const daysInMonth = new Date(selYear, selMonth, 0).getDate();

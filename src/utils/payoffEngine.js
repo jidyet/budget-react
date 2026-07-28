@@ -46,6 +46,7 @@ export const payoffSimulate = (
       promo_until: a.promo_until ?? "",
       apr_after_promo: a.apr_after_promo ?? a.apr ?? 0,
       scheduled_payment: getScheduledPayment(a),
+      min_due: Math.max(0, Number(a.min_due_v || 0)),
       bal: Math.max(0, Number(a.cur_bal || 0)),
     }))
     .filter((a) => a.bal > 0);
@@ -70,13 +71,31 @@ export const payoffSimulate = (
       a.bal += interest;
     });
 
+    // Freed minimums from accounts cleared in *prior* months compound the pool each month.
+    // This is the core snowball/avalanche mechanic: money freed from paid-off debts rolls forward.
+    const rolledOver = state
+      .filter((a) => a.bal <= 0.01)
+      .reduce((s, a) => {
+        const planExtra = Math.max(0, Number(perAccountExtra[a.id] || 0));
+        // Take the max of what was scheduled vs minimum + extra to avoid double-counting
+        // when planned_v already includes the per-account extra (e.g. synced from a payoff plan).
+        return s + Math.max(a.scheduled_payment, a.min_due + planExtra);
+      }, 0);
+
+    // Apply minimums; track same-month overpayment when a debt clears mid-payment.
+    let overpaidThisMonth = 0;
     active.forEach((a) => {
-      const base = Math.max(0, a.scheduled_payment + Number(perAccountExtra[a.id] || 0));
+      const planExtra = Math.max(0, Number(perAccountExtra[a.id] || 0));
+      // max(scheduled, min + extra): if planned_v was synced from the payoff plan and already
+      // includes the extra, this avoids adding it a second time. If planned_v is lower or unset,
+      // the minimum + extra floor still applies.
+      const base = Math.max(0, Math.max(a.scheduled_payment, a.min_due + planExtra));
       const pay = Math.min(a.bal, base);
       a.bal -= pay;
+      if (a.bal <= 0.01) overpaidThisMonth += base - pay;
     });
 
-    let extraPool = Math.max(0, Number(monthlyExtra || 0));
+    let extraPool = Math.max(0, Number(monthlyExtra || 0)) + rolledOver + overpaidThisMonth;
     const targetOrder = [...active]
       .filter((a) => a.bal > 0.01)
       .sort((a, b) => strategy === "snowball" ? a.bal - b.bal : b.apr - a.apr);

@@ -89,9 +89,17 @@ export default function HistoryPage(props) {
   }, [ensureLocalUserData, isLocalUser, loadUploads, monthKey, user, workspaceScope]);
 
   return (
-    <div style={{ opacity: mounted ? 1 : 0, transition: "opacity .3s", marginTop: 16 }}>
-      <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 12 }}>
-        Uploads - {MONTHS[selMonth - 1]} {selYear}
+    <div style={{ opacity: mounted ? 1 : 0, transition: "opacity .3s", display: "grid", gap: 12, maxWidth: 860 }}>
+      <div style={{ background: `linear-gradient(135deg, ${c.ac}14, ${c.surf} 36%, ${c.surf2})`, border: `1px solid ${c.border}`, borderRadius: 20, padding: "18px 20px", display: "grid", gap: 8 }}>
+        <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase", color: c.muted }}>History</div>
+        <div style={{ fontSize: 26, fontWeight: 900, color: c.tx }}>Statement uploads</div>
+        <div style={{ fontSize: 13, color: c.tx2, lineHeight: 1.55, maxWidth: 560 }}>
+          Every statement you've imported this month, with a breakdown of what we pulled in.
+        </div>
+      </div>
+
+      <div style={{ fontSize: 13, fontWeight: 800, color: c.tx2, paddingLeft: 2 }}>
+        {MONTHS[selMonth - 1]} {selYear} · {uploadsList.length} upload{uploadsList.length !== 1 ? "s" : ""}
       </div>
       {uploadsError && <ErrorState palette={c} title="Uploads unavailable" message={uploadsError} />}
       {!uploadsError && uploadsList.length === 0 && <EmptyState palette={c} title="Nothing here yet" message="No uploads were saved for this month." />}

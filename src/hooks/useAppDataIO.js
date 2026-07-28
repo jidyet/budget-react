@@ -1,8 +1,9 @@
 import { useCallback } from "react";
 import { saveUpload } from "../firebase";
 import { MONTHS } from "../data/mockAccounts";
-import { canUseFeature, getUpgradeMessage } from "../utils/planLimits";
-import { getBadge } from "../utils/budgetUtils";
+import { getBillDisplayStatus } from "../services/billModel";
+import { getStatusLabel } from "../utils/guidanceRules";
+import { canUseFeature } from "../utils/planLimits";
 
 export default function useAppDataIO({
   user,
@@ -10,6 +11,8 @@ export default function useAppDataIO({
   subscription,
   openBillingPage,
   showToast,
+  askConfirm,
+  founderAccount = false,
   allAccts,
   selMonth,
   selYear,
@@ -20,14 +23,21 @@ export default function useAppDataIO({
   localData,
   workspaceScope,
 }) {
-  const exportAllData = useCallback(() => {
+  const exportAllData = useCallback(async () => {
     if (!user) {
       showToast("Sign in first to export", "error");
       return;
     }
-    if (!canUseFeature(subscription, "export")) {
-      showToast(getUpgradeMessage("export"));
-      openBillingPage();
+    // Admins (founderAccount) always have full export access regardless of plan
+    if (!founderAccount && !canUseFeature(subscription, "export")) {
+      const goToBilling = await askConfirm({
+        title: "Export is a premium feature",
+        message: "Download a full CSV of your accounts, balances, and income for the selected month. Upgrade to TrackToZero Premium to unlock this and other features.",
+        confirmLabel: "See upgrade options",
+        cancelLabel: "Not now",
+        tone: "neutral",
+      });
+      if (goToBilling) openBillingPage();
       return;
     }
 
@@ -47,9 +57,9 @@ export default function useAppDataIO({
       account.cur_bal != null ? account.cur_bal.toFixed(2) : "",
       account.min_due_v != null ? account.min_due_v.toFixed(2) : "",
       account.paid_v != null ? account.paid_v.toFixed(2) : "",
-      account.is_paid ? "Yes" : "No",
+      ["covered", "paid_cycle", "paid_off"].includes(getBillDisplayStatus(account)?.key) ? "Yes" : "No",
       account.due_day || "",
-      getBadge(account, selMonth, selYear).label.replace(/[^\w\s.-]/g, "").trim(),
+      getStatusLabel(account).replace(/[^\w\s.-]/g, "").trim(),
     ]);
 
     const incHeaders = ["Source", "Amount", "Type"];
@@ -79,8 +89,10 @@ export default function useAppDataIO({
     showToast("Exported as CSV");
   }, [
     allAccts,
+    askConfirm,
     boaPayPeriods,
     eagleviewPayPeriods,
+    founderAccount,
     income,
     monthKey,
     openBillingPage,
@@ -93,10 +105,11 @@ export default function useAppDataIO({
 
   const handleUpload = useCallback(async (upload) => {
     if (!user) return;
+    const MAX_UPLOAD_ROWS = 500;
     const payload = {
-      fileName: upload.fileName || upload.fileName,
-      type: upload.type || "unknown",
-      rows: upload.rows || [],
+      fileName: String(upload.fileName || "").slice(0, 200),
+      type: String(upload.type || "unknown").slice(0, 40),
+      rows: Array.isArray(upload.rows) ? upload.rows.slice(0, MAX_UPLOAD_ROWS) : [],
       parsed: upload.parsed || null,
       uploader: user.email || user.uid,
     };

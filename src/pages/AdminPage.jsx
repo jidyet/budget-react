@@ -12,6 +12,15 @@ const SETUP_STEPS = `To bootstrap admin access:
 2. Create the document with field: uids (array) containing your UID
 3. Reload this page`;
 
+async function confirmAdminAction({
+  title,
+  detail,
+  confirmValue,
+}) {
+  const response = window.prompt(`${title}\n\n${detail}\n\nType ${confirmValue} to continue.`);
+  return response === confirmValue;
+}
+
 export default function AdminPage({ mounted, c, isMobile, user, showToast }) {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -59,7 +68,12 @@ export default function AdminPage({ mounted, c, isMobile, user, showToast }) {
   };
 
   const handleResetToSolo = useCallback(async (targetUser) => {
-    if (!window.confirm(`Reset "${targetUser.email}" to solo and remove them from any household?`)) return;
+    const confirmed = await confirmAdminAction({
+      title: `Reset ${targetUser.email} to solo?`,
+      detail: "This removes the user from any active household and clears managed household workspace state.",
+      confirmValue: "RESET",
+    });
+    if (!confirmed) return;
     await withBusy(targetUser.uid, async () => {
       await adminResetUserToSolo(targetUser.uid);
       showToast(`${targetUser.email} reset to solo`);
@@ -67,10 +81,16 @@ export default function AdminPage({ mounted, c, isMobile, user, showToast }) {
   }, [showToast]);
 
   const handleToggleAdmin = useCallback(async (targetUser, makeAdmin) => {
-    const prompt = makeAdmin
-      ? `Grant admin access to "${targetUser.email}"?`
-      : `Remove admin access from "${targetUser.email}"?`;
-    if (!window.confirm(prompt)) return;
+    const confirmed = await confirmAdminAction({
+      title: makeAdmin
+        ? `Grant admin access to ${targetUser.email}?`
+        : `Remove admin access from ${targetUser.email}?`,
+      detail: makeAdmin
+        ? "This will let the user manage admin-only tools and protected app operations."
+        : "This removes admin-only access from the user.",
+      confirmValue: "ADMIN",
+    });
+    if (!confirmed) return;
     await withBusy(targetUser.uid, async () => {
       await adminSetUserAdminRole(targetUser.uid, makeAdmin);
       refreshAdminConfig();
@@ -79,11 +99,21 @@ export default function AdminPage({ mounted, c, isMobile, user, showToast }) {
   }, [refreshAdminConfig, showToast]);
 
   const handleDeleteData = useCallback(async (targetUser) => {
-    if (!window.confirm(`Delete all Firestore data for "${targetUser.email}"? This does not remove their Firebase Auth sign-in.`)) return;
+    const confirmed = await confirmAdminAction({
+      title: `Delete Firestore data for ${targetUser.email}?`,
+      detail: "This deletes the user's Firestore data only. Their Firebase Auth sign-in will still exist.",
+      confirmValue: "DELETE",
+    });
+    if (!confirmed) return;
     await withBusy(targetUser.uid, async () => {
-      await adminDeleteUserFirestoreData(targetUser.uid);
-      refreshAdminConfig();
-      showToast(`${targetUser.email} Firestore data deleted`);
+      try {
+        await adminDeleteUserFirestoreData(targetUser.uid);
+        refreshAdminConfig();
+        showToast(`${targetUser.email} Firestore data deleted`);
+      } catch (err) {
+        console.error("adminDeleteUserFirestoreData failed:", err);
+        showToast(`Delete failed: ${err?.message || "unknown error"}`, "error");
+      }
     });
   }, [refreshAdminConfig, showToast]);
 
@@ -121,7 +151,7 @@ export default function AdminPage({ mounted, c, isMobile, user, showToast }) {
           Admin tools can now reset workspace state, remove stale household membership, promote or demote admins, and delete a user&apos;s Firestore data.
         </div>
         <div style={{ fontSize: 11, color: c.muted }}>
-          Note: deleting Firebase Auth sign-in accounts still requires an Admin SDK or backend function.
+          Sensitive actions require typed confirmation. Deleting Firebase Auth sign-in accounts still requires an Admin SDK or backend function.
         </div>
       </div>
 

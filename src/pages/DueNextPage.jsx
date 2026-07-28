@@ -1,6 +1,7 @@
 import EmptyState from "../components/feedback/EmptyState";
 import { fx } from "../utils/budgetUtils";
 import { CAT_ICON, MONTHS } from "../data/mockAccounts";
+import { isBillSettledThisCycle } from "../services/billModel";
 
 export default function DueNextPage(props) {
   const {
@@ -168,7 +169,7 @@ export default function DueNextPage(props) {
                             >
                               <input
                                 type="checkbox"
-                                checked={!!account.is_paid}
+                                checked={isBillSettledThisCycle(account)}
                                 onChange={() => markPaid(account)}
                                 style={{ width: 18, height: 18, accentColor: c.ac, cursor: "pointer" }}
                               />
@@ -180,7 +181,7 @@ export default function DueNextPage(props) {
                               </div>
                               <div style={{ textAlign: "right" }}>
                                 <div style={{ fontFamily: "'DM Mono',monospace", fontWeight: 700 }}>{fx(account.min_due_v || 0)}</div>
-                                <div style={{ fontSize: 12, color: c.muted }}>{account.is_paid ? "Paid" : "Min due"}</div>
+                                <div style={{ fontSize: 12, color: c.muted }}>{isBillSettledThisCycle(account) ? "Handled" : "Min due"}</div>
                               </div>
                             </label>
                           ))}

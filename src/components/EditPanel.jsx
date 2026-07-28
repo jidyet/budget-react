@@ -1,5 +1,16 @@
 import { useEffect, useState } from "react";
 import { fx, moneyFieldLabel } from "../utils/budgetUtils";
+import {
+  BILL_TYPE_OPTIONS,
+  getBillTypeHelp,
+  normalizeBillType,
+  normalizeStartsOverMonthly,
+  getBillCycleValues,
+  getBillMonthlyCoverageStatus,
+  MONTHLY_COVERAGE_LABELS,
+  getBillPayoffStatus,
+  PAYOFF_STATUS_LABELS,
+} from "../services/billModel";
 
 const normalizeAprDecimal = (value) => {
   const numeric = Number(value || 0);
@@ -34,6 +45,8 @@ export default function EditPanel({ a, theme, allCategories, onSave, onClose }) 
     // account metadata
     category: String(a.category ?? ""),
     due_day: String(a.due_day ?? 0),
+    billType: normalizeBillType(a),
+    startsOverMonthly: normalizeStartsOverMonthly(a),
     interest_type: String(a.interest_type ?? "variable_apr"),
     promo_apr_pct: String((promoAprDecimal * 100).toFixed(4).replace(/\.?0+$/, "") || "0"),
     promo_until: normalizeMonthInput(a.promo_until ?? ""),
@@ -45,6 +58,10 @@ export default function EditPanel({ a, theme, allCategories, onSave, onClose }) 
 
   const projectedBal = Math.max(0, baseBalance - (Number(vals.paid_v) || 0) + (Number(vals.purch_v) || 0));
   const effectiveCurBal = manualBalEdited ? vals.cur_bal : projectedBal.toFixed(2);
+  const billType = normalizeBillType({ billType: vals.billType, startsOverMonthly: vals.startsOverMonthly });
+  const monthlyRecurring = Boolean(vals.startsOverMonthly) || billType === "monthly";
+  const noInterestPlan = billType === "noInterest";
+  const ratesDisabled = monthlyRecurring || noInterestPlan;
   const currentAprDec = (parseFloat(vals.apr_pct) || 0) / 100;
   const plannedAmount = Number(vals.planned_v) || 0;
   const actualPaidAmount = Number(vals.paid_v) || 0;
@@ -54,6 +71,12 @@ export default function EditPanel({ a, theme, allCategories, onSave, onClose }) 
   const interestApplied = Math.min(breakdownPayment, monthlyInterest);
   const principalApplied = Math.max(0, breakdownPayment - interestApplied);
   const minCoversInterest = (Number(vals.min_due_v) || 0) >= monthlyInterest;
+
+  // Progress Overview — uses live form vals so it updates as user types
+  const livebill = { ...a, ...vals, cur_bal: effectiveCurBal };
+  const cycleVals = getBillCycleValues(livebill);
+  const coverageStatus = getBillMonthlyCoverageStatus(livebill);
+  const payoffStatus = getBillPayoffStatus(livebill);
 
   const D = theme === "dark";
   const c = {
@@ -96,7 +119,26 @@ export default function EditPanel({ a, theme, allCategories, onSave, onClose }) 
   }, [onClose]);
 
   const updateField = (key, value) => {
-    setVals((v) => ({ ...v, [key]: value }));
+    setVals((v) => {
+      if (key === "billType") {
+        return {
+          ...v,
+          billType: value,
+          startsOverMonthly: value === "monthly" ? true : Boolean(v.startsOverMonthly),
+          interest_type: value === "monthly" || value === "noInterest" ? "interest_free" : v.interest_type,
+        };
+      }
+      if (key === "startsOverMonthly") {
+        const nextMonthly = Boolean(value);
+        return {
+          ...v,
+          startsOverMonthly: nextMonthly,
+          billType: nextMonthly ? "monthly" : normalizeBillType({ billType: v.billType }),
+          interest_type: nextMonthly ? "interest_free" : v.interest_type,
+        };
+      }
+      return { ...v, [key]: value };
+    });
     if (key === "cur_bal") setManualBalEdited(true);
   };
 
@@ -170,7 +212,14 @@ export default function EditPanel({ a, theme, allCategories, onSave, onClose }) 
         </div>
         <div>
           {sectionLabel("APR (%)")}
-          <input type="number" step="0.001" style={{ ...inp, color: c.amber }} value={vals.apr_pct} onChange={(e) => updateField("apr_pct", e.target.value)} />
+          <input
+            type="number"
+            step="0.001"
+            style={{ ...inp, color: c.amber, opacity: ratesDisabled ? 0.6 : 1 }}
+            value={vals.apr_pct}
+            onChange={(e) => updateField("apr_pct", e.target.value)}
+            disabled={ratesDisabled}
+          />
         </div>
         <div>
           {sectionLabel(moneyFieldLabel("Auto Balance Preview"))}
@@ -201,6 +250,50 @@ export default function EditPanel({ a, theme, allCategories, onSave, onClose }) 
             <div style={{ fontSize: 10, color: c.muted, marginBottom: 3, fontFamily: "'Instrument Sans',sans-serif", textTransform: "uppercase", letterSpacing: "0.06em" }}>Min Covers Int?</div>
             <div style={{ fontSize: 13, fontWeight: 700, color: minCoversInterest ? c.green : c.red, fontFamily: "'Instrument Sans',sans-serif" }}>
               {monthlyInterest === 0 ? "—" : minCoversInterest ? "Yes" : "No"}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Progress Overview */}
+      <div style={{ borderRadius: 8, border: `1px solid ${c.border2}`, background: c.surf2, padding: "10px 12px", marginBottom: 8 }}>
+        <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: c.muted, marginBottom: 8, fontFamily: "'Instrument Sans',sans-serif" }}>
+          Progress Overview
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          {/* Monthly cycle column */}
+          <div style={{ borderRadius: 6, border: `1px solid ${c.border2}`, padding: "8px 10px" }}>
+            <div style={{ fontSize: 10, color: c.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: "'Instrument Sans',sans-serif", marginBottom: 4 }}>
+              This Month
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: coverageStatus === "covered" || coverageStatus === "overcovered" ? c.green : coverageStatus === "partial" ? c.amber : c.muted, marginBottom: 4, fontFamily: "'Instrument Sans',sans-serif" }}>
+              {MONTHLY_COVERAGE_LABELS[coverageStatus]}
+            </div>
+            <div style={{ fontSize: 11, color: c.muted, fontFamily: "'DM Mono',monospace" }}>
+              {cycleVals.monthly_due > 0 ? (
+                <>
+                  <span style={{ color: c.green }}>{fx(cycleVals.paid_this_cycle)}</span>
+                  {" / "}
+                  <span>{fx(cycleVals.monthly_due)}</span>
+                  {cycleVals.remaining_this_cycle > 0 && (
+                    <span style={{ color: c.amber }}> · {fx(cycleVals.remaining_this_cycle)} left</span>
+                  )}
+                </>
+              ) : (
+                <span>{cycleVals.paid_this_cycle > 0 ? fx(cycleVals.paid_this_cycle) + " paid" : "No amount set"}</span>
+              )}
+            </div>
+          </div>
+          {/* Payoff column */}
+          <div style={{ borderRadius: 6, border: `1px solid ${c.border2}`, padding: "8px 10px" }}>
+            <div style={{ fontSize: 10, color: c.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: "'Instrument Sans',sans-serif", marginBottom: 4 }}>
+              Balance Status
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: payoffStatus === "paid_off" ? c.green : c.tx, marginBottom: 4, fontFamily: "'Instrument Sans',sans-serif" }}>
+              {PAYOFF_STATUS_LABELS[payoffStatus]}
+            </div>
+            <div style={{ fontSize: 11, color: c.muted, fontFamily: "'DM Mono',monospace" }}>
+              {fx(Number(effectiveCurBal) || 0)} remaining
             </div>
           </div>
         </div>
@@ -240,11 +333,42 @@ export default function EditPanel({ a, theme, allCategories, onSave, onClose }) 
             />
           </div>
           <div style={{ gridColumn: "1 / -1" }}>
+            {sectionLabel("What type of bill is this?")}
+            <select
+              style={sel}
+              value={billType}
+              onChange={(e) => updateField("billType", e.target.value)}
+            >
+              {BILL_TYPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            <div style={{ fontSize: 11, color: c.muted, marginTop: 5 }}>
+              {getBillTypeHelp(billType)}
+            </div>
+          </div>
+          <label style={{ gridColumn: "1 / -1", display: "grid", gap: 6, cursor: "pointer" }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <input
+                type="checkbox"
+                checked={monthlyRecurring}
+                onChange={(e) => updateField("startsOverMonthly", e.target.checked)}
+              />
+              <span style={{ fontSize: 13, fontWeight: 700, color: c.tx }}>
+                Does this bill start over each month?
+              </span>
+            </span>
+            <span style={{ fontSize: 11, color: c.muted }}>
+              This bill starts fresh each month and is tracked as covered, not paid off forever.
+            </span>
+          </label>
+          <div style={{ gridColumn: "1 / -1" }}>
             {sectionLabel("Interest Type")}
             <select
               style={sel}
-              value={vals.interest_type}
+              value={ratesDisabled ? "interest_free" : vals.interest_type}
               onChange={(e) => updateField("interest_type", e.target.value)}
+              disabled={ratesDisabled}
             >
               <option value="variable_apr">Variable APR (Credit Cards)</option>
               <option value="fixed_apr">Fixed APR (Student / Personal Loans)</option>
@@ -253,6 +377,11 @@ export default function EditPanel({ a, theme, allCategories, onSave, onClose }) 
               <option value="promo_zero">0% Promotional</option>
               <option value="interest_free">Interest-Free</option>
             </select>
+            {ratesDisabled && (
+              <div style={{ fontSize: 11, color: c.muted, marginTop: 5 }}>
+                Interest settings are turned off for monthly and no-interest bills.
+              </div>
+            )}
           </div>
           <div>
             {sectionLabel("Promo APR (%)")}
@@ -260,9 +389,10 @@ export default function EditPanel({ a, theme, allCategories, onSave, onClose }) 
               type="number"
               step="0.001"
               min="0"
-              style={{ ...inp, color: c.amber }}
+              style={{ ...inp, color: c.amber, opacity: ratesDisabled ? 0.6 : 1 }}
               value={vals.promo_apr_pct}
               onChange={(e) => updateField("promo_apr_pct", e.target.value)}
+              disabled={ratesDisabled}
             />
           </div>
           <div>
@@ -270,9 +400,10 @@ export default function EditPanel({ a, theme, allCategories, onSave, onClose }) 
             <input
               type="text"
               placeholder="e.g. 2025-06"
-              style={{ ...inp, fontSize: 14, borderColor: !promoUntilValid ? c.red : c.border2 }}
+              style={{ ...inp, fontSize: 14, borderColor: !promoUntilValid ? c.red : c.border2, opacity: ratesDisabled ? 0.6 : 1 }}
               value={vals.promo_until}
               onChange={(e) => updateField("promo_until", e.target.value)}
+              disabled={ratesDisabled}
             />
             {!promoUntilValid && (
               <div style={{ fontSize: 11, color: c.red, marginTop: 3 }}>Use YYYY-MM format</div>
@@ -284,9 +415,10 @@ export default function EditPanel({ a, theme, allCategories, onSave, onClose }) 
               type="number"
               step="0.001"
               min="0"
-              style={{ ...inp, color: c.amber }}
+              style={{ ...inp, color: c.amber, opacity: ratesDisabled ? 0.6 : 1 }}
               value={vals.apr_after_promo_pct}
               onChange={(e) => updateField("apr_after_promo_pct", e.target.value)}
+              disabled={ratesDisabled}
             />
           </div>
         </div>

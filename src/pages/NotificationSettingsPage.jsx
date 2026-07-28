@@ -12,6 +12,7 @@ export default function NotificationSettingsPage({
   patchReminderPreferences,
   pwaInstalled,
   subscription,
+  founderAccount = false,
 }) {
   const toggleStyle = (enabled) => ({
     width: 48,
@@ -71,14 +72,17 @@ export default function NotificationSettingsPage({
             </div>
           </div>
 
+          {notifPermission !== "unsupported" && (
           <div style={{ background: c.surf, border: `1px solid ${c.border}`, borderRadius: 18, padding: "16px 18px", display: "grid", gap: 10 }}>
             {[
               ["dueSoon", "Due soon", "A gentle nudge when something is close."],
               ["checkIn", "Check-in", "A simple prompt to come back and look."],
               ["milestones", "Milestones", "Short celebration when you hit a win."],
-              ["householdUpdates", "Household updates", "Know when someone else moved things forward."],
-              ["launchPrompts", "Launch notes", "Small welcome and return prompts during early launch."],
-              ["reviewPrompts", "Feedback asks", "A quick feedback check after a good moment."],
+              ["householdUpdates", "Household updates", "Know when someone updates a bill, statement, plan, or shared setup."],
+              ...(founderAccount ? [
+                ["launchPrompts", "Launch notes", "Small welcome and return prompts during early launch."],
+                ["reviewPrompts", "Feedback asks", "A quick feedback check after a good moment."],
+              ] : []),
             ].map(([key, title, detail]) => (
               <div key={key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: `1px solid ${c.border}` }}>
                 <div>
@@ -90,6 +94,33 @@ export default function NotificationSettingsPage({
                 </button>
               </div>
             ))}
+            <div style={{ display: "grid", gap: 6, paddingTop: 6, borderTop: `1px solid ${c.border}` }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: c.muted, letterSpacing: "0.08em", textTransform: "uppercase" }}>Scheduled pushes</div>
+              <div style={{ fontSize: 12, color: c.tx2 }}>
+                Morning check-in sends around {Number(reminderPreferences.morningHour || 8)}:00 AM.
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {["sunday", "monday"].map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => patchReminderPreferences({ weeklySummaryDay: option })}
+                    style={{
+                      padding: "9px 12px",
+                      borderRadius: 999,
+                      border: `1px solid ${reminderPreferences.weeklySummaryDay === option ? c.ac : c.border2}`,
+                      background: reminderPreferences.weeklySummaryDay === option ? `${c.ac}14` : c.surf2,
+                      color: reminderPreferences.weeklySummaryDay === option ? c.ac : c.tx,
+                      fontSize: 12,
+                      fontWeight: 800,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {option === "sunday" ? "Sunday summary" : "Monday summary"}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div style={{ display: "grid", gap: 6, paddingTop: 6 }}>
               <div style={{ fontSize: 12, fontWeight: 800, color: c.muted, letterSpacing: "0.08em", textTransform: "uppercase" }}>Reminder pace</div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -115,6 +146,7 @@ export default function NotificationSettingsPage({
               </div>
             </div>
           </div>
+          )}
 
           {!pwaInstalled && (
             <EmptyStateCard

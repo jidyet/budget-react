@@ -14,6 +14,7 @@ import {
   getFirestore, collection, doc, setDoc, addDoc,
   getDocs, onSnapshot, getDoc, serverTimestamp, query, orderBy, limit as fsLimit, where, writeBatch, deleteDoc
 } from "firebase/firestore";
+import { getFunctions, connectFunctionsEmulator, httpsCallable } from "firebase/functions";
 
 const env = typeof import.meta !== "undefined" ? (import.meta.env || {}) : {};
 
@@ -60,17 +61,35 @@ export const getFirebaseStatus = () => ({
 let app = null;
 export let db = null;
 export let auth = null;
+export let functions = null;
+
+const parseEnvFlag = (value, fallback = false) => {
+  if (value === undefined || value === null || value === "") return fallback;
+  const normalized = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+};
 
 if (isFirebaseConfigured()) {
   try {
     app = initializeApp(firebaseConfig);
     db = getFirestore(app);
     auth = getAuth(app);
+    functions = getFunctions(app);
+    if (typeof import.meta !== "undefined" && import.meta.env?.DEV && parseEnvFlag(env.VITE_USE_FIREBASE_EMULATORS, false)) {
+      const host = String(env.VITE_FIREBASE_FUNCTIONS_HOST || "127.0.0.1");
+      const port = Number(env.VITE_FIREBASE_FUNCTIONS_PORT || 5001);
+      if (Number.isFinite(port) && port > 0) {
+        connectFunctionsEmulator(functions, host, port);
+      }
+    }
   } catch (e) {
     console.error("Firebase initialization failed:", e);
     app = null;
     db = null;
     auth = null;
+    functions = null;
   }
 }
 
@@ -87,8 +106,10 @@ const userMonthAccountRef = (uid, monthKey, accountId) =>
   doc(db, "users", String(uid), "months", String(monthKey), "accounts", String(accountId));
 const userMonthUploadsRef = (uid, monthKey) => collection(db, "users", String(uid), "months", String(monthKey), "uploads");
 const userAppRef = (uid) => doc(db, "users", String(uid), "meta", "app");
+const userReminderRef = (uid) => doc(db, "users", String(uid), "meta", "reminders");
 const userInvitesRef = (uid) => collection(db, "users", String(uid), "invites");
 const userInviteRef = (uid, householdId) => doc(db, "users", String(uid), "invites", String(householdId));
+const userDeviceRef = (uid, deviceId) => doc(db, "users", String(uid), "devices", String(deviceId));
 const householdsRef = () => collection(db, "households");
 const householdDirectoryRef = () => collection(db, "householdDirectory");
 const householdRootRef = (householdId) => doc(db, "households", String(householdId));
@@ -169,6 +190,32 @@ export const ensureHouseholdDirectoryEntry = async (householdId, overrideData = 
   const normalized = normalizeHouseholdDirectory(householdId, payloadSource);
   await setDoc(householdDirectoryDocRef(householdId), normalized, { merge: true });
   return normalized;
+};
+
+export const ensureHouseholdInviteReady = async (householdId, actor = null) => {
+  if (!db || !householdId) return null;
+  const snap = await getDoc(householdRootRef(householdId));
+  if (!snap.exists()) return null;
+  const data = snap.data() || {};
+  const nextJoinCode = String(data.joinCode || "").trim().toUpperCase() || makeJoinCode();
+  const payload = {
+    ...data,
+    joinCode: nextJoinCode,
+  };
+  if (nextJoinCode !== String(data.joinCode || "").trim().toUpperCase()) {
+    await setDoc(
+      householdRootRef(householdId),
+      {
+        joinCode: nextJoinCode,
+        updatedAt: serverTimestamp(),
+        updatedBy: String(actor?.uid || data.updatedBy || ""),
+        updatedByLabel: String(actor?.displayName || actor?.email || data.updatedByLabel || "Owner"),
+      },
+      { merge: true }
+    );
+  }
+  await ensureHouseholdDirectoryEntry(householdId, payload);
+  return { id: snap.id, ...data, joinCode: nextJoinCode };
 };
 
 const getActorLabel = (scope) => scope?.actorName || scope?.actorEmail || "Unknown member";
@@ -339,6 +386,20 @@ export const updateCurrentUserPassword = async (currentPassword, nextPassword) =
   return true;
 };
 
+export const deleteCurrentHousehold = async (householdId) => {
+  if (!functions) throw firebaseNotReadyError();
+  const callable = httpsCallable(functions, "deleteHousehold");
+  const result = await callable({ householdId: String(householdId || "").trim() });
+  return result?.data || { ok: true };
+};
+
+export const deleteCurrentUserAccount = async () => {
+  if (!functions) throw firebaseNotReadyError();
+  const callable = httpsCallable(functions, "deleteMyAccount");
+  const result = await callable({});
+  return result?.data || { ok: true };
+};
+
 export const onAuth = (cb) => {
   if (!auth) {
     cb(null);
@@ -410,6 +471,10 @@ export const subscribeHouseholdForUser = (uid, callback) => {
     return () => {};
   }
   const safeUid = String(uid || "");
+  // Read the user's saved activeHouseholdId so we can prefer it when multiple
+  // memberships exist (e.g. user created a new household but is still in an old one).
+  let activeHouseholdId = "";
+  getDoc(userAppRef(safeUid)).then((s) => { activeHouseholdId = s.data()?.activeHouseholdId || ""; }).catch(() => {});
   const q = query(householdsRef(), where("memberIds", "array-contains", String(uid)));
   return onSnapshot(
     q,
@@ -454,7 +519,6 @@ export const subscribeHouseholdForUser = (uid, callback) => {
               nameLower: directoryData.nameLower || item.nameLower || String(directoryData.name || item.name || "").trim().toLowerCase(),
               description: directoryData.description || item.description || "",
               joinMode: directoryData.joinMode || item.joinMode || "open",
-              ownerEmail: directoryData.ownerEmail || item.ownerEmail || "",
             };
           } catch (error) {
             console.error("subscribeHouseholdForUser directory merge error:", error);
@@ -462,10 +526,12 @@ export const subscribeHouseholdForUser = (uid, callback) => {
           }
         })
       )).filter(Boolean);
-      callback({
-        activeHousehold: memberships.find((item) => item.active !== false) || null,
-        memberships,
-      });
+      // Prefer the household the user explicitly set as active; fall back to first non-inactive.
+      const activeHousehold =
+        memberships.find((item) => item.id === activeHouseholdId) ||
+        memberships.find((item) => item.active !== false) ||
+        null;
+      callback({ activeHousehold, memberships });
     },
     (err) => {
       console.error("subscribeHouseholdForUser error:", err);
@@ -572,7 +638,10 @@ export const searchHouseholds = async (term) => {
     };
 
     if (parsed.householdId) {
-      const match = await hydrateHousehold({ id: parsed.householdId, householdId: parsed.householdId });
+      // Pass joinCode in seed so hydrateHousehold returns a usable result even when
+      // the root doc is unreadable (legacy household without active:true) and no
+      // directory entry exists yet — both reads fall back to null, but seed survives.
+      const match = await hydrateHousehold({ id: parsed.householdId, householdId: parsed.householdId, joinCode: parsed.joinCode || "" });
       if (match?.name || match?.joinCode) return [match];
     }
     if (parsed.joinCode) {
@@ -592,8 +661,8 @@ export const searchHouseholds = async (term) => {
           return matches;
         }
       } catch {
-      // Non-members cannot query /households — fall through to name search
-    }
+        // Non-members cannot list /households — fall through
+      }
       const directoryScan = await getDocs(query(householdDirectoryRef(), orderBy("nameLower"), fsLimit(100)));
       const scannedMatches = (await Promise.all(
         directoryScan.docs
@@ -606,6 +675,12 @@ export const searchHouseholds = async (term) => {
           .map((item) => hydrateHousehold(item))
       )).filter(Boolean);
       if (scannedMatches.length) return scannedMatches;
+      // Last resort: if we have a householdId from the invite link, try fetching it directly.
+      // This handles legacy households where active:true is missing AND no directory entry exists.
+      if (parsed.householdId) {
+        const directMatch = await hydrateHousehold({ id: parsed.householdId, householdId: parsed.householdId, joinCode: parsed.joinCode });
+        if (directMatch?.name || directMatch?.joinCode) return [directMatch];
+      }
     }
     if (!raw) return [];
     const needle = raw.toLowerCase();
@@ -713,13 +788,13 @@ export const createHousehold = async (owner, household, seed = null) => {
   const ownerIdentity = resolveIdentity(owner);
   const ownerEmail = ownerIdentity.email;
   const ownerLabel = ownerIdentity.displayName || "Owner";
+
   const payload = {
     name: String(household?.name || "My Household").trim(),
     description: String(household?.description || "").trim(),
     joinMode: household?.joinMode === "approval" ? "approval" : "open",
     joinCode: makeJoinCode(),
     ownerId,
-    ownerEmail,
     memberIds: [ownerId],
     memberCount: 1,
     active: true,
@@ -758,6 +833,12 @@ export const createHousehold = async (owner, household, seed = null) => {
       updatedAt: serverTimestamp(),
     }, { merge: true }),
   ]);
+
+  // Clean up any other household memberships in the background.
+  // The new activeHouseholdId is already committed above so the listener
+  // will never see a null/solo flash between states.
+  adminForceRemoveOtherHouseholds(ownerId, householdId)
+    .catch((err) => console.warn("createHousehold: old household cleanup warning:", err));
 
   if (seed) {
     const batch = writeBatch(db);
@@ -841,7 +922,30 @@ export const requestJoinHousehold = async (user, household) => {
     return acceptHouseholdInvite(user, house.id);
   }
   if (house.joinMode === "open") {
-    await ensureHouseholdDirectoryEntry(house.id, house);
+    // Fetch current household root to get accurate memberIds — search results may come
+    // from householdDirectory which doesn't carry memberIds. If the root isn't readable
+    // (legacy household without active:true), fall back to what the search result has.
+    let currentMemberIds = Array.isArray(house.memberIds) ? house.memberIds : [];
+    let currentHousehold = house;
+    try {
+      const currentSnap = await getDoc(householdRootRef(house.id));
+      if (!currentSnap.exists()) throw new Error("Household no longer exists.");
+      currentHousehold = currentSnap.data();
+      currentMemberIds = Array.isArray(currentHousehold.memberIds) ? currentHousehold.memberIds : [];
+    } catch (e) {
+      if (e.message === "Household no longer exists.") throw e;
+      // No read permission (household not yet active) — proceed with what we have.
+      // The owner's next login will stamp active:true and the rule will relax.
+    }
+    const nextMemberIds = [...new Set([...currentMemberIds, uid])];
+
+    // Best-effort: user is not yet a member so CREATE may be denied if no entry exists.
+    // The entry will be created/repaired on the new member's first sync via hydrateHousehold.
+    try {
+      await ensureHouseholdDirectoryEntry(house.id, currentHousehold);
+    } catch {
+      // Non-blocking — proceed with the join regardless
+    }
     await Promise.all([
       setDoc(householdMemberRef(house.id, uid), {
         uid,
@@ -856,8 +960,8 @@ export const requestJoinHousehold = async (user, household) => {
         updatedAt: serverTimestamp(),
       }, { merge: true }),
       setDoc(householdRootRef(house.id), {
-        memberIds: [...new Set([...(house.memberIds || []), uid])],
-        memberCount: Number(house.memberCount || 0) + 1,
+        memberIds: nextMemberIds,
+        memberCount: nextMemberIds.length,
         updatedAt: serverTimestamp(),
         updatedBy: uid,
         updatedByLabel: label,
@@ -911,17 +1015,21 @@ export const inviteUserToHousehold = async (householdId, targetUid, actor) => {
   if (!safeHouseholdId || !safeTargetUid) throw new Error("Household and user ID are required.");
   if (String(actor?.uid || "") === safeTargetUid) throw new Error("Use the share link if you want to invite yourself.");
 
-  const [householdSnap, memberSnap] = await Promise.all([
+  const [householdSnap, memberSnap, inviteSnap] = await Promise.all([
     getDoc(householdRootRef(safeHouseholdId)),
     getDoc(householdMemberRef(safeHouseholdId, safeTargetUid)),
+    getDoc(userInviteRef(safeTargetUid, safeHouseholdId)),
   ]);
   if (!householdSnap.exists()) throw new Error("Household not found.");
   if (memberSnap.exists() && memberSnap.data()?.status === "active") {
     throw new Error("That user is already part of this household.");
   }
 
-  const household = householdSnap.data() || {};
-  await ensureHouseholdDirectoryEntry(safeHouseholdId, household);
+  const household = await ensureHouseholdInviteReady(safeHouseholdId, actor);
+  if (!household?.joinCode) throw new Error("Could not prepare the household invite link yet.");
+  if (inviteSnap.exists()) {
+    await deleteDoc(userInviteRef(safeTargetUid, safeHouseholdId));
+  }
   await setDoc(userInviteRef(safeTargetUid, safeHouseholdId), {
     householdId: safeHouseholdId,
     householdName: String(household.name || "Shared home"),
@@ -934,7 +1042,7 @@ export const inviteUserToHousehold = async (householdId, targetUid, actor) => {
     status: "pending",
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-  }, { merge: true });
+  });
 
   await addHouseholdActivity(
     { householdId: safeHouseholdId, actorUid: actor?.uid || "", actorEmail: actor?.email || "", actorName: actor?.displayName || actor?.email || "Admin" },
@@ -1040,9 +1148,10 @@ export const approveJoinRequest = async (householdId, requestUserId, approver) =
   const requestSnap = await getDoc(householdJoinRequestRef(householdId, requestUserId));
   if (!requestSnap.exists()) return false;
   const request = requestSnap.data();
-  const householdSnap = await getDoc(householdRootRef(householdId));
-  const household = householdSnap.exists() ? householdSnap.data() : {};
-  await ensureHouseholdDirectoryEntry(householdId, { ...household, memberCount: Number(household.memberCount || 0) + 1 });
+  const household = await ensureHouseholdInviteReady(householdId, approver) || {};
+  const nextMemberIds = Array.from(new Set([...(Array.isArray(household.memberIds) ? household.memberIds : []), requestUserId]));
+  const nextMemberCount = nextMemberIds.length;
+  await ensureHouseholdDirectoryEntry(householdId, { ...household, memberCount: nextMemberCount });
   const batch = writeBatch(db);
   batch.set(householdMemberRef(householdId, requestUserId), {
     uid: requestUserId,
@@ -1062,8 +1171,8 @@ export const approveJoinRequest = async (householdId, requestUserId, approver) =
     reviewedBy: approver?.uid || "",
   }, { merge: true });
   batch.set(householdRootRef(householdId), {
-    memberIds: Array.from(new Set([...(household.memberIds || []), requestUserId])),
-    memberCount: Number(household.memberCount || 0) + 1,
+    memberIds: nextMemberIds,
+    memberCount: nextMemberCount,
     updatedAt: serverTimestamp(),
     updatedBy: approver?.uid || "",
     updatedByLabel: approver?.displayName || approver?.email || "Admin",
@@ -1076,18 +1185,7 @@ export const approveJoinRequest = async (householdId, requestUserId, approver) =
     pendingHouseholdName: "",
     updatedAt: serverTimestamp(),
   }, { merge: true });
-  batch.set(userInviteRef(requestUserId, householdId), {
-    householdId,
-    householdName: String(household.name || "Shared home"),
-    householdDescription: String(household.description || ""),
-    joinCode: String(household.joinCode || ""),
-    joinMode: String(household.joinMode || "approval"),
-    invitedByUid: String(approver?.uid || ""),
-    invitedByEmail: String(approver?.email || ""),
-    invitedByName: String(approver?.displayName || approver?.email || "Admin"),
-    status: "accepted",
-    updatedAt: serverTimestamp(),
-  }, { merge: true });
+  batch.delete(userInviteRef(requestUserId, householdId));
   await batch.commit();
   await addHouseholdActivity(
     { householdId, actorUid: approver?.uid || "", actorEmail: approver?.email || "", actorName: approver?.displayName || approver?.email || "Admin" },
@@ -1461,6 +1559,47 @@ export const loadUserSettings = async (uid) => {
   }
 };
 
+export const savePushDevice = async (uid, deviceId, data = {}) => {
+  if (!db) throw firebaseNotReadyError();
+  const safeUid = String(uid || "").trim();
+  const safeDeviceId = String(deviceId || "").trim();
+  if (!safeUid || !safeDeviceId) throw new Error("uid and deviceId are required.");
+  await setDoc(
+    userDeviceRef(safeUid, safeDeviceId),
+    {
+      ...sanitizeForFirestore(data),
+      deviceId: safeDeviceId,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
+  return true;
+};
+
+export const removePushDevice = async (uid, deviceId) => {
+  if (!db) throw firebaseNotReadyError();
+  const safeUid = String(uid || "").trim();
+  const safeDeviceId = String(deviceId || "").trim();
+  if (!safeUid || !safeDeviceId) return false;
+  await deleteDoc(userDeviceRef(safeUid, safeDeviceId));
+  return true;
+};
+
+export const saveReminderSnapshot = async (uid, data = {}) => {
+  if (!db) throw firebaseNotReadyError();
+  const safeUid = String(uid || "").trim();
+  if (!safeUid) throw new Error("uid is required.");
+  await setDoc(
+    userReminderRef(safeUid),
+    {
+      ...sanitizeForFirestore(data),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
+  return true;
+};
+
 export const saveWorkspaceSettings = async (uid, data, scope = null) => {
   if (!db) throw firebaseNotReadyError();
   try {
@@ -1508,6 +1647,20 @@ export const saveUserProfile = async (uid, data = {}) => {
     { merge: true }
   );
   return identity;
+};
+
+export const setHouseholdMemberRole = async (householdId, targetUid, newRole, actor) => {
+  if (!db) throw firebaseNotReadyError();
+  const validRoles = ["admin", "member", "viewer", "owner"];
+  if (!validRoles.includes(newRole)) throw new Error(`Invalid role: ${newRole}`);
+  const actorMemberSnap = await getDoc(householdMemberRef(householdId, String(actor?.uid || "")));
+  const actorRole = actorMemberSnap.data()?.role || "";
+  if (actorRole !== "owner") throw new Error("Only the owner can change member roles.");
+  if (String(targetUid) === String(actor?.uid || "")) throw new Error("You cannot change your own role.");
+  await setDoc(householdMemberRef(householdId, String(targetUid)), {
+    role: newRole,
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
 };
 
 export const saveHouseholdMemberProfile = async (householdId, uid, data = {}) => {
@@ -1591,6 +1744,9 @@ export const saveHouseholdDashboardSnapshot = async (householdId, monthKey, tota
 export const upsertUserRegistry = async (uid, data = {}) => {
   if (!db || !uid) return;
   try {
+    // Skip recreating registry for admin-deleted accounts
+    const existing = await getDoc(registryDocRef(uid));
+    if (existing.exists() && existing.data()?.deleted === true) return;
     await setDoc(registryDocRef(uid), {
       uid: String(uid),
       email: String(data.email || ""),
@@ -1614,7 +1770,7 @@ export const subscribeAllUsers = (callback) => {
   const q = query(registryRef(), orderBy("lastSeenAt", "desc"), fsLimit(200));
   return onSnapshot(
     q,
-    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+    (snap) => callback(snap.docs.filter((d) => !d.data().deleted).map((d) => ({ id: d.id, ...d.data() }))),
     (err) => {
       console.error("subscribeAllUsers error:", err);
       callback([]);
@@ -1674,29 +1830,82 @@ const deleteMonthSubtree = async (monthDocRef) => {
   await deleteDoc(monthDocRef);
 };
 
+// Internal helper — not exported. Removes a user from ALL households except
+// `keepHouseholdId`. Used by createHousehold to clean up stale memberships
+// after the new household is already committed, avoiding any solo-flash.
+const adminForceRemoveOtherHouseholds = async (targetUid, keepHouseholdId) => {
+  if (!db || !targetUid) return;
+  const safeUid = String(targetUid).trim();
+  const safeKeep = String(keepHouseholdId || "").trim();
+
+  const q = query(householdsRef(), where("memberIds", "array-contains", safeUid));
+  const snap = await getDocs(q);
+  if (snap.empty) return;
+
+  const batch = writeBatch(db);
+  for (const docSnap of snap.docs) {
+    if (docSnap.id === safeKeep) continue; // skip the newly created household
+    const household = docSnap.data() || {};
+    const nextIds = (household.memberIds || []).filter((id) => id !== safeUid);
+    batch.delete(householdMemberRef(docSnap.id, safeUid));
+    if (household.ownerId === safeUid && nextIds.length === 0) {
+      batch.update(householdRootRef(docSnap.id), {
+        active: false,
+        memberIds: [],
+        memberCount: 0,
+        updatedAt: serverTimestamp(),
+        updatedBy: "system",
+        updatedByLabel: "System",
+      });
+    } else {
+      batch.update(householdRootRef(docSnap.id), {
+        memberIds: nextIds,
+        memberCount: Math.max(0, nextIds.length),
+        updatedAt: serverTimestamp(),
+      });
+    }
+  }
+  await batch.commit();
+};
+
 export const adminForceRemoveUserFromHouseholds = async (targetUid) => {
   if (!db) throw firebaseNotReadyError();
   const safeTargetUid = String(targetUid || "").trim();
   if (!safeTargetUid) throw new Error("User ID is required.");
 
-  const snap = await getDocs(query(householdsRef(), where("memberIds", "array-contains", safeTargetUid)));
-  for (const householdDoc of snap.docs) {
-    const household = householdDoc.data() || {};
-    const memberSnap = await getDoc(householdMemberRef(householdDoc.id, safeTargetUid));
-    if (memberSnap.exists() && memberSnap.data()?.role === "owner") {
-      throw new Error("This user owns a household. Transfer ownership before forcing removal.");
+  const userAppSnap = await getDoc(userAppRef(safeTargetUid));
+  const activeHouseholdId = String(userAppSnap.exists() ? (userAppSnap.data()?.activeHouseholdId || "") : "").trim();
+
+  if (activeHouseholdId) {
+    const householdSnap = await getDoc(householdRootRef(activeHouseholdId));
+    if (householdSnap.exists()) {
+      const household = householdSnap.data() || {};
+      const memberSnap = await getDoc(householdMemberRef(activeHouseholdId, safeTargetUid));
+      const isOwner = memberSnap.exists() && memberSnap.data()?.role === "owner";
+      const nextIds = (household.memberIds || []).filter((id) => String(id) !== safeTargetUid);
+      const batch = writeBatch(db);
+      batch.delete(householdMemberRef(activeHouseholdId, safeTargetUid));
+      if (isOwner && nextIds.length === 0) {
+        // Sole owner with no other members — dissolve the household
+        batch.update(householdRootRef(activeHouseholdId), {
+          active: false,
+          memberIds: [],
+          memberCount: 0,
+          updatedAt: serverTimestamp(),
+          updatedBy: "admin",
+          updatedByLabel: "Admin",
+        });
+      } else {
+        batch.set(householdRootRef(activeHouseholdId), {
+          memberIds: nextIds,
+          memberCount: Math.max(0, nextIds.length),
+          updatedAt: serverTimestamp(),
+          updatedBy: "admin",
+          updatedByLabel: "Admin",
+        }, { merge: true });
+      }
+      await batch.commit();
     }
-    const nextIds = (household.memberIds || []).filter((id) => String(id) !== safeTargetUid);
-    const batch = writeBatch(db);
-    batch.delete(householdMemberRef(householdDoc.id, safeTargetUid));
-    batch.set(householdRootRef(householdDoc.id), {
-      memberIds: nextIds,
-      memberCount: Math.max(0, nextIds.length),
-      updatedAt: serverTimestamp(),
-      updatedBy: "admin",
-      updatedByLabel: "Admin",
-    }, { merge: true });
-    await batch.commit();
   }
 
   await setDoc(userAppRef(safeTargetUid), {
@@ -1738,6 +1947,7 @@ export const adminResetUserToSolo = async (targetUid) => {
 export const adminDeleteUserFirestoreData = async (targetUid) => {
   if (!db || !targetUid) throw new Error("targetUid required");
   const safeTargetUid = String(targetUid || "").trim();
+
   await adminForceRemoveUserFromHouseholds(safeTargetUid);
 
   const monthRefs = await getDocs(collection(db, "users", safeTargetUid, "months"));
@@ -1759,11 +1969,13 @@ export const adminDeleteUserFirestoreData = async (targetUid) => {
   if (userSnap.exists()) {
     await deleteDoc(userRootRef(safeTargetUid));
   }
-
-  const registrySnap = await getDoc(registryDocRef(safeTargetUid));
-  if (registrySnap.exists()) {
-    await deleteDoc(registryDocRef(safeTargetUid));
-  }
+  // Leave a tombstone in the registry so upsertUserRegistry won't recreate the entry
+  // when the user signs back in with their still-active Firebase Auth account.
+  await setDoc(registryDocRef(safeTargetUid), {
+    uid: safeTargetUid,
+    deleted: true,
+    deletedAt: serverTimestamp(),
+  });
 
   const adminConfig = await fetchAdminConfig();
   if (Array.isArray(adminConfig?.uids) && adminConfig.uids.includes(safeTargetUid)) {

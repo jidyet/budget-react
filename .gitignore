@@ -21,6 +21,7 @@ functions/.env.local
 android/.gradle/
 android/app/build/
 android/app/src/main/assets/
+.android/
 scripts/service-account-key.json
 scripts/*service-account*.json
 *.pem

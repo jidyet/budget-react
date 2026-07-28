@@ -55,7 +55,7 @@ export const getMonthChange = (accounts, getPrevRecord) => {
 export const getProgressLabel = (monthsSooner) => {
   if (monthsSooner >= 2) return `${monthsSooner} months sooner`;
   if (monthsSooner === 1) return "1 month sooner";
-  return "You moved forward";
+  return "Balance went down";
 };
 
 export const getProjectedMonthLabel = (rows) => {

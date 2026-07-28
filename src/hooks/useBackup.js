@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { loadUserSettings, loadWorkspaceSettings, saveUserSettings, saveWorkspaceSettings } from "../firebase";
 import { normalizeIncomeEntries, isSystemIncomeSource } from "../utils/budgetUtils";
 import { canUseFeature, getUpgradeMessage } from "../utils/planLimits";
@@ -5,8 +6,6 @@ import { canUseFeature, getUpgradeMessage } from "../utils/planLimits";
 export default function useBackup({
   user,
   isLocalUser,
-  records,
-  income,
   monthKey,
   workspaceScope,
   localData,
@@ -22,7 +21,44 @@ export default function useBackup({
   showToast,
   askConfirm,
   openBillingPage,
+  canExportAdminBackup = false,
+  buildAdminBackupPayload = null,
 }) {
+  const [adminBackupLoading, setAdminBackupLoading] = useState(false);
+
+  const downloadJson = (data, filename) => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+
+    // Support older Microsoft browsers when available.
+    if (typeof window !== "undefined" && typeof window.navigator?.msSaveOrOpenBlob === "function") {
+      window.navigator.msSaveOrOpenBlob(blob, filename);
+      return;
+    }
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.rel = "noopener";
+    a.style.display = "none";
+
+    document.body.appendChild(a);
+    a.click();
+
+    // Keep the blob URL alive briefly so mobile browsers/webviews can finish the download.
+    window.setTimeout(() => {
+      a.remove();
+      URL.revokeObjectURL(url);
+    }, 1500);
+  };
+
+  const sanitizeFilenamePart = (value, fallback = "backup") =>
+    String(value || fallback)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || fallback;
+
   const exportBackup = async () => {
     if (!canUseFeature(subscription, "export")) {
       showToast(getUpgradeMessage("export"));
@@ -30,9 +66,9 @@ export default function useBackup({
       return;
     }
     const confirmed = await askConfirm({
-      title: "Export Backup",
-      message: "This backup includes your personal and financial data in plain text. Only save it somewhere private that you trust.",
-      confirmLabel: "Download backup",
+      title: "Export Settings Backup",
+      message: "This backup includes your settings and personal preferences in plain text. Save it somewhere private that you trust.",
+      confirmLabel: "Download settings backup",
       tone: "danger",
     });
     if (!confirmed) return;
@@ -57,19 +93,12 @@ export default function useBackup({
         version: 2,
         exportedAt: new Date().toISOString(),
         user: user?.email || "local",
+        scope: "settings-only",
         settings,
         personalSettings,
-        records,
-        income,
       };
-      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `budget-backup-${monthKey}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      showToast("Backup downloaded");
+      downloadJson(backup, `tracktozero-settings-${monthKey}.json`);
+      showToast("Settings backup downloaded");
     } catch (e) {
       showToast("Backup failed: " + e.message, "error");
     } finally {
@@ -83,9 +112,9 @@ export default function useBackup({
       const data = JSON.parse(text);
       if (!data.version || !data.settings) throw new Error("Invalid backup file");
       const confirmed = await askConfirm({
-        title: "Restore Backup",
-        message: "This will overwrite your current settings and categories.",
-        confirmLabel: "Restore",
+        title: "Restore Settings Backup",
+        message: "This will overwrite your current settings, categories, and personal preferences. Bills, payment history, and month records are not changed by this restore.",
+        confirmLabel: "Restore settings",
         tone: "danger",
       });
       if (!confirmed) return;
@@ -102,7 +131,7 @@ export default function useBackup({
           }
         }
       }
-      showToast("Backup restored  -  reloading...");
+      showToast("Settings restored");
       setCustomAccounts(Array.isArray(data.settings?.customAccounts) ? data.settings.customAccounts : []);
       setUserCategories(Array.isArray(data.settings?.userCategories) ? data.settings.userCategories : []);
       setIncomeTemplates(
@@ -120,5 +149,39 @@ export default function useBackup({
     }
   };
 
-  return { exportBackup, importBackup };
+  const exportAdminBackup = async () => {
+    if (!canExportAdminBackup || typeof buildAdminBackupPayload !== "function") {
+      showToast("Admin backup is not available here.", "error");
+      return;
+    }
+    const confirmed = await askConfirm({
+      title: "Export Full Workspace Backup",
+      message: "This admin backup includes settings, the selected month's records, income, and payoff plans in plain text. Save it somewhere private that you trust.",
+      confirmLabel: "Download full backup",
+      tone: "danger",
+    });
+    if (!confirmed) return;
+    setAdminBackupLoading(true);
+    try {
+      const payload = await buildAdminBackupPayload();
+      const modeLabel = payload?.workspaceMode === "household"
+        ? sanitizeFilenamePart(payload?.householdName || "household")
+        : sanitizeFilenamePart(user?.email?.split?.("@")?.[0] || "solo");
+      const selectedMonthKey = payload?.monthKey || monthKey;
+      const backup = {
+        version: 3,
+        exportedAt: new Date().toISOString(),
+        user: user?.email || "local",
+        ...payload,
+      };
+      downloadJson(backup, `tracktozero-backup-${modeLabel}-${selectedMonthKey}.json`);
+      showToast("Admin backup downloaded");
+    } catch (e) {
+      showToast("Admin backup failed: " + e.message, "error");
+    } finally {
+      setAdminBackupLoading(false);
+    }
+  };
+
+  return { exportBackup, importBackup, exportAdminBackup, adminBackupLoading };
 }

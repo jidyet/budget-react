@@ -18,7 +18,7 @@ export default function JoinHouseholdPage({
     setForm((prev) => ({ ...prev, search: value }));
     if (onClearResults) onClearResults();
   };
-  const runSearch = (value) => onSearch(value ?? form.search);
+  const runSearch = (value) => onSearch(typeof value === "string" ? value : form.search);
 
   return (
     <div style={{ display:'grid', gap:14 }}>

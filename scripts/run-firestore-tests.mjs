@@ -1,11 +1,13 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import net from "node:net";
 
 const workspaceRoot = resolve(process.cwd());
 const configHome = resolve(workspaceRoot, ".firebase-config");
 const firebaseBinDir = resolve(workspaceRoot, ".firebase-bin");
 const preferredJavaHomes = [
+  "C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.9.10-hotspot",
   "C:\\Program Files\\Android\\Android Studio1\\jbr",
   "C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.15.6-hotspot",
 ];
@@ -17,6 +19,26 @@ const javaBinPath = javaHome ? resolve(javaHome, "bin") : undefined;
 mkdirSync(configHome, { recursive: true });
 mkdirSync(firebaseBinDir, { recursive: true });
 
+const findOpenPort = (preferredPort) => new Promise((resolvePort) => {
+  const server = net.createServer();
+  server.unref();
+  server.on("error", () => {
+    const retry = net.createServer();
+    retry.unref();
+    retry.on("error", () => resolvePort(preferredPort));
+    retry.listen(0, "127.0.0.1", () => {
+      const address = retry.address();
+      const port = typeof address === "object" && address ? address.port : preferredPort;
+      retry.close(() => resolvePort(port));
+    });
+  });
+  server.listen(preferredPort, "127.0.0.1", () => {
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : preferredPort;
+    server.close(() => resolvePort(port));
+  });
+});
+
 if (process.platform === "win32" && javaBinPath) {
   const javaShim = resolve(firebaseBinDir, "java.cmd");
   const javaExecutable = resolve(javaBinPath, "java.exe");
@@ -24,10 +46,27 @@ if (process.platform === "win32" && javaBinPath) {
 }
 
 const testCommand = "node --test tests/firestore.rules.test.js";
+const firestorePort = await findOpenPort(8080);
+const firebaseConfigPath = resolve(workspaceRoot, "firebase.json");
+const tempFirebaseConfigPath = resolve(configHome, "firebase.test.json");
+const firebaseConfig = JSON.parse(readFileSync(firebaseConfigPath, "utf8"));
+firebaseConfig.emulators = firebaseConfig.emulators || {};
+firebaseConfig.firestore = {
+  ...(firebaseConfig.firestore || {}),
+  rules: resolve(workspaceRoot, "firestore.rules"),
+};
+firebaseConfig.emulators.firestore = {
+  ...(firebaseConfig.emulators.firestore || {}),
+  host: "127.0.0.1",
+  port: firestorePort,
+};
+writeFileSync(tempFirebaseConfigPath, JSON.stringify(firebaseConfig, null, 2), "utf8");
+
 const env = {
   ...process.env,
   CI: "1",
   XDG_CONFIG_HOME: configHome,
+  FIRESTORE_EMULATOR_HOST: `127.0.0.1:${firestorePort}`,
   ...(javaHome ? { JAVA_HOME: javaHome } : {}),
   PATH: `${firebaseBinDir};${javaBinPath ? `${javaBinPath};` : ""}${process.env.PATH ?? ""}`,
 };
@@ -39,7 +78,7 @@ const result =
         [
           "-NoProfile",
           "-Command",
-          `$testCommand = '${testCommand.replace(/'/g, "''")}'; firebase emulators:exec --project demo-budget-react --only firestore -- $testCommand`,
+          `$testCommand = '${testCommand.replace(/'/g, "''")}'; firebase emulators:exec --config "${tempFirebaseConfigPath}" --project demo-budget-react --only firestore -- $testCommand`,
         ],
         {
           cwd: workspaceRoot,
@@ -51,6 +90,8 @@ const result =
         "firebase",
         [
           "emulators:exec",
+          "--config",
+          tempFirebaseConfigPath,
           "--project",
           "demo-budget-react",
           "--only",

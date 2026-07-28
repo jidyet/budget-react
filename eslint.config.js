@@ -36,4 +36,12 @@ export default defineConfig([
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
     },
   },
+  // Node.js scripts (tools/, scripts/) use require/process — not browser globals
+  {
+    files: ['tools/**/*.js', 'scripts/**/*.js'],
+    languageOptions: {
+      globals: globals.node,
+      sourceType: 'commonjs',
+    },
+  },
 ])

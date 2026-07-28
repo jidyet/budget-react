@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { loadPayoffPlans, upsertPayoffPlan, deletePayoffPlan } from "../firebase";
 import { MONTHS } from "../data/mockAccounts";
+import { isMonthlyBill } from "../services/billModel";
 
 /**
  * Manages payoff plan state, persistence, and CRUD.
@@ -28,6 +29,7 @@ const usePlans = ({
   selMonth,
   selYear,
   showToast,
+  updateRecord = null,
 }) => {
   const [plans, setPlans] = useState([]);
   const [planId, setPlanId] = useState("");
@@ -50,6 +52,8 @@ const usePlans = ({
   const planOwnerRef = useRef(planOwner);
   const planStrategyRef = useRef(planStrategy);
   const planMonthlyExtraRef = useRef(planMonthlyExtra);
+  const updateRecordRef = useRef(updateRecord);
+  const allAcctsRef = useRef(allAccts);
 
   useEffect(() => {
     planNameRef.current = planName;
@@ -58,6 +62,9 @@ const usePlans = ({
     planStrategyRef.current = planStrategy;
     planMonthlyExtraRef.current = planMonthlyExtra;
   }, [planName, planItems, planOwner, planStrategy, planMonthlyExtra]);
+
+  useEffect(() => { updateRecordRef.current = updateRecord; }, [updateRecord]);
+  useEffect(() => { allAcctsRef.current = allAccts; }, [allAccts]);
 
   // Load plans when user/workspace changes
   useEffect(() => {
@@ -115,7 +122,8 @@ const usePlans = ({
 
   const buildDefaultPlanItems = useCallback((owner, accounts) => {
     const scoped = owner === "All" ? accounts : accounts.filter((a) => a.owner === owner);
-    return scoped.map((a) => ({
+    const debtAccounts = scoped.filter((a) => !isMonthlyBill(a));
+    return debtAccounts.map((a) => ({
       account_id: a.id,
       include: true,
       extra_payment: 0,
@@ -143,6 +151,26 @@ const usePlans = ({
     setShowAllSimRows(false);
     if (!silent) showToast("New draft ready");
   }, [allAccts, buildDefaultPlanItems, selMonth, selYear, showToast]);
+
+  // Sync planned_v on each included account to min_due_v + plan extra_payment.
+  // This makes the payoff plan actionable in the bill tracker — users just check off payments.
+  // The simulation uses max(planned_v, min_due + extraMap) so there's no double-counting.
+  const syncPlannedPayments = useCallback(async (items) => {
+    const updateRecord = updateRecordRef.current;
+    if (typeof updateRecord !== "function") return;
+    const allAccts = allAcctsRef.current || [];
+    await Promise.all(
+      items
+        .filter((item) => item.include)
+        .map(async (item) => {
+          const acct = allAccts.find((a) => String(a.id) === String(item.account_id));
+          if (!acct) return;
+          const minDue = Math.max(0, Number(acct.min_due_v || 0));
+          const extra = Math.max(0, Number(item.extra_payment || 0));
+          await updateRecord(String(acct.id), { planned_v: minDue + extra });
+        })
+    );
+  }, []);
 
   const savePlan = useCallback(async (targetId = "", opts = {}) => {
     const silent = !!opts.silent;
@@ -174,6 +202,9 @@ const usePlans = ({
       items: builtItems,
     };
 
+    // Sync planned_v on included accounts (fire-and-forget; doesn't block the plan save)
+    syncPlannedPayments(builtItems).catch((e) => console.warn("syncPlannedPayments error", e));
+
     if (user.isLocal || isLocalUser) {
       const id = localData.savePlan(user.uid, payload, targetId);
       const updated = localData.loadPlans(user.uid);
@@ -193,11 +224,15 @@ const usePlans = ({
       console.error("savePlan error", e);
       if (!silent) showToast("Plan save failed", "error");
     }
-  }, [user, isLocalUser, allAccts, deletedAccountIds, workspaceScope, showToast, localData]);
+  }, [user, isLocalUser, allAccts, deletedAccountIds, workspaceScope, showToast, localData, syncPlannedPayments]);
 
   // Save a fully-formed payload directly (bypasses refs — safe to call immediately after setState)
   const saveRawPlan = useCallback(async (payload, targetId = "") => {
     if (!user) return null;
+    // Sync planned_v for included accounts from the raw payload
+    if (Array.isArray(payload?.items)) {
+      syncPlannedPayments(payload.items).catch((e) => console.warn("syncPlannedPayments error", e));
+    }
     if (user.isLocal || isLocalUser) {
       const id = localData.savePlan(user.uid, payload, targetId);
       const updated = localData.loadPlans(user.uid);
@@ -218,7 +253,7 @@ const usePlans = ({
       showToast("Plan save failed", "error");
       return null;
     }
-  }, [user, isLocalUser, workspaceScope, showToast, localData]);
+  }, [user, isLocalUser, workspaceScope, showToast, localData, syncPlannedPayments]);
 
   const removePlan = useCallback(async (targetId = "") => {
     if (!user || !targetId) return;

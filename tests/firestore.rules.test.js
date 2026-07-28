@@ -314,6 +314,103 @@ test("pending invite lets a user join an approval household", async () => {
   );
 });
 
+test("household owner can approve a join request and switch the requester into the household workspace", async () => {
+  const requestCreatedAt = new Date("2026-04-09T00:00:00.000Z");
+  await seedData(async (db) => {
+    await db.doc("households/approval-home").set(
+      householdRoot({
+        ownerId: "owner-1",
+        memberIds: ["owner-1"],
+        memberCount: 1,
+        joinMode: "approval",
+        joinCode: "APPR01",
+        updatedByLabel: "Owner User",
+      })
+    );
+    await db
+      .doc("households/approval-home/members/owner-1")
+      .set(memberDoc({ uid: "owner-1", role: "owner", label: "Owner User", displayName: "Owner User" }));
+    await db
+      .doc("householdDirectory/approval-home")
+      .set(householdDirectory({ householdId: "approval-home", ownerId: "owner-1", joinMode: "approval", joinCode: "APPR01" }));
+    await db
+      .doc("households/approval-home/joinRequests/joiner-1")
+      .set({
+        uid: "joiner-1",
+        email: "joiner-1@example.com",
+        label: "Joiner User",
+        displayName: "Joiner User",
+        photoURL: "",
+        avatarColor: "#3b82f6",
+        status: "pending",
+        createdAt: requestCreatedAt,
+        updatedAt: requestCreatedAt,
+      });
+  });
+
+  const ownerDb = testEnv.authenticatedContext("owner-1").firestore();
+  const approvalNow = new Date();
+
+  await assertSucceeds(
+    ownerDb
+      .doc("households/approval-home/members/joiner-1")
+      .set(memberDoc({ uid: "joiner-1", role: "member", label: "Joiner User", displayName: "Joiner User" }))
+  );
+
+  await assertSucceeds(
+    ownerDb
+      .doc("households/approval-home/joinRequests/joiner-1")
+      .set({
+        status: "approved",
+        updatedAt: approvalNow,
+        reviewedAt: approvalNow,
+        reviewedBy: "owner-1",
+      }, { merge: true })
+  );
+
+  await assertSucceeds(
+    ownerDb
+      .doc("householdDirectory/approval-home")
+      .set({
+        householdId: "approval-home",
+        ownerId: "owner-1",
+        name: "Test household",
+        nameLower: "test household",
+        description: "Shared budget",
+        joinCode: "APPR01",
+        joinMode: "approval",
+        memberCount: 2,
+        active: true,
+        updatedAt: approvalNow,
+      }, { merge: true })
+  );
+
+  await assertSucceeds(
+    ownerDb
+      .doc("households/approval-home")
+      .update({
+        memberIds: ["owner-1", "joiner-1"],
+        memberCount: 2,
+        updatedAt: approvalNow,
+        updatedBy: "owner-1",
+        updatedByLabel: "Owner User",
+      })
+  );
+
+  await assertSucceeds(
+    ownerDb
+      .doc("users/joiner-1/meta/app")
+      .set({
+        activeHouseholdId: "approval-home",
+        householdSetupDone: true,
+        workspaceMode: "household",
+        pendingHouseholdId: "",
+        pendingHouseholdName: "",
+        updatedAt: approvalNow,
+      })
+  );
+});
+
 test("members cannot promote themselves to owner", async () => {
   await seedData(async (db) => {
     await db.doc("households/home-1").set(

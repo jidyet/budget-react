@@ -11,7 +11,13 @@ export default class PageErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, info) {
-    console.error("PageErrorBoundary caught:", error, info);
+    console.error("PageErrorBoundary caught:", this.props.sectionName || "unknown-section", error, info);
+  }
+
+  componentDidUpdate(prevProps) {
+    if (prevProps.resetToken !== this.props.resetToken && this.state.hasError) {
+      this.setState({ hasError: false });
+    }
   }
 
   render() {
@@ -32,13 +38,19 @@ export default class PageErrorBoundary extends React.Component {
         <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", color: c.muted || "#888" }}>
           Page error
         </div>
-        <div style={{ fontSize: 18, fontWeight: 800, color: c.tx || "#222" }}>This section hit a problem</div>
+        <div style={{ fontSize: 18, fontWeight: 800, color: c.tx || "#222" }}>{this.props.title || "This section hit a problem"}</div>
         <div style={{ fontSize: 13, color: c.tx2 || "#555", lineHeight: 1.6 }}>
-          The rest of the app is still working. Try refreshing or navigating away and back.
+          {this.props.description || "We couldn’t reopen this section yet. Try again or return to another tab."}
         </div>
         <button
           type="button"
-          onClick={() => this.setState({ hasError: false })}
+          onClick={() => {
+            if (typeof this.props.onReset === "function") {
+              this.props.onReset();
+              return;
+            }
+            this.setState({ hasError: false });
+          }}
           style={{
             marginTop: 4,
             padding: "10px 18px",

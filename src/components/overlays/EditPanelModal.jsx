@@ -1,4 +1,5 @@
 import EditPanel from "../EditPanel";
+import { normalizeBillType, normalizeStartsOverMonthly } from "../../services/billModel";
 
 /**
  * EditPanelModal — backdrop + bottom-sheet/modal wrapper for EditPanel.
@@ -52,9 +53,18 @@ export default function EditPanelModal({
           theme={theme}
           allCategories={allCategories}
           onSave={async (vals) => {
-            const aprDecimal = (parseFloat(vals.apr_pct) || 0) / 100;
-            const promoAprDecimal = (parseFloat(vals.promo_apr_pct) || 0) / 100;
-            const aprAfterPromoDecimal = (parseFloat(vals.apr_after_promo_pct) || 0) / 100;
+            const billType = normalizeBillType({
+              billType: vals.billType,
+              startsOverMonthly: vals.startsOverMonthly,
+            });
+            const startsOverMonthly = normalizeStartsOverMonthly({
+              billType: vals.billType,
+              startsOverMonthly: vals.startsOverMonthly,
+            });
+            const ratesDisabled = startsOverMonthly || billType === "noInterest";
+            const aprDecimal = ratesDisabled ? 0 : (parseFloat(vals.apr_pct) || 0) / 100;
+            const promoAprDecimal = ratesDisabled ? 0 : (parseFloat(vals.promo_apr_pct) || 0) / 100;
+            const aprAfterPromoDecimal = ratesDisabled ? 0 : (parseFloat(vals.apr_after_promo_pct) || 0) / 100;
             const category = String(vals.category || "").trim().toUpperCase();
             const dueDay = Math.max(0, Math.min(31, parseInt(vals.due_day) || 0));
 
@@ -64,11 +74,13 @@ export default function EditPanelModal({
                 ...(accountOverrides[acct.id] || {}),
                 apr: aprDecimal,
                 promo_apr: promoAprDecimal,
-                promo_until: vals.promo_until || null,
+                promo_until: ratesDisabled ? null : (vals.promo_until || null),
                 apr_after_promo: aprAfterPromoDecimal,
+                billType,
+                startsOverMonthly,
                 ...(category ? { category } : {}),
                 ...(dueDay > 0 ? { due_day: dueDay } : {}),
-                ...(vals.interest_type ? { interest_type: vals.interest_type } : {}),
+                ...((ratesDisabled ? "interest_free" : vals.interest_type) ? { interest_type: ratesDisabled ? "interest_free" : vals.interest_type } : {}),
               },
             };
 

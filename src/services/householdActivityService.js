@@ -37,8 +37,15 @@ export const formatHouseholdActivityItem = (item = {}) => {
   return {
     id: item.id,
     type: item.type || "activity",
-    title: messageMap[item.type] || `${actor} moved things forward`,
-    detail: item.planName || item.householdName || item.statementName || item.monthKey || "You moved forward",
+    title: messageMap[item.type] || `${actor} updated ${account}`,
+    detail:
+      item.detail
+      || item.accountName
+      || item.planName
+      || item.householdName
+      || item.statementName
+      || (item.monthKey ? `Month ${item.monthKey}` : "")
+      || "Open the app to see what changed",
     timestamp: toRelativeTime(item.createdAt),
     raw: item,
   };

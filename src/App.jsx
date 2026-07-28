@@ -3,9 +3,10 @@ import { Capacitor } from "@capacitor/core";
 import {
   getMonthKey, saveIncome,
   login, signup, logout, requestPasswordReset,
+  deleteCurrentUserAccount,
   loadUploads,
   loadWorkspaceSettings, saveWorkspaceSettings, subscribeUserWorkspace,
-  saveHouseholdDashboardSnapshot, updateCurrentUserPassword
+  saveHouseholdDashboardSnapshot, saveReminderSnapshot, updateCurrentUserPassword
 } from "./firebase";
 import ProviderMark from "./components/ProviderMark";
 import EditPanel from "./components/EditPanel";
@@ -42,9 +43,14 @@ import useAppNavigation from "./hooks/useAppNavigation";
 import useAppFeedback from "./hooks/useAppFeedback";
 import useAppDataIO from "./hooks/useAppDataIO";
 import { payoffSimulate, MAX_SIMULATION_MONTHS } from "./utils/payoffEngine";
-import { isFounderEmail } from "./config/launchFlags";
 import { isStripeReady, openBillingPortal, startStripeCheckout } from "./services/stripeService";
 import { buildReturnPrompt } from "./services/retentionService";
+import { isBillOpenThisCycle, isBillSettledThisCycle, withNormalizedBillFields } from "./services/billModel";
+import { buildDebtProgressSnapshot } from "./services/progressEngineService";
+import { buildMomentumSnapshot } from "./services/momentumService";
+import { buildNextMove } from "./services/nextMoveService";
+import { buildWeeklySummary } from "./services/weeklySummaryService";
+import { buildDailyCheckIn } from "./services/checkInService";
 
 const SUPPORT_EMAIL = String((typeof import.meta !== "undefined" && import.meta.env?.VITE_SUPPORT_EMAIL) || LAUNCH_COPY.supportEmailFallback);
 
@@ -53,6 +59,145 @@ const SAVINGS_GOAL = 2000;
 // MAX_SIMULATION_MONTHS now imported from payoffEngine
 const SIM_DISPLAY_ROWS = 60;
 const EMPTY_STARTER_ACCOUNTS = [];
+
+function debugDebtCalculation(bills, displayedTotalDebt = 0) {
+  const report = {
+    totalBills: bills.length,
+    paydownCount: 0,
+    monthlyCount: 0,
+    includedInTotal: [],
+    excludedFromTotal: [],
+    suspectedWrongType: [],
+    totalPaydownBalance: 0,
+    totalMonthlyBalance: 0,
+    displayedTotalDebt: Number(displayedTotalDebt || 0),
+    matchesDisplayedTotal: false,
+  };
+
+  const normalize = (value) => String(value || "").trim().toLowerCase();
+
+  const isMonthlyType = (bill) => {
+    const type = normalize(bill.type);
+    const category = normalize(bill.category);
+    const subtype = normalize(bill.subtype);
+
+    return (
+      type === "monthly" ||
+      type.includes("monthly") ||
+      type.includes("recurring") ||
+      subtype.includes("monthly") ||
+      subtype.includes("subscription") ||
+      category.includes("subscription") ||
+      category.includes("utility") ||
+      category.includes("insurance") ||
+      category.includes("home expense")
+    );
+  };
+
+  const isPaydownType = (bill) => {
+    const type = normalize(bill.type);
+    const category = normalize(bill.category);
+    const subtype = normalize(bill.subtype);
+
+    return (
+      type === "pay down over time" ||
+      type.includes("pay down") ||
+      type.includes("paydown") ||
+      type.includes("loan") ||
+      type.includes("credit") ||
+      type.includes("line of credit") ||
+      subtype.includes("loan") ||
+      subtype.includes("credit card") ||
+      category.includes("loan") ||
+      category.includes("credit")
+    );
+  };
+
+  bills.forEach((bill) => {
+    // Use cur_bal (the computed balance field). Falls back to legacy balance/bal fields.
+    const balance = Number(bill.cur_bal ?? bill.balance ?? bill.bal ?? 0);
+
+    const entry = {
+      name: bill.name || bill.billName || "(unnamed bill)",
+      balance,
+      cur_bal: bill.cur_bal,
+      base_bal_v: bill.base_bal_v,
+      paid_v: bill.paid_v,
+      type: bill.type || "",
+      billType: bill.billType || "",
+      category: bill.category || "",
+      subtype: bill.subtype || "",
+      owner: bill.owner || bill.accountHolder || "",
+    };
+
+    if (isPaydownType(bill)) {
+      report.paydownCount += 1;
+      report.totalPaydownBalance += balance;
+      report.includedInTotal.push(entry);
+      return;
+    }
+
+    if (isMonthlyType(bill)) {
+      report.monthlyCount += 1;
+      report.totalMonthlyBalance += balance;
+      report.excludedFromTotal.push(entry);
+      return;
+    }
+
+    report.suspectedWrongType.push(entry);
+  });
+
+  report.totalPaydownBalance = Number(report.totalPaydownBalance.toFixed(2));
+  report.totalMonthlyBalance = Number(report.totalMonthlyBalance.toFixed(2));
+  report.matchesDisplayedTotal =
+    Math.abs(report.displayedTotalDebt - report.totalPaydownBalance) < 0.01;
+
+  console.group("=== TRACKTOZERO DEBT DEBUG ===");
+  console.log("Displayed Total Debt on screen:", report.displayedTotalDebt);
+  console.log(
+    "Computed PAYDOWN total (should equal Total Debt):",
+    report.totalPaydownBalance
+  );
+  console.log(
+    "Computed MONTHLY total (should NOT be in Total Debt):",
+    report.totalMonthlyBalance
+  );
+  console.log(
+    "Displayed total matches paydown total:",
+    report.matchesDisplayedTotal
+  );
+  console.log("Total bills:", report.totalBills);
+  console.log("Paydown bills:", report.paydownCount);
+  console.log("Monthly bills:", report.monthlyCount);
+
+  console.group("Included in Total Debt");
+  report.includedInTotal.forEach((b, i) => {
+    console.log(
+      `${i + 1}. ${b.name} (${b.owner}) | billType=${b.billType} | category=${b.category} | cur_bal=${b.cur_bal} | base_bal_v=${b.base_bal_v} | paid_v=${b.paid_v}`
+    );
+  });
+  console.groupEnd();
+
+  console.group("Excluded from Total Debt");
+  report.excludedFromTotal.forEach((b, i) => {
+    console.log(
+      `${i + 1}. ${b.name} (${b.owner}) | billType=${b.billType} | category=${b.category} | cur_bal=${b.cur_bal} | base_bal_v=${b.base_bal_v} | paid_v=${b.paid_v}`
+    );
+  });
+  console.groupEnd();
+
+  console.group("Suspected misclassified bills");
+  report.suspectedWrongType.forEach((b, i) => {
+    console.log(
+      `${i + 1}. ${b.name} (${b.owner}) | billType=${b.billType} | category=${b.category} | cur_bal=${b.cur_bal} | base_bal_v=${b.base_bal_v} | paid_v=${b.paid_v}`
+    );
+  });
+  console.groupEnd();
+
+  console.groupEnd();
+
+  return report;
+}
 
 export default function BudgetApp() {
   const mobileChromeRef = useRef(null);
@@ -117,7 +262,7 @@ export default function BudgetApp() {
   const [acctSearch, setAcctSearch] = useState("");
   const [acctOwnerF, setAcctOwnerF] = useState("All");
   const [acctCatF, setAcctCatF] = useState("All");
-  const [acctStatusF, setAcctStatusF] = useState("All");
+  const [acctStatusF, setAcctStatusF] = useState("all");
   const [acctGroupBy, setAcctGroupBy] = useState("category");
   const [acctExpanded, setAcctExpanded] = useState({});
   // customAccounts, userCategories, deletedAccountIds, accountOverrides, editingAccountId,
@@ -204,9 +349,25 @@ export default function BudgetApp() {
   // Auth listener + profile subscription now live in useAppSession above
 
   useEffect(() => {
-    const onResize = () => setViewportW(window.innerWidth);
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    if (typeof window === "undefined") return undefined;
+    const root = document.documentElement;
+    const syncViewportMetrics = () => {
+      const viewport = window.visualViewport;
+      const width = Math.round(viewport?.width || window.innerWidth || 1280);
+      const height = (viewport?.height || window.innerHeight || 800) * 0.01;
+      root.style.setProperty("--app-vh", `${height}px`);
+      setViewportW(width);
+    };
+    syncViewportMetrics();
+    const viewport = window.visualViewport;
+    window.addEventListener("resize", syncViewportMetrics);
+    viewport?.addEventListener("resize", syncViewportMetrics);
+    viewport?.addEventListener("scroll", syncViewportMetrics);
+    return () => {
+      window.removeEventListener("resize", syncViewportMetrics);
+      viewport?.removeEventListener("resize", syncViewportMetrics);
+      viewport?.removeEventListener("scroll", syncViewportMetrics);
+    };
   }, []);
 
   useEffect(() => {
@@ -241,11 +402,16 @@ export default function BudgetApp() {
     };
     syncMobileChromeHeight();
     const ro = el && typeof ResizeObserver !== "undefined" ? new ResizeObserver(syncMobileChromeHeight) : null;
+    const viewport = window.visualViewport;
     ro?.observe(el);
     window.addEventListener("resize", syncMobileChromeHeight);
+    viewport?.addEventListener("resize", syncMobileChromeHeight);
+    viewport?.addEventListener("scroll", syncMobileChromeHeight);
     return () => {
       ro?.disconnect();
       window.removeEventListener("resize", syncMobileChromeHeight);
+      viewport?.removeEventListener("resize", syncMobileChromeHeight);
+      viewport?.removeEventListener("scroll", syncMobileChromeHeight);
     };
   }, [theme, viewportW, page, showMoreDrawer, user, isOnline, hasPendingSync, isLocalUser]);
 
@@ -316,7 +482,9 @@ export default function BudgetApp() {
     handleApproveHouseholdRequest: approveHouseholdRequestAction,
     handleRejectHouseholdRequest: rejectHouseholdRequestAction,
     handleLeaveHousehold,
+    handleDeleteHousehold,
     handleRemoveHouseholdMember,
+    handleSetMemberRole,
     handleInviteHouseholdMemberByUserId,
     handleAcceptHouseholdInvite,
     handleDeclineHouseholdInvite,
@@ -327,11 +495,6 @@ export default function BudgetApp() {
     buildHouseholdSeed: buildCurrentHouseholdSeed,
     showToast,
   });
-  const activeHouseholdOwnerEmail =
-    householdProfile?.activeHousehold?.ownerEmail
-    || householdMembers.find((member) => (member?.role || "") === "owner")?.email
-    || "";
-  const founderOwnedHousehold = isFounderEmail(activeHouseholdOwnerEmail);
   const starterTemplateAccounts = useMemo(
     () => ((launchFlags.starterTemplateEnabled || founderAccount)
       ? MOCK_ACCOUNTS
@@ -340,11 +503,11 @@ export default function BudgetApp() {
   );
   const sharedLegacyAccounts = useMemo(
     () => (
-      workspaceMode === "household" && activeHouseholdId && founderOwnedHousehold
+      workspaceMode === "household" && activeHouseholdId && founderAccount
         ? MOCK_ACCOUNTS
         : starterTemplateAccounts
     ),
-    [workspaceMode, activeHouseholdId, founderOwnedHousehold, starterTemplateAccounts]
+    [workspaceMode, activeHouseholdId, founderAccount, starterTemplateAccounts]
   );
   const hasAuthenticatedUser = Boolean(user);
 
@@ -388,6 +551,7 @@ export default function BudgetApp() {
     deletedAccountIds, setDeletedAccountIds,
     accountOverrides, setAccountOverrides,
     incomeTemplates, setIncomeTemplates,
+    billActivity,
     paySchedule, setPaySchedule, savePaySchedule,
     editingAccountId, setEditingAccountId,
     editAcct, setEditAcct,
@@ -398,8 +562,11 @@ export default function BudgetApp() {
     addCategory,
     addCustomAccount,
     deleteAccount,
+    deleteAccounts,
     startEditAccount,
     saveEditAccount,
+    addBillActivity,
+    ownerOptions,
   } = useAccounts({
     user,
     isLocalUser,
@@ -413,6 +580,9 @@ export default function BudgetApp() {
     showToast,
     askConfirm,
     setAssets,
+    householdMembers,
+    allOwners: [],
+    activityActorLabel: currentUserLabel,
   });
 
   useEffect(() => {
@@ -669,6 +839,101 @@ export default function BudgetApp() {
     }
   };
 
+  const confirmTypedAction = useCallback(async ({
+    title,
+    message,
+    confirmLabel,
+    tone = "danger",
+    confirmValue = "DELETE",
+  }) => {
+    const confirmed = await askConfirm({ title, message, confirmLabel, tone });
+    if (!confirmed) return false;
+    const typed = window.prompt(`${title}\n\nType ${confirmValue} to continue.`);
+    return typed === confirmValue;
+  }, []);
+
+  const getDeleteAccountErrorMessage = useCallback((error) => {
+    const code = String(error?.code || "").toLowerCase();
+    const message = String(error?.message || "");
+    const normalized = message.toLowerCase();
+
+    if (normalized.includes("cannot delete while other members exist")) {
+      return "Cannot delete while other members exist.";
+    }
+    if (normalized.includes("failed to delete household")) {
+      return "Failed to delete household.";
+    }
+    if (
+      code.includes("unavailable") ||
+      code.includes("deadline-exceeded") ||
+      code.includes("network") ||
+      normalized.includes("network")
+    ) {
+      return "Network error, try again.";
+    }
+    return message || "Could not delete your account right now.";
+  }, []);
+
+  const handleDeleteHouseholdAction = useCallback(async () => {
+    if (!activeHouseholdId) {
+      showToast("No household to delete", "error");
+      return false;
+    }
+    const confirmed = await confirmTypedAction({
+      title: "Delete household",
+      message: "This permanently removes the household, shared bills, payoff data, notes, invite links, join code, and member relationships. Everyone in the household will be switched back to solo mode.",
+      confirmLabel: "Delete household",
+      confirmValue: "DELETE HOUSEHOLD",
+    });
+    if (!confirmed) return false;
+    const deleted = await handleDeleteHousehold();
+    if (deleted) {
+      setPage("overview");
+    }
+    return deleted;
+  }, [activeHouseholdId, confirmTypedAction, handleDeleteHousehold]);
+
+  const handleDeleteAccountAction = useCallback(async () => {
+    if (!user) {
+      showToast("Sign in to delete your account", "error");
+      return false;
+    }
+    const confirmed = await confirmTypedAction({
+      title: "Delete my account",
+      message: "This permanently removes your account, personal bills, settings, invites, notifications, upload history, and related data. This cannot be undone.",
+      confirmLabel: "Delete account",
+      confirmValue: "DELETE",
+    });
+    if (!confirmed) return false;
+
+    try {
+      if (user.isLocal || isLocalUser) {
+        localData.deleteUser(user.uid, user.email || "");
+        setUser(null);
+        setIsLocalUser(false);
+        setPage("overview");
+        showToast("Account deleted", "success");
+        return true;
+      }
+
+      await deleteCurrentUserAccount();
+      try {
+        await logout();
+      } catch (error) {
+        console.warn("logout after deleteCurrentUserAccount failed", error);
+      }
+      setUser(null);
+      setIsLocalUser(false);
+      setPage("overview");
+      showToast("Account deleted", "success");
+      return true;
+    } catch (error) {
+      console.error("handleDeleteAccountAction error", error);
+      showToast(getDeleteAccountErrorMessage(error), "error");
+      return false;
+    }
+  }, [confirmTypedAction, getDeleteAccountErrorMessage, isLocalUser, localData, setIsLocalUser, user]);
+
   // normalizeMonthInput, compareMonthKeys, getPromoMeta, getEffectiveApr now imported from budgetUtils
 
   const scrollToSettingsSection = useCallback((ref) => {
@@ -678,12 +943,32 @@ export default function BudgetApp() {
   // getComputedBalance, updateRecord, buildAutoBalanceUpdates now imported/in hooks
 
   const markPaid = async (a) => {
-    const prevPaid = a.is_paid;
-    const newPaid = !a.is_paid;
+    const prevPaid = isBillSettledThisCycle(a);
+    const newPaid = !isBillSettledThisCycle(a);
     const plannedOrMin = Number(a.planned_v || 0) > 0 ? a.planned_v : a.min_due_v;
+    const completesBill = Number(a.cur_bal || 0) > 0 && Number(a.cur_bal || 0) <= Number(plannedOrMin || 0);
     await updateRecord(a.id, {
       ...buildAutoBalanceUpdates(a, { paid_v: newPaid ? plannedOrMin : 0 }),
       is_paid: newPaid,
+    });
+    await addBillActivity({
+      billId: a.id,
+      userName: currentUserLabel || defaultOwnerLabel || "Someone",
+      action: newPaid
+        ? completesBill && !(a.billType === "monthly" || a.startsOverMonthly)
+          ? `${a.name} is now fully paid`
+          : `${currentUserLabel || defaultOwnerLabel || "Someone"} marked ${a.name} paid`
+        : `${currentUserLabel || defaultOwnerLabel || "Someone"} marked ${a.name} unpaid`,
+      metadata: {
+        type: newPaid
+          ? (a.billType === "monthly" || a.startsOverMonthly
+            ? "bill.monthly_covered"
+            : completesBill
+              ? "bill.completed"
+              : "bill.marked_paid")
+          : "bill.marked_unpaid",
+        billName: a.name,
+      },
     });
     if (newPaid) showToast(`Saved: ${a.name}`);
     showUndoToast(
@@ -724,15 +1009,16 @@ export default function BudgetApp() {
   // getBankHolidays, getFridaysInMonth, getFirstFridayOfYear, getStartOfWeek,
   // getPayWeekHolidayCount now imported from budgetUtils
 
-  const createBOAPayPeriods = (month, year) => {
+  const createPaycheckAPeriods = (month, year) => {
     const holidays = getBankHolidays(year);
-    const base = Number(paySchedule?.boaBase || 0);
-    const delta = Number(paySchedule?.boaHolidayDelta || 0);
+    const base = Number(paySchedule?.paycheckABase ?? paySchedule?.boaBase ?? 0);
+    const delta = Number(paySchedule?.paycheckAHolidayDelta ?? paySchedule?.boaHolidayDelta ?? 0);
+    if (!base) return [];
     return getFridaysInMonth(month, year).map((payDate, index) => {
       const holidayCount = getPayWeekHolidayCount(payDate, holidays);
       return {
-        key: `boa-${payDate.toISOString().slice(0, 10)}`,
-        src: "_boa",
+        key: `paycheckA-${payDate.toISOString().slice(0, 10)}`,
+        src: "_paycheckA",
         label: `Week ${index + 1} - ${payDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`,
         amount: Math.max(0, base - (holidayCount * delta)),
         holidayCount,
@@ -740,15 +1026,16 @@ export default function BudgetApp() {
     });
   };
 
-  const createEagleviewPayPeriods = (month, year) => {
+  const createPaycheckBPeriods = (month, year) => {
     const periods = [];
-    const base = Number(paySchedule?.eagleviewBase || 0);
+    const base = Number(paySchedule?.paycheckBBase ?? paySchedule?.eagleviewBase ?? 0);
+    if (!base) return [];
     const cursor = getFirstFridayOfYear(year);
     while (cursor.getFullYear() === year) {
       if (cursor.getMonth() + 1 === month) {
         periods.push({
-          key: `eagleview-${cursor.toISOString().slice(0, 10)}`,
-          src: "_eagleview",
+          key: `paycheckB-${cursor.toISOString().slice(0, 10)}`,
+          src: "_paycheckB",
           label: `Bi-weekly - ${cursor.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`,
           amount: base,
           holidayCount: 0,
@@ -884,8 +1171,21 @@ export default function BudgetApp() {
   };
 
   const handleApproveHouseholdRequest = async (requestUserId) => {
-    if (!activeHouseholdId || !user) return;
+    if (!activeHouseholdId || !user) {
+      console.warn("handleApproveHouseholdRequest: missing activeHouseholdId or user", {
+        activeHouseholdId,
+        userId: user?.uid,
+      });
+      return;
+    }
     if (subscription.billingEnabled && !subscription.premium && subscription.memberLimitReached) {
+      console.warn("handleApproveHouseholdRequest: member limit reached", {
+        billingEnabled: subscription.billingEnabled,
+        premium: subscription.premium,
+        memberLimitReached: subscription.memberLimitReached,
+        memberCount: subscription.memberCount,
+        limit: subscription.limits?.householdMembers,
+      });
       showToast("Unlock shared progress to add more people", "error");
       openBillingPage();
       return;
@@ -908,7 +1208,58 @@ export default function BudgetApp() {
     }
   };
 
-  const { exportBackup, importBackup } = useBackup({
+  const buildAdminBackupPayload = useCallback(() => ({
+    scope: "workspace-backup",
+    workspaceMode: workspaceMode || (activeHouseholdId ? "household" : "solo"),
+    monthKey,
+    monthLabel: `${MONTHS[selMonth - 1]} ${selYear}`,
+    activeHouseholdId: activeHouseholdId || "",
+    householdName: householdProfile?.name || "",
+    exportedByLabel: currentUserLabel || user?.email || "Unknown",
+    exportedByUid: user?.uid || "",
+    settings: {
+      schemaVersion: 2,
+      customAccounts,
+      userCategories,
+      incomeTemplates,
+      deletedAccountIds,
+      accountOverrides,
+      reminderPreferences,
+      assets,
+      monthNotes: { [monthKey]: monthNote || "" },
+      paySchedule,
+    },
+    personalSettings: {
+      paySchedule,
+    },
+    records,
+    income,
+    incomeReceipts,
+    plans: plansRef.current || [],
+  }), [
+    workspaceMode,
+    activeHouseholdId,
+    monthKey,
+    selMonth,
+    selYear,
+    householdProfile,
+    currentUserLabel,
+    user,
+    customAccounts,
+    userCategories,
+    incomeTemplates,
+    deletedAccountIds,
+    accountOverrides,
+    reminderPreferences,
+    assets,
+    monthNote,
+    paySchedule,
+    records,
+    income,
+    incomeReceipts,
+  ]);
+
+  const { exportBackup, importBackup, exportAdminBackup, adminBackupLoading } = useBackup({
     user,
     isLocalUser,
     records,
@@ -929,6 +1280,8 @@ export default function BudgetApp() {
     showToast,
     askConfirm,
     openBillingPage,
+    canExportAdminBackup: founderAccount || canManageHousehold,
+    buildAdminBackupPayload,
   });
   // addCategory, addCustomAccount, deleteAccount, migrateLegacyAccounts,
   // startEditAccount, saveEditAccount now in useAccounts
@@ -946,11 +1299,18 @@ export default function BudgetApp() {
     () => Array.from(new Set([...CATEGORIES, ...userCategories, ...baseAccounts.map((a) => a.category)])).filter(Boolean),
     [userCategories, baseAccounts]
   );
-  const allOwners = useMemo(() => {
-    const opts = Array.from(new Set(baseAccounts.map((a) => a.owner))).filter(Boolean);
-    if (!opts.length) opts.push(defaultOwnerLabel);
-    return ["All", ...opts];
-  }, [baseAccounts, defaultOwnerLabel]);
+  const allOwners = useMemo(
+    () => [
+      "All",
+      ...Array.from(
+        new Set([
+          ...(ownerOptions || []),
+          ...baseAccounts.map((account) => String(account?.owner || "").trim()).filter(Boolean),
+        ].filter(Boolean))
+      ),
+    ],
+    [ownerOptions, baseAccounts]
+  );
   const incomeSources = useMemo(
     () => Array.from(new Set([...incomeTemplates.map((x) => x.src), ...income.map((x) => x.src), "Other"].filter(Boolean))),
     [incomeTemplates, income]
@@ -962,12 +1322,12 @@ export default function BudgetApp() {
       ...(records[a.id] || defaultRecord(a)),
     };
     const promoMeta = getPromoMeta(merged, selMonth, selYear);
-    return {
+    return withNormalizedBillFields({
       ...merged,
       ...promoMeta,
       cur_bal: getComputedBalance(merged),
       d_left: isCur ? daysLeft(a.due_day, selMonth, selYear) : null,
-    };
+    });
   }), [baseAccounts, records, selMonth, selYear, isCur]);
   // Update cross-cutting ref so useAccounts' saveEditAccount always sees current allAccts
   allAcctsRef.current = allAccts;
@@ -1017,6 +1377,7 @@ export default function BudgetApp() {
     selMonth,
     selYear,
     showToast,
+    updateRecord,
   });
   // Keep plansRef current so useHouseholdWorkspace can seed household creation with latest plans
   plansRef.current = plans;
@@ -1054,7 +1415,7 @@ export default function BudgetApp() {
     const totals = {
       totalBalance: allAccts.reduce((sum, a) => sum + (Number(a.cur_bal) || 0), 0),
       totalMinDue: allAccts.reduce((sum, a) => sum + (Number(a.min_due_v) || Number(a.budgeted_min) || 0), 0),
-      paidCount: allAccts.filter((a) => a.is_paid).length,
+      paidCount: allAccts.filter((a) => isBillSettledThisCycle(a)).length,
       accountCount: allAccts.length,
       incomeTotal: income.reduce((sum, entry) => sum + (Number(entry.amt) || 0), 0),
     };
@@ -1071,6 +1432,7 @@ export default function BudgetApp() {
     subscription,
     showToast,
     openBillingPage,
+    billActivity,
   });
   const isNativeApp = typeof window !== "undefined" && Capacitor.isNativePlatform();
   const showMobileActionBar = isMobile && isNativeApp;
@@ -1078,16 +1440,16 @@ export default function BudgetApp() {
   
   // askConfirm defined near showToast above
   
-  const getPrevRecord = (accountId) => {
+  const getPrevRecord = useCallback((accountId) => {
     return records[prevMonthKey]?.[accountId] || null;
-  };
+  }, [records, prevMonthKey]);
 
   const totalDue  = useMemo(() => allAccts.reduce((s,a) => s+(a.min_due_v||0), 0), [allAccts]);
   const totalPaid = useMemo(() => allAccts.reduce((s,a) => s+(a.paid_v||0), 0), [allAccts]);
   const totalBal  = useMemo(() => allAccts.reduce((s,a) => s+(a.cur_bal||0), 0), [allAccts]);
   const dueSoon   = useMemo(
     () => [...allAccts]
-      .filter((a) => isCur && a.d_left != null && a.d_left >= 0 && a.d_left <= 7 && !a.is_paid)
+      .filter((a) => isCur && a.d_left != null && a.d_left >= 0 && a.d_left <= 7 && isBillOpenThisCycle(a))
       .sort((a, b) => {
         const dayDelta = Number(a.d_left ?? 999) - Number(b.d_left ?? 999);
         if (dayDelta !== 0) return dayDelta;
@@ -1098,14 +1460,59 @@ export default function BudgetApp() {
     [allAccts, isCur]
   );
   const remaining = Math.max(totalDue - totalPaid, 0);
-  // createBOAPayPeriods/createEagleviewPayPeriods close over paySchedule — include those values
+  const reminderProgress = useMemo(() => buildDebtProgressSnapshot({
+    accounts: allAccts,
+    totalPaid,
+    totalDue,
+    getPrevRecord,
+    payoffSimulate,
+    selMonth,
+    selYear,
+    workspaceMode,
+    householdMembers,
+  }), [allAccts, totalPaid, totalDue, getPrevRecord, selMonth, selYear, workspaceMode, householdMembers]);
+  const reminderMomentum = useMemo(() => buildMomentumSnapshot({
+    accounts: allAccts,
+    activity: billActivity,
+    progress: reminderProgress,
+    getPrevRecord,
+  }), [allAccts, billActivity, reminderProgress, getPrevRecord]);
+  const reminderNextMove = useMemo(() => buildNextMove({
+    progress: reminderProgress,
+    accounts: allAccts,
+    dueSoon,
+    getPrevRecord,
+    workspaceMode,
+    activity: billActivity,
+  }), [reminderProgress, allAccts, dueSoon, getPrevRecord, workspaceMode, billActivity]);
+  const reminderWeeklySummary = useMemo(() => buildWeeklySummary({
+    workspaceMode,
+    progress: reminderProgress,
+    momentum: reminderMomentum,
+    dueSoon,
+    activity: billActivity,
+  }), [workspaceMode, reminderProgress, reminderMomentum, dueSoon, billActivity]);
+  const reminderCheckIn = useMemo(() => buildDailyCheckIn({
+    workspaceMode,
+    dueSoon,
+    progress: reminderProgress,
+    nextMove: reminderNextMove,
+    momentum: reminderMomentum,
+    weeklySummary: reminderWeeklySummary,
+    activity: billActivity,
+  }), [workspaceMode, dueSoon, reminderProgress, reminderNextMove, reminderMomentum, reminderWeeklySummary, billActivity]);
+
+  useEffect(() => {
+    debugDebtCalculation(allAccts, totalBal);
+  }, [allAccts, totalBal]);
+  // createPaycheckAPeriods/createPaycheckBPeriods close over paySchedule — include those values
   const boaPayPeriods = useMemo(
-    () => createBOAPayPeriods(selMonth, selYear),
-    [selMonth, selYear, paySchedule?.boaBase, paySchedule?.boaHolidayDelta], // eslint-disable-line react-hooks/exhaustive-deps
+    () => createPaycheckAPeriods(selMonth, selYear),
+    [selMonth, selYear, paySchedule?.paycheckABase, paySchedule?.paycheckAHolidayDelta, paySchedule?.boaBase, paySchedule?.boaHolidayDelta], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const eagleviewPayPeriods = useMemo(
-    () => createEagleviewPayPeriods(selMonth, selYear),
-    [selMonth, selYear, paySchedule?.eagleviewBase], // eslint-disable-line react-hooks/exhaustive-deps
+    () => createPaycheckBPeriods(selMonth, selYear),
+    [selMonth, selYear, paySchedule?.paycheckBBase, paySchedule?.eagleviewBase], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const recurringPayPeriods = useMemo(
     () => [...boaPayPeriods, ...eagleviewPayPeriods],
@@ -1113,8 +1520,8 @@ export default function BudgetApp() {
   );
   const recurringIncomeEntries = useMemo(
     () => normalizeIncomeEntries([
-      { src: "_boa", amt: boaPayPeriods.reduce((sum, p) => sum + p.amount, 0) },
-      { src: "_eagleview", amt: eagleviewPayPeriods.reduce((sum, p) => sum + p.amount, 0) },
+      ...(boaPayPeriods.length ? [{ src: "_paycheckA", amt: boaPayPeriods.reduce((sum, p) => sum + p.amount, 0) }] : []),
+      ...(eagleviewPayPeriods.length ? [{ src: "_paycheckB", amt: eagleviewPayPeriods.reduce((sum, p) => sum + p.amount, 0) }] : []),
       ...incomeTemplates,
     ]),
     [boaPayPeriods, eagleviewPayPeriods, incomeTemplates],
@@ -1168,7 +1575,7 @@ export default function BudgetApp() {
         // when March is already paid) always show the upcoming bill.
         const dueDateMonth = dueDate.getMonth() + 1; // 1-indexed
         const dueDateYear = dueDate.getFullYear();
-        if (a.is_paid && dueDateMonth === selMonth && dueDateYear === selYear) return null;
+        if (isBillSettledThisCycle(a) && dueDateMonth === selMonth && dueDateYear === selYear) return null;
         const daysUntilDue = Math.ceil((dueDate - weekStart) / 86400000);
         return {
           ...a,
@@ -1204,6 +1611,69 @@ export default function BudgetApp() {
     const categoryKey = `${dateKey}::${target.category}`;
     setDueNextExpanded((prev) => ({ ...prev, [dateKey]: true, [categoryKey]: true }));
   }, [dueNextBills, dueNextTargetId]);
+  useEffect(() => {
+    if (!user || user.isLocal || isLocalUser) return;
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    saveReminderSnapshot(user.uid, {
+      timezone,
+      activeHouseholdId: String(activeHouseholdId || ""),
+      workspaceMode,
+      monthKey,
+      reminderPreferences,
+      totals: {
+        totalDue,
+        totalPaid,
+        remaining,
+      },
+      progress: {
+        totalDebtLeft: Number(reminderProgress?.totalDebtLeft || 0),
+        totalReduction: Number(reminderProgress?.totalReduction || 0),
+        paidThisMonth: Number(reminderProgress?.paidThisMonth || 0),
+        totalDue: Number(reminderProgress?.totalDue || 0),
+      },
+      momentum: reminderMomentum,
+      nextMove: reminderNextMove,
+      weeklySummary: reminderWeeklySummary,
+      dailyCheckIn: reminderCheckIn,
+      dueSoon: dueSoon.slice(0, 8).map((account) => ({
+        id: String(account.id || ""),
+        name: String(account.name || ""),
+        d_left: Number(account.d_left ?? 0),
+        min_due_v: Number(account.min_due_v ?? account.budgeted_min ?? 0),
+      })),
+      accounts: allAccts.slice(0, 80).map((account) => ({
+        id: String(account.id || ""),
+        name: String(account.name || ""),
+        owner: String(account.owner || ""),
+        billType: String(account.billType || ""),
+        startsOverMonthly: account.startsOverMonthly === true,
+        due_day: Number(account.due_day || 0),
+        d_left: account.d_left == null ? null : Number(account.d_left),
+        min_due_v: Number(account.min_due_v ?? account.budgeted_min ?? 0),
+        budgeted_min: Number(account.budgeted_min ?? 0),
+        paid_v: Number(account.paid_v || 0),
+        cur_bal: Number(account.cur_bal || 0),
+        is_paid: account.is_paid === true,
+      })),
+    }).catch((error) => console.error("save reminder snapshot error", error));
+  }, [
+    user,
+    isLocalUser,
+    activeHouseholdId,
+    workspaceMode,
+    monthKey,
+    reminderPreferences,
+    totalDue,
+    totalPaid,
+    remaining,
+    reminderProgress,
+    reminderMomentum,
+    reminderNextMove,
+    reminderWeeklySummary,
+    reminderCheckIn,
+    dueSoon,
+    allAccts,
+  ]);
   const totalInc  = incomeEntriesForDisplay.reduce((s,r) => s+r.amt, 0);
   const netAfterBills = totalInc - totalDue;
   const _netAfterSav   = netAfterBills - SAVINGS_GOAL;
@@ -1213,6 +1683,8 @@ export default function BudgetApp() {
     subscription,
     openBillingPage,
     showToast,
+    askConfirm,
+    founderAccount,
     allAccts,
     selMonth,
     selYear,
@@ -1261,7 +1733,7 @@ export default function BudgetApp() {
   };
 
   // Urgency count for nav badge  -  overdue + due today
-  const _navUrgentCount = allAccts.filter(a => !a.is_paid && a.d_left != null && a.d_left <= 0).length;
+  const _navUrgentCount = allAccts.filter((a) => isBillOpenThisCycle(a) && a.d_left != null && a.d_left <= 0).length;
 
   const mobileActionBarConfig = useMemo(() => {
     if (!isMobile) return { title: "", subtitle: "", actions: [], status: null };
@@ -1326,7 +1798,7 @@ export default function BudgetApp() {
   return (
     <>
       <AppShellStyles c={c} dark={D} />
-      <div className="app-shell-scroll" style={{height:useDocumentScroll?"auto":"100dvh",minHeight:"100dvh",width:"100%",maxWidth:"100vw",overflowX:"clip",overflowY:useDocumentScroll?"visible":"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"thin",background:`radial-gradient(1200px 520px at -5% -10%, ${c.acD}, transparent 62%), radial-gradient(900px 420px at 105% 0%, ${c.waD}, transparent 58%), linear-gradient(180deg, ${c.bg}, ${c.bg2})`,color:c.tx,fontFamily:"'Instrument Sans','Inter',sans-serif",transition:"background .2s,color .2s",paddingTop:0,paddingBottom:isMobile?(showMobileActionBar?`calc(${safeBottom} + 190px)`:`calc(${safeBottom} + 104px)`):`calc(${safeBottom} + 8px)`}}>
+      <div className="app-shell-scroll" style={{height:useDocumentScroll?"auto":"calc(var(--app-vh, 1vh) * 100)",minHeight:"calc(var(--app-vh, 1vh) * 100)",width:"100%",maxWidth:"100vw",overflowX:"clip",overflowY:useDocumentScroll?"visible":"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"thin",background:`radial-gradient(1200px 520px at -5% -10%, ${c.acD}, transparent 62%), radial-gradient(900px 420px at 105% 0%, ${c.waD}, transparent 58%), linear-gradient(180deg, ${c.bg}, ${c.bg2})`,color:c.tx,fontFamily:"'Instrument Sans','Inter',sans-serif",transition:"background .2s,color .2s",paddingTop:0,paddingBottom:isMobile?(showMobileActionBar?`calc(${safeBottom} + 190px)`:`calc(${safeBottom} + 104px)`):`calc(${safeBottom} + 8px)`}}>
         <div className="app-shell-page" style={{width:"100%",maxWidth:1400,margin:"0 auto",padding:isMobile?"0 12px 72px":"0 32px 80px",overflowX:"clip"}}>
           <AppChrome
             hasAuthenticatedUser={hasAuthenticatedUser}
@@ -1560,6 +2032,7 @@ export default function BudgetApp() {
             settingsDataRef={settingsDataRef}
             scrollToSettingsSection={scrollToSettingsSection}
             isNativeApp={isNativeApp}
+            billActivity={billActivity}
             newCategoryName={newCategoryName}
             setNewCategoryName={setNewCategoryName}
             addCategory={addCategory}
@@ -1573,12 +2046,15 @@ export default function BudgetApp() {
             setEditingAccountId={setEditingAccountId}
             startEditAccount={startEditAccount}
             deleteAccount={deleteAccount}
+            deleteAccounts={deleteAccounts}
             editAcct={editAcct}
             setEditAcct={setEditAcct}
             saveEditAccount={saveEditAccount}
             normalizeMonthInput={normalizeMonthInput}
             handleLeaveHousehold={handleLeaveHousehold}
+            handleDeleteHousehold={handleDeleteHouseholdAction}
             handleRemoveHouseholdMember={handleRemoveHouseholdMember}
+            handleSetMemberRole={handleSetMemberRole}
             handleSaveHouseholdProfile={handleSaveHouseholdProfile}
             handleInviteHouseholdMemberByUserId={handleInviteHouseholdMemberByUserId}
             pendingHouseholdId={pendingHouseholdId}
@@ -1587,14 +2063,17 @@ export default function BudgetApp() {
             handleForgotPassword={handleForgotPassword}
             authEmail={authEmail}
             handleUpdatePassword={handleUpdatePassword}
+            handleDeleteAccount={handleDeleteAccountAction}
             passwordUpdateLoading={passwordUpdateLoading}
             saveAssets={saveAssets}
             paySchedule={paySchedule}
-            savePaySchedule={savePaySchedule}
-            exportBackup={exportBackup}
-            backupLoading={backupLoading}
-            importBackup={importBackup}
-            buildAutoBalanceUpdates={buildAutoBalanceUpdates}
+              savePaySchedule={savePaySchedule}
+              exportBackup={exportBackup}
+              backupLoading={backupLoading}
+              importBackup={importBackup}
+              exportAdminBackup={exportAdminBackup}
+              adminBackupLoading={adminBackupLoading}
+              buildAutoBalanceUpdates={buildAutoBalanceUpdates}
             dueBanner={dueBanner}
             setDueBanner={setDueBanner}
             onboardingStep={onboardingStep}
@@ -1602,8 +2081,6 @@ export default function BudgetApp() {
             completeOnboarding={completeOnboarding}
             householdSetupOpen={householdSetupOpen}
             householdSetupTab={householdSetupTab}
-            setHouseholdSetupTab={setHouseholdSetupTab}
-            setHouseholdSetupOpen={setHouseholdSetupOpen}
             householdForm={householdForm}
             setHouseholdForm={setHouseholdForm}
             householdActionLoading={householdActionLoading}
@@ -1614,12 +2091,6 @@ export default function BudgetApp() {
             searchForHouseholds={searchForHouseholds}
             joinSelectedHousehold={joinSelectedHousehold}
             continueSoloMode={continueSoloMode}
-            householdInviteLink={householdInviteLink}
-            handleCopyHouseholdInvite={handleCopyHouseholdInvite}
-            handleShareHouseholdInvite={handleShareHouseholdInvite}
-            lblStyle={lblStyle}
-            inputStyle={inputStyle}
-            selStyle={selStyle}
           />
         </div>
         <AppOverlays
@@ -1633,6 +2104,8 @@ export default function BudgetApp() {
           founderAccount={founderAccount}
           currentUserLabel={currentUserLabel}
           userProfile={userProfile}
+          workspaceMode={workspaceMode}
+          householdProfile={householdProfile}
           showIncome={showIncome}
           incomeReceipts={incomeReceipts}
           boaPayPeriods={boaPayPeriods}
@@ -1701,6 +2174,17 @@ export default function BudgetApp() {
           setCmdkOpen={setCmdkOpen}
           toast={toast}
           reducedMotion={reducedMotion}
+          onSignOut={async () => {
+            if (user?.isLocal || isLocalUser) {
+              setUser(null);
+              setIsLocalUser(false);
+              showToast("Signed out");
+            } else {
+              try { await logout(); } catch (e) { console.error(e); }
+              setUser(null);
+              showToast("Signed out");
+            }
+          }}
         />
     </div>
   </>

@@ -4,13 +4,16 @@ import {
   approveJoinRequest,
   continueSoloWorkspace,
   createHousehold,
+  deleteCurrentHousehold,
   declineHouseholdInvite,
   ensureHouseholdDirectoryEntry,
+  ensureHouseholdInviteReady,
   fetchHouseholdMembership,
   fetchHouseholdById,
   inviteUserToHousehold,
   leaveHousehold,
   removeHouseholdMember,
+  setHouseholdMemberRole,
   rejectJoinRequest,
   requestJoinHousehold,
   saveHouseholdMemberProfile,
@@ -23,6 +26,20 @@ import {
   subscribeJoinRequests,
   subscribeUserWorkspace,
 } from "../firebase";
+
+// Parse #join=CODE&household=ID from a string (URL hash or full URL)
+const parseInviteTerm = (term) => {
+  if (!term) return null;
+  try {
+    const s = String(term).trim();
+    const hashPart = s.startsWith("http") ? new URL(s).hash : s;
+    const params = new URLSearchParams(hashPart.replace(/^#/, ""));
+    const joinCode = (params.get("join") || params.get("joinCode") || "").trim().toUpperCase();
+    const householdId = (params.get("household") || params.get("householdId") || "").trim();
+    if (joinCode && householdId) return { joinCode, householdId };
+  } catch { /* ignore */ }
+  return null;
+};
 import { buildHouseholdInviteLink } from "../services/householdService";
 
 const getInviteSearchTermFromLocation = () => {
@@ -168,11 +185,25 @@ export default function useHouseholdWorkspace({
       }
       // Only show setup modal if they haven't made a choice yet
       const needsHouseholdChoice = !settings?.householdSetupDone && !settings?.pendingHouseholdId;
-      setHouseholdSetupOpen(!!needsHouseholdChoice);
+      if (inviteModalOpenRef.current) {
+        // Invite effect opened the modal — let it stay open. Clear flag so future
+        // snapshots (e.g. after joining) can close the modal as expected.
+        inviteModalOpenRef.current = false;
+      } else {
+        setHouseholdSetupOpen(!!needsHouseholdChoice);
+      }
       if (needsHouseholdChoice) setHouseholdSetupTab("choose");
     });
     return () => unsub && unsub();
   }, [user, isLocalUser]);
+
+  // Holds the household created in this session so the subscription doesn't
+  // overwrite it with a stale Firestore read before the write propagates.
+  const justCreatedHouseholdRef = useRef(null);
+
+  // Set to true when the invite-link effect opens the setup modal so that the
+  // async subscribeUserWorkspace snapshot doesn't immediately close it.
+  const inviteModalOpenRef = useRef(false);
 
   useEffect(() => {
     if (!user || user.isLocal || isLocalUser) {
@@ -180,6 +211,24 @@ export default function useHouseholdWorkspace({
       return;
     }
     const unsub = subscribeHouseholdForUser(user.uid, (profile) => {
+      const created = justCreatedHouseholdRef.current;
+      if (created) {
+        const incomingId = profile?.activeHousehold?.id || "";
+        if (incomingId === created.id) {
+          // Firestore caught up — merge to preserve the correct joinCode
+          justCreatedHouseholdRef.current = null;
+          setHouseholdProfile({
+            ...profile,
+            activeHousehold: { ...profile.activeHousehold, joinCode: created.joinCode },
+            memberships: (profile.memberships || []).map((m) =>
+              m.id === created.id ? { ...m, joinCode: created.joinCode } : m
+            ),
+          });
+          return;
+        }
+        // Firestore hasn't caught up yet — keep the created state
+        return;
+      }
       setHouseholdProfile(profile);
     });
     return () => unsub && unsub();
@@ -250,11 +299,15 @@ export default function useHouseholdWorkspace({
     Promise.all([
       fetchHouseholdById(activeHouseholdId),
       fetchHouseholdMembership(activeHouseholdId, user.uid),
-    ]).then(([, member]) => {
+    ]).then(([household, member]) => {
       if (cancelled) return;
       if (member?.status === "active") return;
+      // Do not immediately write the user back to solo on a single stale refresh read.
+      // The live household/member listeners below are the authoritative source and will
+      // reset the workspace if the membership is truly gone.
+      if (household || member) return;
       resetToSoloWorkspace({
-        syncRemote: true,
+        syncRemote: false,
         logLabel: "validate active household membership",
       });
     }).catch((error) => {
@@ -303,8 +356,8 @@ export default function useHouseholdWorkspace({
     if (!canManageHousehold) return;
     const directorySeed = resolvedHousehold || householdProfile?.activeHousehold || null;
     if (!directorySeed?.name && !directorySeed?.joinCode) return;
-    ensureHouseholdDirectoryEntry(activeHouseholdId, directorySeed).catch((error) => {
-      console.error("ensureHouseholdDirectoryEntry error", error);
+    ensureHouseholdInviteReady(activeHouseholdId, user).catch((error) => {
+      console.error("ensureHouseholdInviteReady error", error);
     });
   }, [activeHouseholdId, canManageHousehold, resolvedHousehold, householdProfile?.activeHousehold, user, isLocalUser]);
 
@@ -314,11 +367,24 @@ export default function useHouseholdWorkspace({
     if (!householdMembersReady) return;
     const stillMember = (householdMembers || []).some((member) => String(member.uid || member.id) === String(user.uid));
     if (stillMember) return;
+    let cancelled = false;
 
-    resetToSoloWorkspace({
-      syncRemote: true,
-      logLabel: "reset missing active household member",
-    });
+    fetchHouseholdMembership(activeHouseholdId, user.uid)
+      .then((member) => {
+        if (cancelled) return;
+        if (member?.status === "active") return;
+        resetToSoloWorkspace({
+          syncRemote: false,
+          logLabel: "reset missing active household member",
+        });
+      })
+      .catch((error) => {
+        console.error("confirm missing active household member error", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [user, isLocalUser, activeHouseholdId, workspaceMode, householdMembersReady, householdMembers, resetToSoloWorkspace]);
 
   const searchForHouseholds = useCallback(async (overrideTerm = "") => {
@@ -328,6 +394,17 @@ export default function useHouseholdWorkspace({
       if (!term) {
         setHouseholdSearchResults([]);
         return;
+      }
+      // Fast path: if term contains both householdId + joinCode (i.e. it's an invite link),
+      // skip the search layer entirely and fetch the root doc directly — same as the
+      // auto-click-detect path. This is more reliable than going through searchHouseholds.
+      const parsed = parseInviteTerm(term);
+      if (parsed?.householdId) {
+        const household = await fetchHouseholdById(parsed.householdId).catch(() => null);
+        if (household) {
+          setHouseholdSearchResults([{ ...household, joinCode: household.joinCode || parsed.joinCode }]);
+          return;
+        }
       }
       const results = await searchHouseholds(term);
       setHouseholdSearchResults(results);
@@ -344,15 +421,42 @@ export default function useHouseholdWorkspace({
     setHouseholdSearchLoading(false);
   }, []);
 
+  // Preserve invite link in sessionStorage before auth wipes the URL hash
+  useEffect(() => {
+    if (typeof window === "undefined" || user) return;
+    const inviteTerm = getInviteSearchTermFromLocation();
+    if (inviteTerm) sessionStorage.setItem("_pendingInviteLink", inviteTerm);
+  }, [user]);
+
   useEffect(() => {
     if (typeof window === "undefined" || !user || user.isLocal || isLocalUser) return;
-    const inviteTerm = getInviteSearchTermFromLocation();
+    const inviteTerm =
+      sessionStorage.getItem("_pendingInviteLink") || getInviteSearchTermFromLocation();
     if (!inviteTerm) return;
+    sessionStorage.removeItem("_pendingInviteLink");
+    history.replaceState(null, "", window.location.pathname);
+    inviteModalOpenRef.current = true;
     setHouseholdSetupTab("join");
     setHouseholdSetupOpen(true);
     setHouseholdForm((prev) => ({ ...prev, search: inviteTerm }));
-    searchForHouseholds(inviteTerm);
-    history.replaceState(null, "", window.location.pathname);
+
+    // When the invite link has both householdId and joinCode, fetch the household
+    // directly instead of going through search — avoids all search/index/rules issues.
+    const parsed = parseInviteTerm(inviteTerm);
+    if (parsed?.householdId) {
+      fetchHouseholdById(parsed.householdId).then((household) => {
+        if (household) {
+          setHouseholdSearchResults([{
+            ...household,
+            joinCode: household.joinCode || parsed.joinCode,
+          }]);
+        } else {
+          searchForHouseholds(inviteTerm);
+        }
+      }).catch(() => searchForHouseholds(inviteTerm));
+    } else {
+      searchForHouseholds(inviteTerm);
+    }
   }, [user, isLocalUser, searchForHouseholds]);
 
   const createCurrentHousehold = async () => {
@@ -366,6 +470,9 @@ export default function useHouseholdWorkspace({
     try {
       const seed = typeof buildHouseholdSeed === "function" ? buildHouseholdSeed() : null;
       const created = await createHousehold({ ...user, ...userProfile }, householdForm, seed);
+      // Pin the created household so the subscription can't overwrite it with a
+      // stale Firestore read before the new write propagates.
+      justCreatedHouseholdRef.current = created;
       setHouseholdProfile((prev) => ({
         activeHousehold: created,
         memberships: [
@@ -375,9 +482,10 @@ export default function useHouseholdWorkspace({
       }));
       setActiveHouseholdId(created.id);
       setWorkspaceMode("household");
+      setHouseholdMembersReady(false);
       // Keep modal open, switch to invite tab so the owner can copy/share right away
       setHouseholdSetupTab("invite");
-      showToast(`Household created! Code: ${created.joinCode}`, "success");
+      showToast("Household created successfully", "success");
     } catch (e) {
       console.error("createCurrentHousehold error", e);
       showToast(`Could not create household${e?.message ? `: ${e.message}` : ""}`, "error");
@@ -477,19 +585,23 @@ export default function useHouseholdWorkspace({
     const seed = resolvedHousehold || householdProfile?.activeHousehold;
     if (!seed?.name && !seed?.joinCode) return;
     try {
-      await ensureHouseholdDirectoryEntry(activeHouseholdId, seed);
+      const repaired = await ensureHouseholdInviteReady(activeHouseholdId, user);
+      if (repaired?.joinCode) {
+        return buildHouseholdInviteLink(repaired, typeof window !== "undefined" ? window.location.origin : "");
+      }
     } catch (e) {
       console.error("syncDirectoryBeforeInvite error", e);
     }
+    return buildHouseholdInviteLink(seed, typeof window !== "undefined" ? window.location.origin : "");
   };
 
   const handleCopyHouseholdInvite = async (link) => {
-    const nextLink = String(link || householdInviteLink || "").trim();
+    const repairedLink = await syncDirectoryBeforeInvite();
+    const nextLink = String(link || repairedLink || householdInviteLink || "").trim();
     if (!nextLink) {
       showToast("No link yet", "error");
       return;
     }
-    await syncDirectoryBeforeInvite();
     try {
       await navigator.clipboard.writeText(nextLink);
       showToast("Invite link copied", "success");
@@ -500,12 +612,12 @@ export default function useHouseholdWorkspace({
   };
 
   const handleShareHouseholdInvite = async (link) => {
-    const nextLink = String(link || householdInviteLink || "").trim();
+    const repairedLink = await syncDirectoryBeforeInvite();
+    const nextLink = String(link || repairedLink || householdInviteLink || "").trim();
     if (!nextLink) {
       showToast("No link yet", "error");
       return;
     }
-    await syncDirectoryBeforeInvite();
     try {
       if (navigator.share) {
         await navigator.share({
@@ -523,16 +635,17 @@ export default function useHouseholdWorkspace({
     }
   };
 
-  const handleApproveHouseholdRequest = async (requestUserId) => {
-    if (!activeHouseholdId || !user) return;
+  const handleApproveHouseholdRequest = useCallback(async (requestUserId) => {
+    const currentHouseholdId = activeHouseholdIdRef.current;
+    if (!currentHouseholdId || !user) return;
     try {
-      await approveJoinRequest(activeHouseholdId, requestUserId, user);
+      await approveJoinRequest(currentHouseholdId, requestUserId, user);
       showToast("Join request approved");
     } catch (e) {
       console.error("handleApproveHouseholdRequest error", e);
       showToast("Could not approve request", "error");
     }
-  };
+  }, [user, showToast]); // reads activeHouseholdId via ref — always current, no stale closure
 
   const handleRejectHouseholdRequest = async (requestUserId) => {
     if (!activeHouseholdId || !user) return;
@@ -559,6 +672,26 @@ export default function useHouseholdWorkspace({
     }
   };
 
+  const handleDeleteHousehold = async () => {
+    if (!activeHouseholdId || !user || user.isLocal || isLocalUser) return false;
+    try {
+      await deleteCurrentHousehold(activeHouseholdId);
+      setWorkspaceMode("solo");
+      setActiveHouseholdId("");
+      setHouseholdProfile({ activeHousehold: null, memberships: [] });
+      setHouseholdMembers([]);
+      setHouseholdRequests([]);
+      setPendingHouseholdId("");
+      setPendingHouseholdName("");
+      showToast("Household deleted", "success");
+      return true;
+    } catch (e) {
+      console.error("handleDeleteHousehold error", e);
+      showToast(e?.message || "Could not delete household", "error");
+      return false;
+    }
+  };
+
   const handleRemoveHouseholdMember = async (targetUid) => {
     if (!activeHouseholdId || !user || user.isLocal || isLocalUser) return;
     try {
@@ -567,6 +700,17 @@ export default function useHouseholdWorkspace({
     } catch (e) {
       console.error("handleRemoveHouseholdMember error", e);
       showToast(e?.message || "Could not remove member", "error");
+    }
+  };
+
+  const handleSetMemberRole = async (targetUid, newRole) => {
+    if (!activeHouseholdId || !user || user.isLocal || isLocalUser) return;
+    try {
+      await setHouseholdMemberRole(activeHouseholdId, targetUid, newRole, user);
+      showToast(`Role updated to ${newRole}`);
+    } catch (e) {
+      console.error("handleSetMemberRole error", e);
+      showToast(e?.message || "Could not update role", "error");
     }
   };
 
@@ -660,7 +804,9 @@ export default function useHouseholdWorkspace({
     handleApproveHouseholdRequest,
     handleRejectHouseholdRequest,
     handleLeaveHousehold,
+    handleDeleteHousehold,
     handleRemoveHouseholdMember,
+    handleSetMemberRole,
     handleInviteHouseholdMemberByUserId,
     handleAcceptHouseholdInvite,
     handleDeclineHouseholdInvite,

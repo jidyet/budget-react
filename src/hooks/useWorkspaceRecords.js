@@ -7,6 +7,7 @@ import {
   isSystemIncomeSource,
   normalizeAprDecimal,
   normalizeIncomeEntries,
+  startsOverMonthly,
 } from "../utils/budgetUtils";
 
 const localKey = (uid) => `budget_local_${uid}`;
@@ -43,11 +44,16 @@ export default function useWorkspaceRecords({
 
   const buildCarryoverRecord = useCallback((account, previousRecord) => {
     const prev = previousRecord || {};
+    const monthly = startsOverMonthly(account);
     const carriedBalance = Number(
-      prev.cur_bal ??
-      prev.base_bal_v ??
-      account?.starting_bal ??
-      0
+      monthly
+        ? (account?.starting_bal ?? 0)
+        : (
+          prev.cur_bal ??
+          prev.base_bal_v ??
+          account?.starting_bal ??
+          0
+        )
     ) || 0;
     return {
       ...defaultRecord(account),
@@ -58,7 +64,7 @@ export default function useWorkspaceRecords({
       min_due_v: Number(prev.min_due_v ?? account?.budgeted_min ?? 0) || 0,
       base_bal_v: carriedBalance,
       cur_bal: carriedBalance,
-      apr_v: normalizeAprDecimal(prev.apr_v ?? account?.apr ?? 0),
+      apr_v: monthly ? 0 : normalizeAprDecimal(prev.apr_v ?? account?.apr ?? 0),
     };
   }, []);
 

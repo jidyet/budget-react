@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import OverviewPage from "../../pages/OverviewPage";
 import DashboardPage from "../../pages/DashboardPage";
 import LoadingState from "../ui/LoadingState";
@@ -18,6 +18,7 @@ const AdminPage = lazy(() => import("../../pages/AdminPage"));
 const PrivacySecurityPage = lazy(() => import("../../pages/PrivacySecurityPage"));
 const SupportPage = lazy(() => import("../../pages/SupportPage"));
 const UploadPage = lazy(() => import("../../pages/UploadPage"));
+const HouseholdPage = lazy(() => import("../../pages/HouseholdPage"));
 
 export default function AppPageContent(props) {
   const {
@@ -64,9 +65,20 @@ export default function AppPageContent(props) {
     notifPermission,
   } = props;
   const lazyFallback = <LoadingState palette={c} label="Opening page..." />;
+  const [pageRetryKey, setPageRetryKey] = useState(0);
+
+  useEffect(() => {
+    setPageRetryKey(0);
+  }, [page]);
 
   return (
-    <PageErrorBoundary key={page} palette={c}>
+    <PageErrorBoundary
+      key={`${page}-${pageRetryKey}`}
+      palette={c}
+      sectionName={`page:${page}`}
+      resetToken={`${page}-${pageRetryKey}`}
+      onReset={() => setPageRetryKey((current) => current + 1)}
+    >
       <div
         style={{
           paddingTop: isMobile ? 12 : 16,
@@ -125,6 +137,7 @@ export default function AppPageContent(props) {
                 reminderPreferences={props.reminderPreferences}
                 pwaInstalled={pwaInstalled}
                 launchFlags={launchFlags}
+                founderAccount={founderAccount}
                 softLaunchState={props.softLaunchState}
                 patchSoftLaunchState={props.patchSoftLaunchState}
                 onInstallApp={props.handleInstallApp}
@@ -146,6 +159,7 @@ export default function AppPageContent(props) {
                 recurringPayPeriods={props.recurringPayPeriods}
                 incomeReceipts={props.incomeReceipts}
                 setShowIncome={props.setShowIncome}
+                markPaid={props.markPaid}
               />
             }
             dueNext={
@@ -188,6 +202,7 @@ export default function AppPageContent(props) {
               acctGroupBy={props.acctGroupBy}
               setAcctGroupBy={props.setAcctGroupBy}
               allOwners={allOwners}
+              billActivity={props.billActivity}
               allCategories={allCategories}
               inputStyle={props.inputStyle}
               selStyle={props.selStyle}
@@ -212,6 +227,12 @@ export default function AppPageContent(props) {
               setPage={props.setPage}
               theme={theme}
               buildAutoBalanceUpdates={props.buildAutoBalanceUpdates}
+              launchFlags={launchFlags}
+              founderAccount={founderAccount}
+              workspaceMode={workspaceMode}
+              householdMembers={householdMembers}
+              selMonth={selMonth}
+              selYear={selYear}
             />
           </Suspense>
         )}
@@ -264,6 +285,10 @@ export default function AppPageContent(props) {
               setShowAllSimRows={props.setShowAllSimRows}
               MAX_SIMULATION_MONTHS={props.MAX_SIMULATION_MONTHS}
               SIM_DISPLAY_ROWS={props.SIM_DISPLAY_ROWS}
+              launchFlags={launchFlags}
+              founderAccount={founderAccount}
+              workspaceMode={workspaceMode}
+              householdMembers={householdMembers}
             />
           </Suspense>
         )}
@@ -275,12 +300,17 @@ export default function AppPageContent(props) {
               mounted={mounted}
               allAccts={allAccts}
               allOwners={allOwners}
+              billActivity={props.billActivity}
               selMonth={selMonth}
               selYear={selYear}
               income={income}
               assets={assets}
               setCatF={props.setAcctCatF}
               navigateTo={props.navigateTo}
+              launchFlags={launchFlags}
+              founderAccount={founderAccount}
+              workspaceMode={workspaceMode}
+              householdMembers={householdMembers}
             />
           </Suspense>
         )}
@@ -361,6 +391,38 @@ export default function AppPageContent(props) {
               patchReminderPreferences={props.patchReminderPreferences}
               pwaInstalled={pwaInstalled}
               subscription={subscription}
+              founderAccount={founderAccount}
+            />
+          </Suspense>
+        )}
+        {page === "household" && (
+          <Suspense fallback={lazyFallback}>
+            <HouseholdPage
+              c={c}
+              workspaceMode={workspaceMode}
+              setHouseholdSetupOpen={props.setHouseholdSetupOpen}
+              setHouseholdSetupTab={props.setHouseholdSetupTab}
+              householdProfile={householdProfile}
+              currentHouseholdMember={currentHouseholdMember}
+              householdMembers={householdMembers}
+              householdRequests={householdRequests}
+              canManageHousehold={canManageHousehold}
+              handleApproveHouseholdRequest={props.handleApproveHouseholdRequest}
+              handleRejectHouseholdRequest={props.handleRejectHouseholdRequest}
+              handleLeaveHousehold={props.handleLeaveHousehold}
+              handleRemoveHouseholdMember={props.handleRemoveHouseholdMember}
+              handleSetMemberRole={props.handleSetMemberRole}
+              userProfile={userProfile}
+              householdInviteLink={props.householdInviteLink}
+              subscription={subscription}
+              openBillingPage={props.openBillingPage}
+              handleSaveHouseholdProfile={props.handleSaveHouseholdProfile}
+              handleCopyHouseholdInvite={props.handleCopyHouseholdInvite}
+              handleShareHouseholdInvite={props.handleShareHouseholdInvite}
+              handleInviteHouseholdMemberByUserId={props.handleInviteHouseholdMemberByUserId}
+              pendingHouseholdId={props.pendingHouseholdId}
+              pendingHouseholdName={props.pendingHouseholdName}
+              cancelPendingRequest={props.cancelPendingRequest}
             />
           </Suspense>
         )}
@@ -371,9 +433,15 @@ export default function AppPageContent(props) {
               allAccts={allAccts}
               monthKey={monthKey}
               theme={theme}
+              ownerOptions={Array.from(new Set([
+                ...(allOwners || []),
+                currentUserLabel || "",
+                ...(householdMembers || []).flatMap((member) => [member?.displayName || "", member?.label || ""]),
+              ].filter(Boolean)))}
               updateRecord={props.updateRecord}
               showToast={props.showToast}
               handleUpload={props.handleUpload}
+              addCustomAccount={props.addCustomAccount}
             />
           </Suspense>
         )}
@@ -450,12 +518,14 @@ export default function AppPageContent(props) {
               setNewAcct={props.setNewAcct}
               selStyle={props.selStyle}
               allOwners={allOwners}
+              billActivity={props.billActivity}
               showToast={props.showToast}
               addCustomAccount={props.addCustomAccount}
               editingAccountId={props.editingAccountId}
               setEditingAccountId={props.setEditingAccountId}
               startEditAccount={props.startEditAccount}
               deleteAccount={props.deleteAccount}
+              deleteAccounts={props.deleteAccounts}
               editAcct={props.editAcct}
               setEditAcct={props.setEditAcct}
               saveEditAccount={props.saveEditAccount}
@@ -465,7 +535,9 @@ export default function AppPageContent(props) {
               handleApproveHouseholdRequest={props.handleApproveHouseholdRequest}
               handleRejectHouseholdRequest={props.handleRejectHouseholdRequest}
               handleLeaveHousehold={props.handleLeaveHousehold}
+              handleDeleteHousehold={props.handleDeleteHousehold}
               handleRemoveHouseholdMember={props.handleRemoveHouseholdMember}
+              handleSetMemberRole={props.handleSetMemberRole}
               householdInviteLink={props.householdInviteLink}
               handleSaveHouseholdProfile={props.handleSaveHouseholdProfile}
               handleCopyHouseholdInvite={props.handleCopyHouseholdInvite}
@@ -476,20 +548,27 @@ export default function AppPageContent(props) {
               cancelPendingRequest={props.cancelPendingRequest}
               onForgotPassword={() => props.handleForgotPassword(user?.email || props.authEmail)}
               onUpdatePassword={props.handleUpdatePassword}
+              onDeleteAccount={props.handleDeleteAccount}
               passwordUpdateLoading={props.passwordUpdateLoading}
               assets={assets}
               saveAssets={props.saveAssets}
               allAccts={allAccts}
+              updateRecord={props.updateRecord}
+              handleUpload={props.handleUpload}
               paySchedule={props.paySchedule}
               savePaySchedule={props.savePaySchedule}
               exportBackup={props.exportBackup}
               backupLoading={props.backupLoading}
               importBackup={props.importBackup}
+              exportAdminBackup={props.exportAdminBackup}
+              adminBackupLoading={props.adminBackupLoading}
               openFeedback={props.openFeedback}
               openPrivacyPage={() => props.setPage("privacy")}
               openSupportPage={() => props.setPage("support")}
               copyToClipboard={props.copyToClipboard}
               softLaunchSummary={props.softLaunchSummary}
+              founderAccount={founderAccount}
+              founderOpsVisible={founderOpsVisible}
             />
           </Suspense>
         )}

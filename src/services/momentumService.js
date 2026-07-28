@@ -1,3 +1,5 @@
+import { isBillSettledThisCycle } from "./billModel";
+
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 const toDate = (value) => {
@@ -22,7 +24,7 @@ export const buildMomentumSnapshot = ({
 }) => {
   const handledFromAccounts = accounts.filter((account) => {
     const prev = typeof getPrevRecord === "function" ? getPrevRecord(account.id) : null;
-    if (account.is_paid && !prev?.is_paid) return true;
+    if (isBillSettledThisCycle(account) && !isBillSettledThisCycle(prev || {})) return true;
     return Number(account.paid_v || 0) > Number(prev?.paid_v || 0);
   }).length;
 

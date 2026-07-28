@@ -9,6 +9,7 @@ body,
 #root {
   width: 100%;
   min-height: 100vh;
+  min-height: calc(var(--app-vh, 1vh) * 100);
   margin: 0;
   padding: 0;
 }
@@ -43,6 +44,7 @@ button, input, select, textarea {
   touch-action: manipulation;
 }
 
+
 .app-shell-page {
   width: 100%;
   max-width: 1400px;
@@ -51,11 +53,18 @@ button, input, select, textarea {
 
 .app-shell-scroll {
   min-height: 100vh;
+  min-height: calc(var(--app-vh, 1vh) * 100);
 }
 
 @supports (height: 100dvh) {
   html, body, #root, .app-shell-scroll {
     min-height: 100dvh;
+  }
+}
+
+@supports (height: 100svh) {
+  html, body, #root, .app-shell-scroll {
+    min-height: 100svh;
   }
 }
 

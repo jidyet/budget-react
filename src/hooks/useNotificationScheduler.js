@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import { LocalNotifications } from "@capacitor/local-notifications";
+import { PushNotifications } from "@capacitor/push-notifications";
+import { removePushDevice, savePushDevice } from "../firebase";
+import { isBillOpenThisCycle } from "../services/billModel";
 import { fx } from "../utils/budgetUtils";
 import { canUseFeature, getUpgradeMessage } from "../utils/planLimits";
 import { subscribeFormattedHouseholdActivity } from "../services/householdActivityService";
@@ -59,6 +62,70 @@ function accountReminderId(accountId, kind) {
   return Math.max(1, hash);
 }
 
+function getClientDeviceId() {
+  if (typeof window === "undefined") return "server";
+  const key = "tracktozero_device_id";
+  const existing = window.localStorage.getItem(key);
+  if (existing) return existing;
+  const created = globalThis.crypto?.randomUUID?.() || `device-${Date.now()}`;
+  window.localStorage.setItem(key, created);
+  return created;
+}
+
+function buildBillActivityNotification(entry = {}) {
+  const type = String(entry?.metadata?.type || "");
+  const actor = String(entry?.userName || "Someone");
+  const billName = String(entry?.metadata?.billName || "").trim();
+
+  switch (type) {
+    case "bill.owner_changed":
+      return {
+        title: `${actor} reassigned ${billName || "a bill"}`,
+        body: billName ? `${billName} now has a different owner.` : "A bill owner changed in your plan.",
+      };
+    case "bill.monthly_covered":
+      return {
+        title: `${billName || "A monthly bill"} is covered`,
+        body: `${actor} marked it covered for this month.`,
+      };
+    case "bill.marked_paid":
+      return {
+        title: `${actor} updated ${billName || "a bill"}`,
+        body: billName ? `${billName} was marked paid.` : "A bill was marked paid.",
+      };
+    case "bill.completed":
+      return {
+        title: `${billName || "A bill"} is fully paid`,
+        body: `${actor} just cleared it from the plan.`,
+      };
+    case "bill.marked_unpaid":
+      return {
+        title: `${actor} reopened ${billName || "a bill"}`,
+        body: billName ? `${billName} is back on your list.` : "A bill was marked unpaid again.",
+      };
+    case "bill.deleted":
+      return {
+        title: `${actor} removed ${billName || "a bill"}`,
+        body: "Open the app to review the latest bill list.",
+      };
+    case "bill.created":
+      return {
+        title: `${billName || "A bill"} was added`,
+        body: `${actor} added it to the plan.`,
+      };
+    case "bill.updated":
+      return {
+        title: `${actor} updated ${billName || "a bill"}`,
+        body: "Open the app to review the latest details.",
+      };
+    default:
+      return {
+        title: entry?.action || "Bill updated",
+        body: billName ? `${billName} changed in your plan.` : "Open the app to see what changed.",
+      };
+  }
+}
+
 export default function useNotificationScheduler({
   reminderPreferences,
   allAccts,
@@ -69,10 +136,14 @@ export default function useNotificationScheduler({
   subscription,
   showToast,
   openBillingPage,
+  billActivity = [],
 }) {
   const isNativeApp = isNativePlatform();
   const [notifPermission, setNotifPermission] = useState("default");
   const activitySeededRef = useRef(false);
+  const billActivitySeededRef = useRef(false);
+  const pushTokenRef = useRef("");
+  const pushDeviceIdRef = useRef(getClientDeviceId());
 
   useEffect(() => {
     let alive = true;
@@ -97,10 +168,74 @@ export default function useNotificationScheduler({
     return () => { alive = false; };
   }, []);
 
+  useEffect(() => {
+    if (!isNativeApp || notifPermission !== "granted" || !currentUserId) return undefined;
+
+    let active = true;
+    const persistPushDevice = async (token) => {
+      if (!token || !currentUserId) return;
+      try {
+        await savePushDevice(currentUserId, pushDeviceIdRef.current, {
+          token,
+          platform: Capacitor.getPlatform(),
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+          activeHouseholdId: String(activeHouseholdId || ""),
+          reminderPreferences,
+        });
+      } catch (error) {
+        console.error("save push device error", error);
+      }
+    };
+
+    const registerNativePush = async () => {
+      try {
+        const permissions = await PushNotifications.requestPermissions();
+        if ((permissions.receive || "granted") !== "granted") return;
+
+        const tokenListener = await PushNotifications.addListener("registration", (token) => {
+          if (!active) return;
+          pushTokenRef.current = String(token?.value || "");
+          persistPushDevice(pushTokenRef.current);
+        });
+        const errorListener = await PushNotifications.addListener("registrationError", (error) => {
+          console.error("push registration error", error);
+        });
+
+        await PushNotifications.register();
+
+        return () => {
+          tokenListener?.remove?.();
+          errorListener?.remove?.();
+        };
+      } catch (error) {
+        console.error("native push setup error", error);
+        return undefined;
+      }
+    };
+
+    let cleanup;
+    registerNativePush().then((nextCleanup) => {
+      cleanup = nextCleanup;
+      if (pushTokenRef.current) persistPushDevice(pushTokenRef.current);
+    });
+
+    return () => {
+      active = false;
+      cleanup?.();
+    };
+  }, [activeHouseholdId, currentUserId, isNativeApp, notifPermission, reminderPreferences]);
+
+  useEffect(() => {
+    if (!isNativeApp || !currentUserId || notifPermission === "granted" || !pushDeviceIdRef.current) return;
+    removePushDevice(currentUserId, pushDeviceIdRef.current).catch((error) =>
+      console.error("remove push device error", error)
+    );
+  }, [currentUserId, isNativeApp, notifPermission]);
+
   // Web notifications
   useEffect(() => {
     if (!reminderPreferences.dueSoon || notifPermission !== "granted" || isNativeApp || typeof Notification === "undefined") return;
-    const upcoming = allAccts.filter((a) => !a.is_paid && a.d_left !== null && a.d_left >= 0 && a.d_left <= 3);
+    const upcoming = allAccts.filter((a) => isBillOpenThisCycle(a) && a.d_left !== null && a.d_left >= 0 && a.d_left <= 3);
     upcoming.forEach((a) => {
       if (a.d_left === 0) {
         if (!shouldDispatchReminder("web-today", a.id)) return;
@@ -121,7 +256,7 @@ export default function useNotificationScheduler({
   // Native notifications
   useEffect(() => {
     if (!reminderPreferences.dueSoon || !isNativeApp || notifPermission !== "granted") return;
-    const upcoming = allAccts.filter((a) => !a.is_paid && a.d_left !== null && a.d_left >= 0 && a.d_left <= 2);
+    const upcoming = allAccts.filter((a) => isBillOpenThisCycle(a) && a.d_left !== null && a.d_left >= 0 && a.d_left <= 2);
     if (!upcoming.length) return;
 
     const syncNativeReminders = async () => {
@@ -179,14 +314,44 @@ export default function useNotificationScheduler({
 
   useEffect(() => {
     activitySeededRef.current = false;
+    billActivitySeededRef.current = false;
   }, [activeHouseholdId, currentUserId]);
+
+  useEffect(() => {
+    if (!reminderPreferences.householdUpdates || notifPermission !== "granted") return;
+    const latest = Array.isArray(billActivity) ? billActivity[0] : null;
+    if (!latest?.id) return;
+    if (!billActivitySeededRef.current) {
+      billActivitySeededRef.current = true;
+      return;
+    }
+    const dedupeKey = `budget_bill_activity_${currentUserId}_${latest.id}`;
+    if (typeof window !== "undefined" && localStorage.getItem(dedupeKey)) return;
+    if (typeof window !== "undefined") localStorage.setItem(dedupeKey, "1");
+    const { title, body } = buildBillActivityNotification(latest);
+    if (isNativeApp) {
+      LocalNotifications.schedule({
+        notifications: [{
+          id: accountReminderId(latest.id, "bill-activity"),
+          title,
+          body,
+          schedule: { at: new Date(Date.now() + 3000), allowWhileIdle: true },
+        }],
+      }).catch((error) => console.error("bill activity native notification error", error));
+      return;
+    }
+    showWebNotification(title, {
+      body,
+      tag: `bill-activity-${latest.id}`,
+    }).catch((error) => console.error("bill activity web notification error", error));
+  }, [billActivity, currentUserId, isNativeApp, notifPermission, reminderPreferences.householdUpdates]);
 
   useEffect(() => {
     if (!activeHouseholdId || !reminderPreferences.householdUpdates || notifPermission !== "granted") return undefined;
 
     const sendActivityNotification = async (item) => {
       const notificationTitle = item?.title || "Household updated";
-      const notificationBody = item?.detail || "Someone moved things forward.";
+      const notificationBody = item?.detail || "Open the app to see what changed.";
 
       if (isNativeApp) {
         try {
@@ -239,8 +404,11 @@ export default function useNotificationScheduler({
     }
     try {
       if (isNativeApp) {
-        const perm = await LocalNotifications.requestPermissions();
-        const next = perm.display || "default";
+        const [localPerm, pushPerm] = await Promise.all([
+          LocalNotifications.requestPermissions(),
+          PushNotifications.requestPermissions(),
+        ]);
+        const next = localPerm.display || pushPerm.receive || "default";
         setNotifPermission(next);
         showToast(next === "granted" ? "Phone bill reminders enabled" : "Phone notifications are still blocked");
         return;

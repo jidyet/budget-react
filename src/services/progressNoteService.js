@@ -12,8 +12,8 @@ export const buildProgressNotes = ({
   if (safeNumber(progress?.monthsSooner) > 0) {
     notes.push({
       id: "months-sooner",
-      title: progress.monthsSoonerLabel || "You moved forward",
-      detail: "Your payoff path got shorter",
+      title: progress.monthsSoonerLabel || "Payoff got shorter",
+      detail: progress.projectedPayoffDate ? `Projected finish ${progress.projectedPayoffDate}` : "Your payoff path got shorter",
       tone: "good",
     });
   }
@@ -41,7 +41,7 @@ export const buildProgressNotes = ({
     notes.push({
       id: "milestone",
       title: clearedMilestone.title || "One down",
-      detail: clearedMilestone.detail || "You moved forward",
+      detail: clearedMilestone.detail || clearedMilestone.body || "A debt or balance moved in the right direction",
       tone: "good",
     });
   }
@@ -50,7 +50,7 @@ export const buildProgressNotes = ({
     notes.push({
       id: "shared-progress",
       title: "Shared progress",
-      detail: activity[0]?.title || "Your household moved forward",
+      detail: activity[0]?.title || "Someone in your household updated shared progress",
       tone: "accent",
     });
   }
@@ -66,4 +66,3 @@ export const buildProgressNotes = ({
 
   return notes.slice(0, 2);
 };
-

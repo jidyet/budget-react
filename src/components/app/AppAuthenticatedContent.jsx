@@ -39,7 +39,12 @@ export default function AppAuthenticatedContent(props) {
     completeOnboarding,
     currencyCode,
     saveCurrencyPreference,
-    navigateTo,
+    newAcct,
+    setNewAcct,
+    addCustomAccount,
+    updateRecord,
+    handleUpload,
+    theme,
   } = props;
 
   return (
@@ -76,10 +81,13 @@ export default function AppAuthenticatedContent(props) {
             currencyCode={currencyCode}
             currencyOptions={props.currencyOptions}
             onCurrencyChange={saveCurrencyPreference}
-            openSettings={() => {
-              navigateTo("settings");
-              setOnboardingStep(3);
-            }}
+            newAcct={newAcct}
+            setNewAcct={setNewAcct}
+            addCustomAccount={addCustomAccount}
+            allAccts={allAccts}
+            updateRecord={updateRecord}
+            handleUpload={handleUpload}
+            theme={theme}
           />
         </>
       )}

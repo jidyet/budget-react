@@ -133,6 +133,27 @@ export function createLocalDataService({ seedMonthKey, seedAccounts, defaultReco
       return { uid: entry.uid, email, isLocal: true };
     },
 
+    deleteUser(uid, email = "") {
+      const safeUid = String(uid || "").trim();
+      const safeEmail = String(email || "").trim();
+      if (!safeUid && !safeEmail) return false;
+
+      const users = safeParse(localStorage.getItem(USERS_KEY), {});
+      const nextUsers = { ...users };
+      const matchedEmail = safeEmail || Object.entries(users).find(([, entry]) => String(entry?.uid || "") === safeUid)?.[0] || "";
+      if (matchedEmail && nextUsers[matchedEmail]) {
+        delete nextUsers[matchedEmail];
+        localStorage.setItem(USERS_KEY, JSON.stringify(nextUsers));
+      }
+
+      if (safeUid) {
+        localStorage.removeItem(localKey(safeUid));
+        localStorage.removeItem(planKey(safeUid));
+        localStorage.removeItem(settingsKey(safeUid));
+      }
+      return true;
+    },
+
     loadPlans(uid) {
       return safeParse(localStorage.getItem(planKey(uid)), []);
     },

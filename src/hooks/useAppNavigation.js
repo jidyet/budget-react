@@ -62,7 +62,6 @@ export default function useAppNavigation({
       ...(founderAccount ? [{ id: "admin", label: "Admin", icon: "🛡️" }] : []),
       { id: "privacy", label: "Privacy", icon: "🔒" },
       { id: "support", label: "Help & FAQ", icon: "❓" },
-      { id: "billing", label: "Billing", icon: "✦" },
       { id: "notifications", label: "Notifications", icon: "🔔" },
       { id: "upload", label: "Import", icon: "↑" },
       { id: "history", label: "History", icon: "🕐" },

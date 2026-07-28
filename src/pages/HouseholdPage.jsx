@@ -16,6 +16,7 @@ export default function HouseholdPage(props) {
     handleRejectHouseholdRequest,
     handleLeaveHousehold,
     handleRemoveHouseholdMember,
+    handleSetMemberRole,
     userProfile,
     householdInviteLink,
     subscription,
@@ -53,6 +54,15 @@ export default function HouseholdPage(props) {
           setHouseholdSetupOpen(true);
           setHouseholdSetupTab('choose');
         }}
+        onOpenCreate={() => {
+          setHouseholdSetupOpen(true);
+          setHouseholdSetupTab('create');
+        }}
+        onOpenJoin={() => {
+          setHouseholdSetupOpen(true);
+          setHouseholdSetupTab('join');
+        }}
+        onLeave={handleLeaveHousehold}
       />
 
       {workspaceMode === 'household' ? (
@@ -68,16 +78,9 @@ export default function HouseholdPage(props) {
           onReject={handleRejectHouseholdRequest}
           onLeave={handleLeaveHousehold}
           onRemoveMember={handleRemoveHouseholdMember}
+          onSetRole={handleSetMemberRole}
         />
-      ) : (
-        <div style={{ background:c.surf, border:`1px solid ${c.border}`, borderRadius:18, padding:'18px 20px' }}>
-          <div style={{ fontSize:11, fontWeight:800, letterSpacing:'0.1em', textTransform:'uppercase', color:c.muted, marginBottom:6 }}>Solo mode</div>
-          <div style={{ fontSize:18, fontWeight:800, color:c.tx, marginBottom:4 }}>Your private flow is still here</div>
-          <div style={{ fontSize:13, color:c.tx2, lineHeight:1.6 }}>
-            You can keep tracking on your own or start a shared household later without giving up spreadsheet import or manual entry.
-          </div>
-        </div>
-      )}
+      ) : null}
     </div>
   );
 }

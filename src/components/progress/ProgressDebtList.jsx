@@ -1,4 +1,5 @@
 import ProgressRing from "./ProgressRing";
+import { getBillDisplayName } from "../../services/billModel";
 
 const CONFETTI = [
   { left: "15%", color: "#39a844", size: 5, delay: "0s",    dur: "1.1s" },
@@ -30,8 +31,8 @@ export default function ProgressDebtList({ palette, debts = [], activity = [], r
   // Match activity to debts by name fragment
   const getDebtActivity = (debt) =>
     (activity || []).find((a) =>
-      a?.title && debt?.name &&
-      a.title.toLowerCase().includes(debt.name.toLowerCase().split(" ")[0])
+      a?.title && debt &&
+      a.title.toLowerCase().includes(getBillDisplayName(debt).toLowerCase().split(" ")[0])
     );
 
   return (
@@ -189,7 +190,7 @@ export default function ProgressDebtList({ palette, debts = [], activity = [], r
                 <ProgressRing
                   palette={c}
                   ratio={debt.ratio}
-                  label={debt.name}
+                  label={getBillDisplayName(debt)}
                   value={cleared ? "Cleared" : debt.currentBalanceLabel}
                   tone={ringColor}
                   size={102}

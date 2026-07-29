@@ -59,3 +59,8 @@ Use this checklist before launch changes go live.
 - Client build contains only publishable Stripe values.
 - No Stripe secret key is present in frontend code or committed env examples.
 - Webhook updates are handled server-side only.
+- User cannot create their own `users/{uid}` doc with a `subscription` field.
+- User cannot modify `subscription` on their own existing `users/{uid}` doc.
+- App admin can still write `subscription` (covers manual/support overrides;
+  Cloud Functions use the Admin SDK, which bypasses rules entirely).
+  Covered by `tests/firestore.rules.test.js`.

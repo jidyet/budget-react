@@ -179,6 +179,54 @@ test("users cannot read another user's private data", async () => {
   await assertFails(db.doc("users/alice/profile/main").get());
 });
 
+test("users can create and update their own user document without touching subscription", async () => {
+  const db = testEnv.authenticatedContext("alice").firestore();
+
+  await assertSucceeds(
+    db.doc("users/alice").set({ displayName: "Alice", updatedAt: new Date() }, { merge: true })
+  );
+  await assertSucceeds(
+    db.doc("users/alice").set({ displayName: "Alice Updated" }, { merge: true })
+  );
+});
+
+test("users cannot create their own user document with a subscription field", async () => {
+  const db = testEnv.authenticatedContext("alice").firestore();
+
+  await assertFails(
+    db.doc("users/alice").set({
+      displayName: "Alice",
+      subscription: { planId: "premium", status: "active" },
+    })
+  );
+});
+
+test("users cannot self-grant premium by writing subscription on an existing user document", async () => {
+  await seedData(async (db) => {
+    await db.doc("users/alice").set({ displayName: "Alice", subscription: { planId: "free", status: "free" } });
+  });
+
+  const db = testEnv.authenticatedContext("alice").firestore();
+  await assertFails(
+    db.doc("users/alice").set({ subscription: { planId: "premium", status: "active" } }, { merge: true })
+  );
+  await assertSucceeds(
+    db.doc("users/alice").set({ displayName: "Alice Renamed" }, { merge: true })
+  );
+});
+
+test("app admins can write subscription on a user's document", async () => {
+  await seedData(async (db) => {
+    await db.doc("config/admins").set({ uids: ["admin-1"] });
+    await db.doc("users/alice").set({ displayName: "Alice", subscription: { planId: "free", status: "free" } });
+  });
+
+  const db = testEnv.authenticatedContext("admin-1").firestore();
+  await assertSucceeds(
+    db.doc("users/alice").set({ subscription: { planId: "premium", status: "active" } }, { merge: true })
+  );
+});
+
 test("non-members can read active household roots but not member docs", async () => {
   await seedData(async (db) => {
     await db.doc("households/home-1").set(householdRoot({ ownerId: "owner-1" }));

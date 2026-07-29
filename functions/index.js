@@ -1,8 +1,9 @@
 /* global require, process, exports */
-const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
 const { FieldValue } = require("firebase-admin/firestore");
+const Stripe = require("stripe");
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -10,6 +11,13 @@ if (!admin.apps.length) {
 
 const db = admin.firestore();
 const serverTimestamp = () => FieldValue.serverTimestamp();
+// stripeWebhook only calls stripe.webhooks.constructEvent(), which verifies
+// the signature locally using STRIPE_WEBHOOK_SECRET and never uses this key
+// to call the Stripe API — so a placeholder is safe when the real secret
+// isn't configured yet, and keeps this module loadable (the Stripe SDK
+// throws at construction time on an empty apiKey, which would otherwise
+// break every export in this file, not just stripeWebhook).
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "sk_not_configured", { apiVersion: "2025-02-24.acacia" });
 
 const parseFlag = (value, fallback = false) => {
   if (value === undefined || value === null || value === "") return fallback;
@@ -1071,5 +1079,74 @@ exports.deleteMyAccount = onCall({ region: "us-central1", timeoutSeconds: 90, me
       stack: error?.stack || null,
     });
     throw new HttpsError("internal", "Could not delete your account right now.");
+  }
+});
+
+// Server-authoritative entitlement write (P0-1). This is the only place
+// `users/{uid}.subscription` is ever written; firestore.rules blocks
+// clients from writing that field directly. Requires STRIPE_SECRET_KEY and
+// STRIPE_WEBHOOK_SECRET to be configured before this function is deployed
+// and registered as a webhook endpoint in the Stripe Dashboard — neither is
+// set in this environment, so this function is inert until deployed.
+exports.stripeWebhook = onRequest({ region: "us-central1", timeoutSeconds: 30, memory: "256MiB" }, async (req, res) => {
+  if (req.method !== "POST") {
+    res.status(405).send("Method Not Allowed");
+    return;
+  }
+
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(
+      req.rawBody,
+      req.headers["stripe-signature"],
+      process.env.STRIPE_WEBHOOK_SECRET || ""
+    );
+  } catch (error) {
+    console.error("stripeWebhook:signature-error", error.message);
+    res.status(400).send(`Webhook Error: ${error.message}`);
+    return;
+  }
+
+  try {
+    // Only subscription-object events are handled here — they carry status/
+    // items/customer directly. checkout.session.completed is intentionally
+    // not handled: its event payload is a Checkout Session, not a
+    // Subscription, and lacks those fields; Stripe always follows a
+    // completed checkout with customer.subscription.created, which this
+    // does handle correctly.
+    if (
+      event.type === "customer.subscription.created"
+      || event.type === "customer.subscription.updated"
+      || event.type === "customer.subscription.deleted"
+    ) {
+      const subscription = event.data.object;
+      const uid = subscription.metadata?.uid || subscription.client_reference_id;
+      if (uid) {
+        const price = subscription.items?.data?.[0]?.price;
+        const interval = price?.recurring?.interval || "month";
+        const status = String(subscription.status || "free").toLowerCase();
+        const premium = ["active", "trialing", "past_due"].includes(status);
+
+        await db.collection("users").doc(String(uid)).set({
+          subscription: {
+            planId: premium ? "premium" : "free",
+            status,
+            interval,
+            stripeCustomerId: subscription.customer || "",
+            stripeSubscriptionId: subscription.id || "",
+            cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
+            currentPeriodEnd: subscription.current_period_end
+              ? admin.firestore.Timestamp.fromMillis(subscription.current_period_end * 1000)
+              : null,
+            updatedAt: serverTimestamp(),
+          },
+        }, { merge: true });
+      }
+    }
+
+    res.json({ received: true });
+  } catch (error) {
+    console.error("stripeWebhook:handler-error", error);
+    res.status(500).json({ error: "Webhook handling failed" });
   }
 });

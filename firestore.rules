@@ -437,7 +437,19 @@ service cloud.firestore {
 
     match /users/{uid} {
       allow read: if isOwner(uid) || isAppAdmin();
-      allow write: if isOwner(uid) || isAppAdmin();
+      // Entitlement is server-authoritative: `subscription` may only be created
+      // or modified by isAppAdmin() (i.e. the Admin SDK from a trusted Cloud
+      // Function, which bypasses these rules anyway; isAppAdmin() additionally
+      // covers direct console/admin-tool writes). A client cannot self-grant
+      // premium by writing to its own subscription field. See P0-1.
+      allow create: if (isOwner(uid) || isAppAdmin())
+        && (isAppAdmin() || !("subscription" in request.resource.data));
+      allow update: if (isOwner(uid) || isAppAdmin())
+        && (
+          isAppAdmin()
+          || !request.resource.data.diff(resource.data).affectedKeys().hasAny(["subscription"])
+        );
+      allow delete: if isOwner(uid) || isAppAdmin();
 
       match /meta/app {
         allow read: if isOwner(uid) || isAppAdmin();

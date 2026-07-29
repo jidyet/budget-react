@@ -14,7 +14,6 @@ export default defineConfig([
     'android/app/build/**',
     'android/app/src/main/assets/**',
     'android/.gradle/**',
-    'functions/stripeWebhook.example.js',
   ]),
   {
     files: ['**/*.{js,jsx}'],

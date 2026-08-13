@@ -14,6 +14,21 @@ const money = (value) =>
   Number(value || 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
 
 const percent = (value) => value == null ? "Unknown APR" : `${(Number(value || 0) * 100).toFixed(2)}% APR`;
+const todayInputValue = () => new Date().toISOString().slice(0, 10);
+const dateInputToIso = (value) => value ? `${value}T00:00:00.000Z` : "";
+const newDebtDraft = () => ({
+  clientRequestId: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  name: "",
+  debtType: "credit_card",
+  currentBalance: "",
+  balanceAsOf: todayInputValue(),
+  aprStatus: "unknown",
+  apr: "",
+  minimumRequiredPayment: "",
+  dueDate: "",
+  ownerLabel: "",
+  includedInCorePayoffPlan: true,
+});
 
 const styles = {
   shell: {
@@ -282,7 +297,7 @@ function Home({ snapshot, scenario, onScenario }) {
 function Debts({ snapshot, service, refresh, runAction, writeState }) {
   const [payment, setPayment] = useState({ debtId: snapshot.debts[0]?.id || "", amount: "" });
   const [balance, setBalance] = useState({ debtId: snapshot.debts[0]?.id || "", amount: "" });
-  const [newDebt, setNewDebt] = useState({ name: "", currentBalance: "", minimumRequiredPayment: "", aprStatus: "unknown", apr: "", debtType: "credit_card" });
+  const [newDebt, setNewDebt] = useState(newDebtDraft);
   const canManage = snapshot.permissions.manageDebts && snapshot.mode !== "legacy_preview";
   const canObserve = snapshot.permissions.recordObservations && snapshot.mode !== "legacy_preview";
 
@@ -339,22 +354,67 @@ function Debts({ snapshot, service, refresh, runAction, writeState }) {
           <form onSubmit={(event) => {
             event.preventDefault();
             runAction("add debt", async () => {
-              await service.createNewDebt(snapshot.workspace.id, { ...newDebt, currentBalance: Number(newDebt.currentBalance), minimumRequiredPayment: Number(newDebt.minimumRequiredPayment), apr: newDebt.aprStatus === "unknown" ? null : Number(newDebt.apr), ownerLabel: snapshot.membership?.displayName || "Workspace" });
-              setNewDebt({ name: "", currentBalance: "", minimumRequiredPayment: "", aprStatus: "unknown", apr: "", debtType: "credit_card" });
+              const dueDay = newDebt.dueDate ? new Date(`${newDebt.dueDate}T00:00:00.000Z`).getUTCDate() : null;
+              await service.createNewDebt(snapshot.workspace.id, {
+                clientRequestId: newDebt.clientRequestId,
+                name: newDebt.name,
+                debtType: newDebt.debtType,
+                currentBalance: Number(newDebt.currentBalance),
+                balanceAsOf: dateInputToIso(newDebt.balanceAsOf),
+                minimumRequiredPayment: Number(newDebt.minimumRequiredPayment),
+                aprStatus: newDebt.aprStatus,
+                apr: newDebt.aprStatus === "unknown" ? null : newDebt.aprStatus === "no_interest" ? 0 : Number(newDebt.apr),
+                dueDay,
+                ownerLabel: newDebt.ownerLabel || snapshot.membership?.displayName || "Workspace",
+                includedInCorePayoffPlan: !!newDebt.includedInCorePayoffPlan,
+              });
+              setNewDebt(newDebtDraft());
               await refresh();
             });
           }}>
-            <Field label="Add debt"><input style={styles.input} placeholder="Debt name" value={newDebt.name} onChange={(event) => setNewDebt({ ...newDebt, name: event.target.value })} /></Field>
-            <Field label="Balance"><input style={styles.input} value={newDebt.currentBalance} onChange={(event) => setNewDebt({ ...newDebt, currentBalance: event.target.value })} /></Field>
+            <Field label="Creditor / debt name"><input style={styles.input} placeholder="Debt name" value={newDebt.name} onChange={(event) => setNewDebt({ ...newDebt, name: event.target.value })} /></Field>
+            <Field label="Debt type">
+              <select
+                style={styles.input}
+                value={newDebt.debtType}
+                onChange={(event) => {
+                  const debtType = event.target.value;
+                  setNewDebt({ ...newDebt, debtType, includedInCorePayoffPlan: debtType === "mortgage" ? false : newDebt.includedInCorePayoffPlan });
+                }}
+              >
+                <option value="credit_card">Credit card</option>
+                <option value="personal_loan">Personal loan</option>
+                <option value="auto_loan">Auto loan</option>
+                <option value="student_loan">Student loan</option>
+                <option value="medical">Medical debt</option>
+                <option value="collections">Collections</option>
+                <option value="tax_debt">Tax debt</option>
+                <option value="line_of_credit">Line of credit</option>
+                <option value="bnpl">Financing / BNPL</option>
+                <option value="personal_debt">Personal debt</option>
+                <option value="mortgage">Mortgage</option>
+                <option value="other">Other</option>
+              </select>
+            </Field>
+            <Field label="Current balance"><input style={styles.input} type="number" min="0" step="0.01" value={newDebt.currentBalance} onChange={(event) => setNewDebt({ ...newDebt, currentBalance: event.target.value })} /></Field>
+            <Field label="Balance as-of date"><input style={styles.input} type="date" value={newDebt.balanceAsOf} onChange={(event) => setNewDebt({ ...newDebt, balanceAsOf: event.target.value })} /></Field>
             <Field label="Required payment"><input style={styles.input} value={newDebt.minimumRequiredPayment} onChange={(event) => setNewDebt({ ...newDebt, minimumRequiredPayment: event.target.value })} /></Field>
             <Field label="APR status">
               <select style={styles.input} value={newDebt.aprStatus} onChange={(event) => setNewDebt({ ...newDebt, aprStatus: event.target.value })}>
                 <option value="unknown">Unknown</option>
                 <option value="known">Known</option>
                 <option value="no_interest">No interest</option>
+                <option value="promotional">Promotional</option>
               </select>
             </Field>
-            {newDebt.aprStatus !== "unknown" && <Field label="APR"><input style={styles.input} value={newDebt.apr} onChange={(event) => setNewDebt({ ...newDebt, apr: event.target.value })} /></Field>}
+            {newDebt.aprStatus !== "unknown" && newDebt.aprStatus !== "no_interest" && <Field label="APR"><input style={styles.input} type="number" min="0" step="0.01" value={newDebt.apr} onChange={(event) => setNewDebt({ ...newDebt, apr: event.target.value })} /></Field>}
+            <Field label="Due date"><input style={styles.input} type="date" value={newDebt.dueDate} onChange={(event) => setNewDebt({ ...newDebt, dueDate: event.target.value })} /></Field>
+            <Field label="Owner"><input style={styles.input} placeholder="Me, spouse, household..." value={newDebt.ownerLabel} onChange={(event) => setNewDebt({ ...newDebt, ownerLabel: event.target.value })} /></Field>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, margin: "8px 0 14px", fontWeight: 800 }}>
+              <input type="checkbox" checked={!!newDebt.includedInCorePayoffPlan} onChange={(event) => setNewDebt({ ...newDebt, includedInCorePayoffPlan: event.target.checked })} />
+              Include in my core payoff plan
+            </label>
+            {newDebt.debtType === "mortgage" && !newDebt.includedInCorePayoffPlan && <p style={{ color: "#47657d" }}>Mortgage is tracked, but excluded from the core debt-free date unless you include it.</p>}
             <button disabled={!canManage || writeState.inProgress} style={canManage && !writeState.inProgress ? styles.primaryButton : styles.disabledButton}>
               {writeState.action === "add debt" ? "Adding..." : "Add debt"}
             </button>

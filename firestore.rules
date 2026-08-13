@@ -750,6 +750,21 @@ service cloud.firestore {
         && request.resource.data.createdBy == resource.data.createdBy;
     }
 
+    function v2OpeningSnapshotPath(workspaceId, debtId, snapshotId) {
+      return /databases/$(database)/documents/workspaces/$(workspaceId)/debts/$(debtId)/balance_snapshots/$(snapshotId);
+    }
+
+    function v2OpeningSnapshotCreatedWithDebt(workspaceId, debtId) {
+      return "openingBalanceSnapshotId" in request.resource.data
+        && request.resource.data.openingBalanceSnapshotId is string
+        && existsAfter(v2OpeningSnapshotPath(workspaceId, debtId, request.resource.data.openingBalanceSnapshotId))
+        && getAfter(v2OpeningSnapshotPath(workspaceId, debtId, request.resource.data.openingBalanceSnapshotId)).data.workspaceId == workspaceId
+        && getAfter(v2OpeningSnapshotPath(workspaceId, debtId, request.resource.data.openingBalanceSnapshotId)).data.debtId == debtId
+        && getAfter(v2OpeningSnapshotPath(workspaceId, debtId, request.resource.data.openingBalanceSnapshotId)).data.balance == request.resource.data.currentBalance
+        && getAfter(v2OpeningSnapshotPath(workspaceId, debtId, request.resource.data.openingBalanceSnapshotId)).data.createdBy == request.auth.uid
+        && getAfter(v2OpeningSnapshotPath(workspaceId, debtId, request.resource.data.openingBalanceSnapshotId)).data.source in ["manual", "import"];
+    }
+
     match /workspaces/{workspaceId} {
       allow create: if v2WorkspaceCreator(workspaceId);
       allow read: if v2ViewerPlus(workspaceId);
@@ -791,7 +806,12 @@ service cloud.firestore {
 
       match /debts/{debtId} {
         allow read: if v2ViewerPlus(workspaceId);
-        allow create, update: if v2AdminPlus(workspaceId)
+        allow create: if v2AdminPlus(workspaceId)
+          && request.resource.data.workspaceId == workspaceId
+          && request.resource.data.id == debtId
+          && request.resource.data.createdBy == request.auth.uid
+          && v2OpeningSnapshotCreatedWithDebt(workspaceId, debtId);
+        allow update: if v2AdminPlus(workspaceId)
           && request.resource.data.workspaceId == workspaceId;
         allow delete: if v2AdminPlus(workspaceId)
           && resource.data.workspaceId == workspaceId;

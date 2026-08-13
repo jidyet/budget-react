@@ -233,7 +233,28 @@ describe("Phase 4 migration execution, resume, validation, and rollback", () => 
     expect(repo.listPaymentEvents(preview.candidateWorkspace.id, preview.candidateDebts[0].id)).toHaveLength(0);
     expect(repo.getWorkspace(preview.candidateWorkspace.id).activePlanId).toBe("");
 
-    repo.saveDebt({ id: "native-after-cutover", workspaceId: preview.candidateWorkspace.id, name: "Native", currentBalance: 10, minimumRequiredPayment: 1, createdAt: ts, createdBy: "owner-a" });
+    repo.createDebtWithOpeningSnapshot({
+      debt: {
+        id: "native-after-cutover",
+        workspaceId: preview.candidateWorkspace.id,
+        name: "Native",
+        currentBalance: 10,
+        minimumRequiredPayment: 1,
+        createdAt: ts,
+        createdBy: "owner-a",
+        openingBalanceSnapshotId: "opening-native-after-cutover",
+      },
+      openingSnapshot: {
+        id: "opening-native-after-cutover",
+        workspaceId: preview.candidateWorkspace.id,
+        debtId: "native-after-cutover",
+        balance: 10,
+        observedAt: ts,
+        source: "manual",
+        createdAt: ts,
+        createdBy: "owner-a",
+      },
+    });
     await expect(rollbackMigration({ repository: repo, preview, actorId: "owner-a" })).rejects.toThrow(/Rollback blocked/);
   });
 

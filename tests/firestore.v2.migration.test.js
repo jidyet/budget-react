@@ -218,14 +218,27 @@ test("Phase 4 migration denies non-owner operators and blocks rollback after nat
     explicitConfirmation: true,
     actorId: "owner",
   });
-  await ownerRepo.saveDebt({
-    id: "native-write",
-    workspaceId: preview.candidateWorkspace.id,
-    name: "Native debt",
-    currentBalance: 10,
-    minimumRequiredPayment: 1,
-    createdAt: ts,
-    createdBy: "owner",
+  await ownerRepo.createDebtWithOpeningSnapshot({
+    debt: {
+      id: "native-write",
+      workspaceId: preview.candidateWorkspace.id,
+      name: "Native debt",
+      currentBalance: 10,
+      minimumRequiredPayment: 1,
+      createdAt: ts,
+      createdBy: "owner",
+      openingBalanceSnapshotId: "opening-native-write",
+    },
+    openingSnapshot: {
+      id: "opening-native-write",
+      workspaceId: preview.candidateWorkspace.id,
+      debtId: "native-write",
+      balance: 10,
+      observedAt: ts,
+      source: "manual",
+      createdAt: ts,
+      createdBy: "owner",
+    },
   });
   await assert.rejects(
     rollbackMigration({ repository: ownerRepo, preview, actorId: "owner" }),

@@ -1,5 +1,5 @@
 import { ROLE_PERMISSIONS } from "../../domain/tracktozero/constants.js";
-import { createDebt, createStartingDebtSnapshotItem } from "../../domain/tracktozero/models.js";
+import { createStartingDebtSnapshotItem } from "../../domain/tracktozero/models.js";
 import { buildExpectedCheckpoints } from "../adapters/tracktozeroCalcAdapter.js";
 import { calculateWhatIfComparison } from "../calc/scenarioComparison.js";
 import {
@@ -12,6 +12,12 @@ import { V2_DATA_MODES, hasPermission } from "./v2ApplicationService.js";
 import { V2_TEST_NOW } from "./v2SeedData.js";
 
 const id = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const stableIdPart = (value) => String(value || "")
+  .trim()
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, "-")
+  .replace(/^-+|-+$/g, "")
+  .slice(0, 64);
 
 const parseAsOf = (asOf) => {
   const date = new Date(asOf || V2_TEST_NOW);
@@ -212,13 +218,33 @@ export const createTrackToZeroV2AsyncAppService = ({
     assertInteractive();
     const { membership } = await getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "manageDebts")) throw new Error("Your role can view debts, but cannot add debt terms.");
-    return repository.saveDebt(createDebt({
-      id: id("debt"),
-      workspaceId,
-      createdAt: asOf,
-      createdBy: actorId,
-      ...input,
-    }));
+    if (typeof repository.createDebtWithOpeningSnapshot !== "function") {
+      throw new Error("Debt setup requires an opening balance snapshot.");
+    }
+    const debtId = input.id || (input.clientRequestId ? `debt-${stableIdPart(input.clientRequestId)}` : id("debt"));
+    const openingBalanceSnapshotId = input.openingBalanceSnapshotId || `opening-${debtId}`;
+    const result = await repository.createDebtWithOpeningSnapshot({
+      debt: {
+        ...input,
+        id: debtId,
+        workspaceId,
+        createdAt: asOf,
+        createdBy: actorId,
+        openingBalanceSnapshotId,
+      },
+      openingSnapshot: {
+        id: openingBalanceSnapshotId,
+        workspaceId,
+        debtId,
+        balance: input.currentBalance,
+        observedAt: input.balanceAsOf || input.observedAt || asOf,
+        source: "manual",
+        notes: "Opening balance",
+        createdAt: asOf,
+        createdBy: actorId,
+      },
+    });
+    return result.debt;
   };
 
   const updateDebt = async (workspaceId, debtId, patch) => {

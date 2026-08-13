@@ -94,6 +94,19 @@ service cloud.firestore {
         && request.resource.data.observedAt == resource.data.observedAt
         && request.resource.data.createdBy == resource.data.createdBy;
     }
+    function openingSnapshotPath(workspaceId, debtId, snapshotId) {
+      return /databases/$(database)/documents/workspaces/$(workspaceId)/debts/$(debtId)/balance_snapshots/$(snapshotId);
+    }
+    function openingSnapshotCreatedWithDebt(workspaceId, debtId) {
+      return "openingBalanceSnapshotId" in request.resource.data
+        && request.resource.data.openingBalanceSnapshotId is string
+        && existsAfter(openingSnapshotPath(workspaceId, debtId, request.resource.data.openingBalanceSnapshotId))
+        && getAfter(openingSnapshotPath(workspaceId, debtId, request.resource.data.openingBalanceSnapshotId)).data.workspaceId == workspaceId
+        && getAfter(openingSnapshotPath(workspaceId, debtId, request.resource.data.openingBalanceSnapshotId)).data.debtId == debtId
+        && getAfter(openingSnapshotPath(workspaceId, debtId, request.resource.data.openingBalanceSnapshotId)).data.balance == request.resource.data.currentBalance
+        && getAfter(openingSnapshotPath(workspaceId, debtId, request.resource.data.openingBalanceSnapshotId)).data.createdBy == request.auth.uid
+        && getAfter(openingSnapshotPath(workspaceId, debtId, request.resource.data.openingBalanceSnapshotId)).data.source in ["manual", "import"];
+    }
     function versionImmutable() {
       return request.resource.data == resource.data;
     }
@@ -139,7 +152,12 @@ service cloud.firestore {
 
       match /debts/{debtId} {
         allow read: if isViewerPlus(workspaceId);
-        allow create, update: if isAdminPlus(workspaceId)
+        allow create: if isAdminPlus(workspaceId)
+          && request.resource.data.workspaceId == workspaceId
+          && request.resource.data.id == debtId
+          && request.resource.data.createdBy == request.auth.uid
+          && openingSnapshotCreatedWithDebt(workspaceId, debtId);
+        allow update: if isAdminPlus(workspaceId)
           && request.resource.data.workspaceId == workspaceId;
         allow delete: if isAdminPlus(workspaceId)
           && resource.data.workspaceId == workspaceId;

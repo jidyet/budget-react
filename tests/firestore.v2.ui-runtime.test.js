@@ -123,8 +123,10 @@ test("Firebase-backed Home loads domain state, warnings, status, mortgage exclus
 test("Debt operations persist for Owner/Admin and are denied by rules for Contributor/Viewer/Non-member", async () => {
   const ownerDebt = await serviceAs("owner").createNewDebt("household-e2e", { name: "Owner Added", currentBalance: 100, minimumRequiredPayment: 10, aprStatus: "unknown" });
   assert.equal((await repoAs("owner").listDebts("household-e2e")).some((debt) => debt.id === ownerDebt.id), true);
+  assert.equal((await repoAs("owner").listBalanceSnapshots("household-e2e", ownerDebt.id)).some((snapshot) => snapshot.id === ownerDebt.openingBalanceSnapshotId && snapshot.balance === 100), true);
   const adminDebt = await serviceAs("admin").createNewDebt("household-e2e", { name: "Admin Added", currentBalance: 200, minimumRequiredPayment: 20, aprStatus: "known", apr: 0.2 });
   assert.equal((await repoAs("viewer").listDebts("household-e2e")).some((debt) => debt.id === adminDebt.id), true);
+  assert.equal((await repoAs("viewer").listBalanceSnapshots("household-e2e", adminDebt.id)).some((snapshot) => snapshot.id === adminDebt.openingBalanceSnapshotId && snapshot.balance === 200), true);
 
   await assertFails(repoAs("contrib").saveDebt({ id: "bad-contrib", workspaceId: "household-e2e", name: "Denied", currentBalance: 1, minimumRequiredPayment: 1, createdAt: date(), createdBy: "contrib" }));
   await assertFails(repoAs("viewer").saveDebt({ id: "bad-viewer", workspaceId: "household-e2e", name: "Denied", currentBalance: 1, minimumRequiredPayment: 1, createdAt: date(), createdBy: "viewer" }));

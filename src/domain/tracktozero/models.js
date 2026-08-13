@@ -71,6 +71,7 @@ export const createDebt = (input = {}) => {
     ownerId: optionalString(input.ownerId),
     ownerLabel: optionalString(input.ownerLabel),
     includedInCorePayoffPlan: input.includedInCorePayoffPlan ?? !isMortgage,
+    openingBalanceSnapshotId: optionalString(input.openingBalanceSnapshotId),
     createdAt: nowOr(input.createdAt),
     createdBy: requireString(input.createdBy, "debt.createdBy"),
     updatedAt: optionalTimestamp(input.updatedAt),

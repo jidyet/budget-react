@@ -105,6 +105,23 @@ export class FirebaseTrackToZeroRepository {
     await setDoc(doc(this.db, v2Paths.debt(debt.workspaceId, debt.id)), toFirestoreDoc("debt", debt));
     return debt;
   }
+  async createDebtWithOpeningSnapshot({ debt: debtInput, openingSnapshot: snapshotInput }) {
+    const debt = createDebt(debtInput);
+    const openingSnapshot = createBalanceSnapshot({
+      ...snapshotInput,
+      workspaceId: debt.workspaceId,
+      debtId: debt.id,
+      balance: snapshotInput?.balance ?? debt.currentBalance,
+    });
+    const batch = writeBatch(this.db);
+    batch.set(doc(this.db, v2Paths.debt(debt.workspaceId, debt.id)), toFirestoreDoc("debt", debt));
+    batch.set(
+      doc(this.db, v2Paths.balanceSnapshot(openingSnapshot.workspaceId, openingSnapshot.debtId, openingSnapshot.id)),
+      toFirestoreDoc("balanceSnapshot", openingSnapshot)
+    );
+    await batch.commit();
+    return { debt, openingSnapshot };
+  }
   async listDebts(workspaceId) {
     const snap = await getDocs(collection(this.db, "workspaces", workspaceId, "debts"));
     return snap.docs.map((d) => fromFirestoreDoc("debt", d.data()));

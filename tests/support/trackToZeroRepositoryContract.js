@@ -30,6 +30,33 @@ async function bootstrapOwnerWorkspace(repo, workspaceId = "w1") {
   return created;
 }
 
+async function createDebtWithOpeningSnapshot(repo, input) {
+  const debt = {
+    id: input.id,
+    workspaceId: input.workspaceId || "w1",
+    name: input.name || "Card",
+    currentBalance: input.currentBalance ?? 100,
+    minimumRequiredPayment: input.minimumRequiredPayment ?? 10,
+    createdAt: input.createdAt || TS,
+    createdBy: input.createdBy || "owner",
+    openingBalanceSnapshotId: input.openingBalanceSnapshotId || `opening-${input.id}`,
+  };
+  const { debt: created } = await repo.createDebtWithOpeningSnapshot({
+    debt,
+    openingSnapshot: {
+      id: debt.openingBalanceSnapshotId,
+      workspaceId: debt.workspaceId,
+      debtId: debt.id,
+      balance: debt.currentBalance,
+      observedAt: input.observedAt || TS,
+      source: "manual",
+      createdAt: input.createdAt || TS,
+      createdBy: input.createdBy || "owner",
+    },
+  });
+  return created;
+}
+
 export function runTrackToZeroRepositoryContractSuite({ describe, it, createRepository, switchActivePlan }) {
   describe("repository contract: workspace", () => {
     it("creates and reads back a workspace", async () => {
@@ -65,11 +92,15 @@ export function runTrackToZeroRepositoryContractSuite({ describe, it, createRepo
     it("creates, reads, and lists debts", async () => {
       const repo = await createRepository();
       await bootstrapOwnerWorkspace(repo);
-      await repo.saveDebt({ id: "d1", workspaceId: "w1", name: "Card", currentBalance: 100, minimumRequiredPayment: 10, createdAt: TS, createdBy: "owner" });
-      await repo.saveDebt({ id: "d2", workspaceId: "w1", name: "Loan", currentBalance: 500, minimumRequiredPayment: 50, createdAt: TS, createdBy: "owner" });
+      await createDebtWithOpeningSnapshot(repo, { id: "d1", name: "Card", currentBalance: 100, minimumRequiredPayment: 10 });
+      await createDebtWithOpeningSnapshot(repo, { id: "d2", name: "Loan", currentBalance: 500, minimumRequiredPayment: 50 });
       const listed = await repo.listDebts("w1");
       assert.equal(listed.length, 2);
       assert.deepEqual(listed.map((d) => d.id).sort(), ["d1", "d2"]);
+      const snapshots = await repo.listBalanceSnapshots("w1", "d1");
+      assert.equal(snapshots.length, 1);
+      assert.equal(snapshots[0].id, "opening-d1");
+      assert.equal(snapshots[0].balance, 100);
     });
   });
 
@@ -167,7 +198,7 @@ export function runTrackToZeroRepositoryContractSuite({ describe, it, createRepo
     it("appends a payment event and reads it back", async () => {
       const repo = await createRepository();
       await bootstrapOwnerWorkspace(repo);
-      await repo.saveDebt({ id: "d1", workspaceId: "w1", name: "Card", currentBalance: 100, minimumRequiredPayment: 10, createdAt: TS, createdBy: "owner" });
+      await createDebtWithOpeningSnapshot(repo, { id: "d1", name: "Card", currentBalance: 100, minimumRequiredPayment: 10 });
       const created = await repo.createPaymentEvent({
         id: "e1", workspaceId: "w1", debtId: "d1", amount: 25, paidAt: TS, createdAt: TS, createdBy: "owner",
       });
@@ -182,8 +213,7 @@ export function runTrackToZeroRepositoryContractSuite({ describe, it, createRepo
     it("appends snapshots and lists them newest-observedAt-first with a deterministic tiebreak", async () => {
       const repo = await createRepository();
       await bootstrapOwnerWorkspace(repo);
-      await repo.saveDebt({ id: "d1", workspaceId: "w1", name: "Card", currentBalance: 100, minimumRequiredPayment: 10, createdAt: TS, createdBy: "owner" });
-      await repo.createBalanceSnapshot({ id: "s1", workspaceId: "w1", debtId: "d1", balance: 100, observedAt: TS, createdAt: TS, createdBy: "owner" });
+      await createDebtWithOpeningSnapshot(repo, { id: "d1", name: "Card", currentBalance: 100, minimumRequiredPayment: 10, openingBalanceSnapshotId: "s1" });
       await repo.createBalanceSnapshot({ id: "s2", workspaceId: "w1", debtId: "d1", balance: 90, observedAt: TS2, createdAt: TS, createdBy: "owner" });
       const listed = await repo.listBalanceSnapshots("w1", "d1");
       assert.equal(listed.length, 2);

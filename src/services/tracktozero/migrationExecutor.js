@@ -191,12 +191,30 @@ export const executeMigrationPreview = async ({
     }
 
     for (const path of orderedPaths) {
+      if (completedPaths.includes(path)) continue;
       const entity = entityFromPath(preview, path);
       const existing = await safe(() => repository.getEntityAtPath(path), null);
       if (existing && !sameEntity(existing, entity.value)) throw new Error(`Conflicting existing target at ${path}`);
-      if (!existing) await saveEntity(repository, entity);
-      if (!completedPaths.includes(path)) completedPaths.push(path);
-      writeCount += 1;
+      const pathsCompletedByWrite = [path];
+      if (!existing && entity.kind === "debt" && typeof repository.createDebtWithOpeningSnapshot === "function") {
+        const openingSnapshot = preview.initialBalanceSnapshots.find((snapshot) => snapshot.debtId === entity.value.id);
+        if (!openingSnapshot) throw new Error(`Debt ${entity.value.id} is missing its opening balance snapshot`);
+        const snapshotPath = v2Paths.balanceSnapshot(preview.candidateWorkspace.id, openingSnapshot.debtId, openingSnapshot.id);
+        const existingSnapshot = await safe(() => repository.getEntityAtPath(snapshotPath), null);
+        if (existingSnapshot && !sameEntity(existingSnapshot, openingSnapshot)) throw new Error(`Conflicting existing target at ${snapshotPath}`);
+        if (!existingSnapshot) {
+          await repository.createDebtWithOpeningSnapshot({ debt: entity.value, openingSnapshot });
+        } else {
+          await saveEntity(repository, entity);
+        }
+        pathsCompletedByWrite.push(snapshotPath);
+      } else if (!existing) {
+        await saveEntity(repository, entity);
+      }
+      for (const completedPath of pathsCompletedByWrite) {
+        if (!completedPaths.includes(completedPath)) completedPaths.push(completedPath);
+      }
+      writeCount += pathsCompletedByWrite.length;
       manifest = { ...manifest, completedPaths: [...completedPaths], updatedAt: nowIso() };
       await repository.saveMigrationRun(manifest);
       if (failAfterWrites != null && writeCount >= failAfterWrites) {

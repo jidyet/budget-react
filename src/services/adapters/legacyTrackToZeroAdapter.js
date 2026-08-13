@@ -135,6 +135,7 @@ export const legacyAccountToDebtCandidate = ({ account, workspaceId, createdBy =
   const aprKnown = aprRaw !== undefined && aprRaw !== null && aprRaw !== "";
   const sourceAccountId = text(account.id);
   const debtId = confirmation.targetDebtId || idMap?.debts?.[sourceAccountId] || deterministicId("debt", workspaceId, sourceAccountId);
+  const openingBalanceSnapshotId = deterministicId("snapshot", debtId, sourceAccountId, "initial");
   const currentBalance = money(confirmation.currentBalance ?? account.cur_bal ?? account.starting_bal);
   const debt = createDebt({
     id: debtId,
@@ -151,6 +152,7 @@ export const legacyAccountToDebtCandidate = ({ account, workspaceId, createdBy =
     ownerId: text(confirmation.ownerId),
     ownerLabel: text(confirmation.ownerLabel || account.owner),
     includedInCorePayoffPlan: confirmation.includedInCorePayoffPlan ?? !isMortgage,
+    openingBalanceSnapshotId,
     createdAt: asOf,
     createdBy,
   });

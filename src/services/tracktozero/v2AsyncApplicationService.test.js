@@ -62,6 +62,68 @@ describe("TrackToZero v2 async application service", () => {
     await expect(futureService.getWorkspaceSnapshot("household-owner-a")).rejects.toThrow(/not a member/i);
   });
 
+  it("creates manual debts with an opening balance snapshot and preserves APR/mortgage truth", async () => {
+    const { repository, service } = makeService();
+
+    const debt = await service.createNewDebt("personal-seed", {
+      clientRequestId: "manual-card-001",
+      name: "Manual Card",
+      debtType: "credit_card",
+      currentBalance: 300,
+      balanceAsOf: "2026-08-10T00:00:00.000Z",
+      minimumRequiredPayment: 30,
+      aprStatus: "unknown",
+      apr: null,
+      includedInCorePayoffPlan: true,
+    });
+
+    expect(debt.id).toBe("debt-manual-card-001");
+    expect(debt.apr).toBeNull();
+    expect(debt.aprStatus).toBe("unknown");
+    expect(debt.openingBalanceSnapshotId).toBe(`opening-${debt.id}`);
+    const snapshots = repository.listBalanceSnapshots("personal-seed", debt.id);
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]).toMatchObject({
+      id: debt.openingBalanceSnapshotId,
+      debtId: debt.id,
+      balance: 300,
+      observedAt: "2026-08-10T00:00:00.000Z",
+      source: "manual",
+      createdBy: "seed-owner",
+    });
+
+    const mortgage = await service.createNewDebt("personal-seed", {
+      clientRequestId: "manual-mortgage-001",
+      name: "Optional Mortgage",
+      debtType: "mortgage",
+      currentBalance: 250000,
+      minimumRequiredPayment: 1800,
+      aprStatus: "known",
+      apr: 6.1,
+    });
+    expect(mortgage.includedInCorePayoffPlan).toBe(false);
+  });
+
+  it("keeps manual debt creation idempotent for the same client request", async () => {
+    const { repository, service } = makeService();
+
+    const input = {
+      clientRequestId: "retry-card-001",
+      name: "Retry Card",
+      debtType: "credit_card",
+      currentBalance: 500,
+      minimumRequiredPayment: 50,
+      aprStatus: "known",
+      apr: 17.99,
+    };
+    const first = await service.createNewDebt("personal-seed", input);
+    const second = await service.createNewDebt("personal-seed", input);
+
+    expect(second.id).toBe(first.id);
+    expect(repository.listDebts("personal-seed").filter((debt) => debt.id === first.id)).toHaveLength(1);
+    expect(repository.listBalanceSnapshots("personal-seed", first.id).filter((snapshot) => snapshot.id === first.openingBalanceSnapshotId)).toHaveLength(1);
+  });
+
   it("records payment and balance append-only facts with actor attribution", async () => {
     const { repository, service } = makeService("seed-contributor");
     const payment = await service.recordPayment("household-seed", "household-samsung", { amount: 40, notes: "paid from app" });

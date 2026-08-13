@@ -38,6 +38,33 @@ async function seedBaseWorkspace(workspaceId = "w1") {
   });
 }
 
+async function createDebtWithOpeningSnapshot(repo, input = {}) {
+  const debt = {
+    id: input.id || "d1",
+    workspaceId: input.workspaceId || "w1",
+    name: input.name || "Card",
+    currentBalance: input.currentBalance ?? 100,
+    minimumRequiredPayment: input.minimumRequiredPayment ?? 10,
+    aprStatus: input.aprStatus || "unknown",
+    createdAt: input.createdAt || now(),
+    createdBy: input.createdBy || "admin",
+    openingBalanceSnapshotId: input.openingBalanceSnapshotId || `opening-${input.id || "d1"}`,
+  };
+  return repo.createDebtWithOpeningSnapshot({
+    debt,
+    openingSnapshot: {
+      id: debt.openingBalanceSnapshotId,
+      workspaceId: debt.workspaceId,
+      debtId: debt.id,
+      balance: debt.currentBalance,
+      observedAt: input.observedAt || now(),
+      source: "manual",
+      createdAt: input.createdAt || now(),
+      createdBy: debt.createdBy,
+    },
+  });
+}
+
 test.before(async () => {
   // Fail closed: refuse to run rather than guess at a default emulator
   // address. @firebase/rules-unit-testing's initializeTestEnvironment is
@@ -96,12 +123,49 @@ test("membership: raw email invite is pending-only and does not grant workspace 
 
 test("debt: admin can write, viewer can read, contributor cannot write", async () => {
   await seedBaseWorkspace();
-  const created = await repoAs("admin").saveDebt({ id: "d1", workspaceId: "w1", name: "Card", currentBalance: 100, minimumRequiredPayment: 10, createdAt: now(), createdBy: "admin" });
+  const { debt: created } = await createDebtWithOpeningSnapshot(repoAs("admin"), { id: "d1", createdBy: "admin" });
   assert.equal(created.name, "Card");
   const listed = await repoAs("viewer").listDebts("w1");
   assert.equal(listed.length, 1);
   assert.equal(listed[0].id, "d1");
-  await assertFails(repoAs("contrib").saveDebt({ id: "d2", workspaceId: "w1", name: "Loan", currentBalance: 200, minimumRequiredPayment: 20, createdAt: now(), createdBy: "contrib" }));
+  const snapshots = await repoAs("viewer").listBalanceSnapshots("w1", "d1");
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0].id, "opening-d1");
+  await assertFails(createDebtWithOpeningSnapshot(repoAs("contrib"), { id: "d2", name: "Loan", currentBalance: 200, minimumRequiredPayment: 20, createdBy: "contrib" }));
+  await assertFails(repoAs("admin").saveDebt({ id: "standalone", workspaceId: "w1", name: "Standalone", currentBalance: 200, minimumRequiredPayment: 20, createdAt: now(), createdBy: "admin", openingBalanceSnapshotId: "missing-opening" }));
+  const afterStandaloneDenied = await repoAs("viewer").listDebts("w1");
+  assert.equal(afterStandaloneDenied.length, 1);
+});
+
+test("debt + opening snapshot batch fails closed when opening snapshot is invalid", async () => {
+  await seedBaseWorkspace();
+  await assertFails(repoAs("admin").createDebtWithOpeningSnapshot({
+    debt: {
+      id: "bad-opening",
+      workspaceId: "w1",
+      name: "Bad Opening",
+      currentBalance: 100,
+      minimumRequiredPayment: 10,
+      aprStatus: "unknown",
+      createdAt: now(),
+      createdBy: "admin",
+      openingBalanceSnapshotId: "opening-bad-opening",
+    },
+    openingSnapshot: {
+      id: "opening-bad-opening",
+      workspaceId: "w1",
+      debtId: "bad-opening",
+      balance: 100,
+      observedAt: now(),
+      source: "manual",
+      createdAt: now(),
+      createdBy: "not-admin",
+    },
+  }));
+  const debts = await repoAs("viewer").listDebts("w1");
+  assert.equal(debts.some((debt) => debt.id === "bad-opening"), false);
+  const snapshots = await repoAs("viewer").listBalanceSnapshots("w1", "bad-opening");
+  assert.equal(snapshots.length, 0);
 });
 
 test("plan + planVersion: admin can write, viewer can read, contributor cannot write", async () => {
@@ -124,7 +188,7 @@ test("plan + planVersion: admin can write, viewer can read, contributor cannot w
 
 test("payment event: contributor can append, viewer can read independently, viewer cannot append", async () => {
   await seedBaseWorkspace();
-  await repoAs("admin").saveDebt({ id: "d1", workspaceId: "w1", name: "Card", currentBalance: 100, minimumRequiredPayment: 10, createdAt: now(), createdBy: "admin" });
+  await createDebtWithOpeningSnapshot(repoAs("admin"), { id: "d1", createdBy: "admin" });
   const created = await repoAs("contrib").createPaymentEvent({ id: "e1", workspaceId: "w1", debtId: "d1", amount: 25, paidAt: now(), createdAt: now(), createdBy: "contrib" });
   assert.equal(created.amount, 25);
   const fetched = await repoAs("viewer").getPaymentEvent("w1", "d1", "e1");
@@ -134,8 +198,7 @@ test("payment event: contributor can append, viewer can read independently, view
 
 test("balance snapshot: contributor can append, viewer can read with correct ordering, viewer cannot append", async () => {
   await seedBaseWorkspace();
-  await repoAs("admin").saveDebt({ id: "d1", workspaceId: "w1", name: "Card", currentBalance: 100, minimumRequiredPayment: 10, createdAt: now(), createdBy: "admin" });
-  await repoAs("contrib").createBalanceSnapshot({ id: "s1", workspaceId: "w1", debtId: "d1", balance: 100, observedAt: now(), createdAt: now(), createdBy: "contrib" });
+  await createDebtWithOpeningSnapshot(repoAs("admin"), { id: "d1", createdBy: "admin", openingBalanceSnapshotId: "s1" });
   await repoAs("contrib").createBalanceSnapshot({ id: "s2", workspaceId: "w1", debtId: "d1", balance: 90, observedAt: later(), createdAt: now(), createdBy: "contrib" });
 
   const listed = await repoAs("viewer").listBalanceSnapshots("w1", "d1");

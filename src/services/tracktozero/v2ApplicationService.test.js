@@ -98,6 +98,8 @@ describe("TrackToZero v2 application service", () => {
     service.recordBalanceSnapshot("personal-seed", debt.id, { balance: 270 });
 
     expect(repository.listDebts("personal-seed").some((candidate) => candidate.id === debt.id)).toBe(true);
+    expect(debt.openingBalanceSnapshotId).toBeTruthy();
     expect(repository.listBalanceSnapshots("personal-seed", debt.id)[0].balance).toBe(270);
+    expect(repository.listBalanceSnapshots("personal-seed", debt.id).some((snapshot) => snapshot.id === debt.openingBalanceSnapshotId && snapshot.balance === 300)).toBe(true);
   });
 });

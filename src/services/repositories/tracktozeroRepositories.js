@@ -77,6 +77,18 @@ export class InMemoryTrackToZeroRepository {
     this.debts.set(this.key(debt.workspaceId, debt.id), clone(debt));
     return debt;
   }
+  createDebtWithOpeningSnapshot({ debt: debtInput, openingSnapshot: snapshotInput }) {
+    const debt = createDebt(debtInput);
+    const openingSnapshot = createBalanceSnapshot({
+      ...snapshotInput,
+      workspaceId: debt.workspaceId,
+      debtId: debt.id,
+      balance: snapshotInput?.balance ?? debt.currentBalance,
+    });
+    this.debts.set(this.key(debt.workspaceId, debt.id), clone(debt));
+    this.balanceSnapshots.set(this.key(`${openingSnapshot.workspaceId}/${openingSnapshot.debtId}`, openingSnapshot.id), clone(openingSnapshot));
+    return { debt, openingSnapshot };
+  }
   listDebts(workspaceId) { return [...this.debts.values()].filter((d) => d.workspaceId === workspaceId).map(clone); }
 
   savePlan(input) {

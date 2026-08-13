@@ -9,7 +9,7 @@ let testEnv;
 const now = () => new Date("2026-01-01T00:00:00.000Z");
 const ws = (id = "w1", createdBy = "owner") => ({ id, type: "household", status: "active", activePlanId: "", createdAt: now(), createdBy });
 const member = (workspaceId, uid, role) => ({ workspaceId, uid, role, status: "active", createdAt: now(), createdBy: "owner" });
-const debt = (workspaceId = "w1", id = "d1") => ({ id, workspaceId, name: "Card", status: "active", currentBalance: 100, minimumRequiredPayment: 10, createdBy: "owner" });
+const debt = (workspaceId = "w1", id = "d1", createdBy = "owner") => ({ id, workspaceId, name: "Card", status: "active", currentBalance: 100, minimumRequiredPayment: 10, createdBy, openingBalanceSnapshotId: `opening-${id}` });
 const payment = (workspaceId = "w1", debtId = "d1", uid = "contrib") => ({ id: "p1", workspaceId, debtId, amount: 25, paidAt: now(), source: "manual", createdAt: now(), createdBy: uid });
 const snapshot = (workspaceId = "w1", debtId = "d1", uid = "contrib") => ({ id: "s1", workspaceId, debtId, balance: 75, observedAt: now(), source: "manual", createdAt: now(), createdBy: uid });
 const plan = (workspaceId = "w1", id = "plan1") => ({ id, workspaceId, status: "draft", activeVersionId: "", createdAt: now(), createdBy: "owner" });
@@ -33,6 +33,24 @@ async function seedWorkspace() {
     await db.doc("workspaces/w1/debts/d1/payment_events/p1").set(payment());
     await db.doc("workspaces/w1/debts/d1/balance_snapshots/s1").set(snapshot());
   });
+}
+
+const openingSnapshot = (workspaceId = "w1", debtId = "d1", uid = "owner") => ({
+  id: `opening-${debtId}`,
+  workspaceId,
+  debtId,
+  balance: 100,
+  observedAt: now(),
+  source: "manual",
+  createdAt: now(),
+  createdBy: uid,
+});
+
+function debtWithOpeningSnapshotBatch(db, workspaceId, debtId, uid) {
+  const batch = db.batch();
+  batch.set(db.doc(`workspaces/${workspaceId}/debts/${debtId}`), debt(workspaceId, debtId, uid));
+  batch.set(db.doc(`workspaces/${workspaceId}/debts/${debtId}/balance_snapshots/opening-${debtId}`), openingSnapshot(workspaceId, debtId, uid));
+  return batch.commit();
 }
 
 test.before(async () => {
@@ -77,7 +95,8 @@ test("contributor can append observations but cannot manage debts or plans", asy
 test("admin can manage financial docs but cannot promote to owner or demote owner", async () => {
   await seedWorkspace();
   const db = testEnv.authenticatedContext("admin").firestore();
-  await assertSucceeds(db.doc("workspaces/w1/debts/d2").set(debt("w1", "d2")));
+  await assertSucceeds(debtWithOpeningSnapshotBatch(db, "w1", "d2", "admin"));
+  await assertFails(db.doc("workspaces/w1/debts/standalone").set(debt("w1", "standalone", "admin")));
   await assertSucceeds(db.doc("workspaces/w1/plans/plan2").set(plan("w1", "plan2")));
   await assertFails(db.doc("workspaces/w1/members/admin").update({ role: "owner" }));
   await assertFails(db.doc("workspaces/w1/members/contrib").update({ role: "owner" }));

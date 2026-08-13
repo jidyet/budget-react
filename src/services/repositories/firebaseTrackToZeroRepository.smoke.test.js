@@ -8,7 +8,7 @@ describe("FirebaseTrackToZeroRepository (smoke)", () => {
     const methods = [
       "saveWorkspace", "getWorkspace", "putWorkspace",
       "saveMembership", "getMembership",
-      "saveDebt", "listDebts",
+      "saveDebt", "createDebtWithOpeningSnapshot", "listDebts",
       "savePlan", "getPlan", "putPlan", "listPlans",
       "savePlanVersion", "getPlanVersion", "updatePlanVersion",
       "createPaymentEvent", "getPaymentEvent", "updatePaymentEvent",

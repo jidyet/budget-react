@@ -1,4 +1,4 @@
-import { createBalanceSnapshot, createDebt, createPaymentEvent, createPayoffPlan, createPlanVersion, createWorkspace, createWorkspaceMembership } from "../../domain/tracktozero/models";
+import { createBalanceSnapshot, createDebt, createExpectedCheckpoint, createPaymentEvent, createPayoffPlan, createPlanVersion, createWorkspace, createWorkspaceMembership } from "../../domain/tracktozero/models.js";
 
 const clone = (value) => structuredClone(value);
 
@@ -23,10 +23,12 @@ export class InMemoryTrackToZeroRepository {
     this.versions = new Map(Object.entries(seed.versions || {}).map(([key, value]) => [key, clone(value)]));
     this.paymentEvents = new Map(Object.entries(seed.paymentEvents || {}).map(([key, value]) => [key, clone(value)]));
     this.balanceSnapshots = new Map(Object.entries(seed.balanceSnapshots || {}).map(([key, value]) => [key, clone(value)]));
+    this.expectedCheckpoints = new Map(Object.entries(seed.expectedCheckpoints || {}).map(([key, value]) => [key, clone(value)]));
   }
 
   key(workspaceId, id) { return `${workspaceId}/${id}`; }
   versionKey(workspaceId, planId, versionId) { return `${workspaceId}/${planId}/${versionId}`; }
+  checkpointKey(workspaceId, planId, versionId, checkpointId) { return `${workspaceId}/${planId}/${versionId}/${checkpointId}`; }
 
   saveWorkspace(input) {
     const workspace = createWorkspace(input);
@@ -75,6 +77,10 @@ export class InMemoryTrackToZeroRepository {
     this.paymentEvents.set(this.key(`${event.workspaceId}/${event.debtId}`, event.id), clone(event));
     return event;
   }
+  getPaymentEvent(workspaceId, debtId, eventId) {
+    const key = this.key(`${workspaceId}/${debtId}`, eventId);
+    return this.paymentEvents.has(key) ? clone(this.paymentEvents.get(key)) : null;
+  }
   updatePaymentEvent() { throw new Error("PaymentEvent core facts are append-only; create a correction record"); }
 
   createBalanceSnapshot(input) {
@@ -89,5 +95,19 @@ export class InMemoryTrackToZeroRepository {
       .sort((a, b) => Date.parse(b.observedAt) - Date.parse(a.observedAt) || String(b.id).localeCompare(String(a.id)))
       .map(clone);
   }
+
+  createExpectedCheckpoint(input) {
+    const checkpoint = createExpectedCheckpoint(input);
+    this.expectedCheckpoints.set(
+      this.checkpointKey(checkpoint.workspaceId, checkpoint.planId, checkpoint.planVersionId, checkpoint.id),
+      clone(checkpoint)
+    );
+    return checkpoint;
+  }
+  getExpectedCheckpoint(workspaceId, planId, versionId, checkpointId) {
+    const key = this.checkpointKey(workspaceId, planId, versionId, checkpointId);
+    return this.expectedCheckpoints.has(key) ? clone(this.expectedCheckpoints.get(key)) : null;
+  }
+  updateExpectedCheckpoint() { throw new Error("ExpectedCheckpoint is immutable once created"); }
 }
 

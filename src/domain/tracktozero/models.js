@@ -8,7 +8,7 @@ import {
   VERSION_REASONS,
   WORKSPACE_STATUSES,
   WORKSPACE_TYPES,
-} from "./constants";
+} from "./constants.js";
 import {
   deepFreezeClone,
   normalizeAprDecimal,
@@ -18,7 +18,7 @@ import {
   requireMoney,
   requireString,
   requireTimestamp,
-} from "./validation";
+} from "./validation.js";
 
 const nowOr = (value) => requireTimestamp(value || new Date("2026-01-01T00:00:00.000Z").toISOString(), "timestamp");
 

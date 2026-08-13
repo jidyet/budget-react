@@ -14,6 +14,8 @@ import {
 } from "../services/aiCoachPayload";
 import { canAccessAICoach } from "../config/launchFlags";
 import { getBillDisplayName } from "../services/billModel";
+import { calculateGoalDatePlan } from "../services/calc/goalDate";
+import { calculateWhatIfComparison } from "../services/calc/scenarioComparison";
 
 export default function PayoffPage(props) {
   const {
@@ -144,106 +146,28 @@ export default function PayoffPage(props) {
   const scenarioCurrentBalance = scenarioSelectedDebt
     ? Number(scenarioSelectedDebt.cur_bal || 0)
     : included.reduce((s, a) => s + Number(a.cur_bal || 0), 0);
-  const scenarioMonthsCurrent = whatIfBaselineRows.length;
-  const scenarioMonthsNew = whatIfScenarioRows.length;
-  const scenarioMonthsSaved = Math.max(0, scenarioMonthsCurrent - scenarioMonthsNew);
-  const scenarioInterestSaved = Math.max(0,
-    whatIfBaselineRows.reduce((s, r) => s + (Number(r.total_interest) || 0), 0) -
-    whatIfScenarioRows.reduce((s, r) => s + (Number(r.total_interest) || 0), 0)
-  );
-
-  const scenarioComparisonRows = (() => {
-    const totalRows = Math.max(whatIfBaselineRows.length, whatIfScenarioRows.length);
-    return Array.from({ length: totalRows }, (_, index) => {
-      const currentRow = whatIfBaselineRows[index];
-      const newRow = whatIfScenarioRows[index];
-      return {
-        month: currentRow?.month || newRow?.month || `Month ${index + 1}`,
-        currentBalance: Number(currentRow?.remaining_debt || 0),
-        newBalance: Number(newRow?.remaining_debt || 0),
-        currentInterest: Number(currentRow?.total_interest || 0),
-        newInterest: Number(newRow?.total_interest || 0),
-      };
-    });
-  })();
-
-  const formatGoalMonth = (value) => {
-    if (!value) return "";
-    const parsed = new Date(`${value}-01T00:00:00`);
-    if (Number.isNaN(parsed.getTime())) return value;
-    return parsed.toLocaleString("en-US", { month: "long", year: "numeric" });
-  };
+  const whatIfComparison = calculateWhatIfComparison({
+    baselineRows: whatIfBaselineRows,
+    scenarioRows: whatIfScenarioRows,
+  });
+  const scenarioMonthsSaved = whatIfComparison.monthsSaved;
+  const scenarioInterestSaved = whatIfComparison.interestSaved;
+  const scenarioComparisonRows = whatIfComparison.rows;
 
   // Standalone goalPlanner — independent of What If, uses goalDebtId
-  const goalPlanner = (() => {
-    if (!goalDate) return null;
-    const [goalYearRaw, goalMonthRaw] = goalDate.split("-");
-    const goalYearNum = Number(goalYearRaw);
-    const goalMonthNum = Number(goalMonthRaw);
-    if (!Number.isFinite(goalYearNum) || !Number.isFinite(goalMonthNum)) return { valid: false, reason: "invalid" };
-    const targetRowCount = ((goalYearNum - selYear) * 12) + (goalMonthNum - selMonth) + 1;
-    if (targetRowCount <= 0) return { valid: false, reason: "past" };
-    const targetLabel = formatGoalMonth(goalDate);
-
-    const goalAccounts = goalDebtId
-      ? scenarioAccounts.filter((a) => String(a.id) === goalDebtId)
-      : included;
-    if (!goalAccounts.length) return { valid: false, reason: "no_accounts" };
-
-    const goalExtraMap = goalDebtId ? { [goalDebtId]: Number(extraMap[goalDebtId] || 0) } : extraMap;
-    const goalBaseMonthlyExtra = goalDebtId ? 0 : Number(planMonthlyExtra || 0);
-
-    const goalBaselineRows = payoffSimulate(goalAccounts, planStrategy, goalBaseMonthlyExtra, goalExtraMap, selMonth, selYear);
-    const baselineFinishesOnTime = goalBaselineRows.length > 0 && goalBaselineRows.length <= targetRowCount;
-    const baselineProjectionRow = goalBaselineRows[targetRowCount - 1] || goalBaselineRows[goalBaselineRows.length - 1] || null;
-    const baselineRemainingAtGoal = baselineFinishesOnTime ? 0 : Math.max(0, Number(baselineProjectionRow?.remaining_debt || 0));
-    const configuredFinishMonth = goalBaselineRows[goalBaselineRows.length - 1]?.month || "n/a";
-
-    const simulateWithExtra = (additionalExtra) =>
-      payoffSimulate(goalAccounts, planStrategy, goalBaseMonthlyExtra + additionalExtra, goalExtraMap, selMonth, selYear);
-
-    let additionalNeeded = 0;
-    if (!baselineFinishesOnTime) {
-      let lo = 0, hi = 250, result = null;
-      const finishesByTarget = (rows) => rows.length > 0 && rows.length <= targetRowCount;
-      while (hi < 100000 && !finishesByTarget(simulateWithExtra(hi))) hi *= 2;
-      if (finishesByTarget(simulateWithExtra(hi))) {
-        for (let iter = 0; iter < 30; iter++) {
-          const mid = (lo + hi) / 2;
-          if (finishesByTarget(simulateWithExtra(mid))) { result = mid; hi = mid; }
-          else lo = mid;
-        }
-      }
-      additionalNeeded = result === null ? null : Math.ceil(result);
-    }
-
-    const proposedRows = additionalNeeded === null ? [] : simulateWithExtra(additionalNeeded);
-    const proposedFinishMonth = proposedRows[proposedRows.length - 1]?.month || configuredFinishMonth;
-
-    const goalCurrentPayment = goalDebtId
-      ? (() => {
-          const a = goalAccounts[0];
-          if (!a) return 0;
-          const planned = Math.max(0, Number(a.planned_v || 0));
-          const paid = Math.max(0, Number(a.paid_v || 0));
-          const min = Math.max(0, Number(a.min_due_v || 0));
-          return (planned > 0 ? planned : paid > 0 ? paid : min) + Number(extraMap[String(a.id)] || 0);
-        })()
-      : planMonthlyDebtPayment;
-
-    return {
-      valid: true,
-      targetLabel,
-      targetRowCount,
-      goalDebtId,
-      baselineFinishesOnTime,
-      baselineRemainingAtGoal,
-      configuredFinishMonth,
-      additionalNeeded,
-      proposedFinishMonth,
-      proposedTotalMonthlyPayment: additionalNeeded === null ? null : goalCurrentPayment + (additionalNeeded || 0),
-    };
-  })();
+  const goalPlanner = calculateGoalDatePlan({
+    goalDate,
+    goalDebtId,
+    scenarioAccounts,
+    included,
+    extraMap,
+    planMonthlyExtra,
+    planMonthlyDebtPayment,
+    planStrategy,
+    selMonth,
+    selYear,
+    payoffSimulate,
+  });
 
   useEffect(() => {
     if (!goalPlanner?.valid) { setGoalRequiredExtra(null); return; }

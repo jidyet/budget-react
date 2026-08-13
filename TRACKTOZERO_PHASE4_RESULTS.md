@@ -6,12 +6,15 @@ Phase 4A is complete on `phase4/migration-rehearsal`.
 
 No production migration, production v2 writes, rules deployment, merge, push, or deploy was performed.
 
+This completion pass closes the post-review evidence gaps for large synthetic fixtures, explicit projection parity, and migration UX failure-state coverage.
+
 ## 2. BRANCH / COMMITS
 
 - Base branch: `phase3c/browser-qa`
 - Base commit: `ee2d646 Phase 3c: complete browser responsive and accessibility QA`
 - Phase 4A branch: `phase4/migration-rehearsal`
-- Phase 4A commit: created after this report
+- Phase 4A implementation commit: `9d8740f Phase 4a: prove controlled migration and rollback in emulator`
+- Phase 4A completion commit: see current branch HEAD; final hash is reported by Codex after commit.
 
 ## 3. COMPLETION GATE
 
@@ -32,6 +35,7 @@ Added/updated:
 - `firestore.v2.rules` emulator-only migration-operator controls
 - `tests/firestore.v2.migration.test.js`
 - `src/services/tracktozero/migrationExecutor.test.js`
+- `src/services/tracktozero/migrationUxState.js`
 
 World 1 remains read-only. World 2 writes in this phase are emulator-only through `FirebaseTrackToZeroRepository`.
 
@@ -153,6 +157,23 @@ Validation compares preview entities against persisted World 2 entities and dete
 
 Draft PlanVersions and ExpectedCheckpoints are derived through the approved Phase 1/2 calculation adapter, not copied from legacy monthly schedules.
 
+PROJECTION PARITY: PASSED.
+
+Automated proof:
+
+- Test file: `src/services/tracktozero/migrationExecutor.test.js`
+- Test name: `proves projection parity before vs after persistence migration`
+- Compared fields:
+  - strategy
+  - included payoff-order debt IDs from the PlanVersion starting snapshot
+  - months-to-zero
+  - projected payoff month
+  - estimated total interest
+  - final remaining debt
+  - first five ExpectedCheckpoint periods, expected total balances, and projected zero date
+
+Both sides run through the trusted Phase 2 calculation adapter / Phase 1 payoff engine. The test reconstructs migrated World-2 debts and PlanVersion from the repository after execution and fails if migration changes financial meaning.
+
 ## 28. ROLLBACK
 
 Rollback removes migration-created financial World-2 data before the native-write barrier. It leaves World 1 untouched and preserves the minimal archived workspace/operator membership needed for a readable rollback journal.
@@ -173,9 +194,52 @@ Tests prove migrating one workspace does not modify unrelated workspaces.
 
 A narrow migration panel is available only behind `trackToZeroMigrationEnabled`. It lists safe migration states and does not execute production operations.
 
+Automated UX-state coverage was added at the service-state layer:
+
+- Test file: `src/services/tracktozero/migrationExecutor.test.js`
+- Test name: `covers loading, preview, confirmation, ready, in-progress, success, rollback, and failure states safely`
+- State contract file: `src/services/tracktozero/migrationUxState.js`
+
+Verified states:
+
+| State | Verified |
+| --- | --- |
+| loading source | Yes |
+| preview ready | Yes |
+| needs confirmation | Yes |
+| ready to migrate | Yes |
+| migration in progress | Yes |
+| migration failed | Yes; no success, no World-2-authoritative claim, no raw Firebase error |
+| validation failed | Yes; no success and no cutover implication |
+| migration succeeded | Yes; success only after validation result |
+| rollback available | Yes; only when manifest is rollback-eligible |
+| rollback blocked | Yes; no destructive rollback action presented |
+
 ## 33. PERFORMANCE
 
 Preview uses deterministic in-memory normalization, sorting, and hashing. Emulator rehearsal uses controlled repository writes; no listener/query explosion or one-query-per-field UI loop was introduced.
+
+Large synthetic fixture proof:
+
+- Test file: `tests/firestore.v2.migration.test.js`
+- Test name: `Phase 4 large synthetic fixture executes, validates, and rolls back under emulator rules`
+- Source records inspected: 120
+- Clear debts: 60
+- Excluded non-debts: 60
+- Needs confirmation before resolution: 10
+- Needs confirmation at execution: 0
+- Members: 4
+- Draft plans: 2
+- Initial BalanceSnapshots: 60
+- Expected target paths: 153
+- Expected World-2 writes including migration manifest: 154
+- Actual executor-created target paths: 153
+- Validation result: passed
+- Rollback result: passed
+- World 1 fixture mutation check: unchanged
+- PaymentEvents created from `paid_v`: 0
+- Mortgage debts excluded from core payoff by default: 10
+- Unknown APR debts preserved as unknown: 10
 
 ## 34. PRODUCTION SAFETY
 
@@ -192,11 +256,11 @@ Confirmed:
 
 ## 35. VALIDATION RESULTS
 
-- `npm test -- --run`: passed, 17 files / 120 tests.
+- `npm test -- --run`: passed, 17 files / 123 tests.
 - `npm run lint`: passed with the same 3 existing React hook warnings.
 - `npm run build`: passed with existing large-chunk warning.
 - `npm run test:firestore`: passed, 12/12 legacy rules tests.
-- `npm run test:firestore:v2`: passed, 38/38 v2 emulator tests.
+- `npm run test:firestore:v2`: passed, 39/39 v2 emulator tests.
 - `npm run perf:check`: passed.
 - `npm audit --omit=dev`: passed, 0 vulnerabilities.
 

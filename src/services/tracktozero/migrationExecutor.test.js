@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { buildMigrationPreview } from "../adapters/legacyTrackToZeroAdapter";
 import { InMemoryTrackToZeroRepository, v2Paths } from "../repositories/tracktozeroRepositories";
+import { buildExpectedCheckpoints, simulatePlanVersion } from "../adapters/tracktozeroCalcAdapter";
 import {
   collectWorkspacePaths,
   executeMigrationPreview,
   rollbackMigration,
   validateMigrationPreviewAgainstRepository,
 } from "./migrationExecutor";
+import { describeMigrationUxState, MIGRATION_UX_STATES } from "./migrationUxState";
 
 const ts = "2026-08-13T00:00:00.000Z";
 
@@ -28,6 +30,95 @@ const confirmedPersonalPreview = () => buildMigrationPreview({
   asOf: ts,
   previewGeneratedAt: ts,
 });
+
+const payoffSummary = (debts, version) => {
+  const rows = simulatePlanVersion({ debts, planVersion: version, startMonth: 8, startYear: 2026, maxMonths: 240 });
+  return {
+    strategy: version.strategy,
+    payoffOrderByDebt: version.startingDebtSnapshot.filter((item) => item.includedInCorePayoffPlan).map((item) => item.debtId),
+    monthsToZero: rows.length,
+    payoffMonth: rows.at(-1)?.month || "",
+    totalInterest: Number(rows.reduce((sum, row) => sum + Number(row.total_interest || 0), 0).toFixed(6)),
+    finalRemainingDebt: Number((rows.at(-1)?.remaining_debt || 0).toFixed(6)),
+  };
+};
+
+const checkpointSortValue = (period) => {
+  const parsed = Date.parse(`1 ${period} UTC`);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const checkpointSummary = (checkpoints) => [...checkpoints]
+  .sort((a, b) => checkpointSortValue(a.period) - checkpointSortValue(b.period))
+  .slice(0, 5)
+  .map((checkpoint) => ({
+    period: checkpoint.period,
+    expectedTotalBalance: Number(checkpoint.expectedTotalBalance.toFixed(6)),
+    projectedZeroDate: checkpoint.projectedZeroDate,
+  }));
+
+const largeFixture = () => {
+  const legacyMembers = [
+    { uid: "large-owner", role: "owner", status: "active" },
+    { uid: "large-member-a", role: "member", status: "active" },
+    { uid: "large-member-b", role: "member", status: "active" },
+    { uid: "large-member-c", role: "member", status: "active" },
+  ];
+  const debtAccounts = Array.from({ length: 40 }, (_, index) => ({
+    id: `debt-known-${index + 1}`,
+    name: `Synthetic Credit Card ${index + 1}`,
+    cur_bal: 500 + index * 25,
+    base_bal_v: 600 + index * 25,
+    min_due_v: 35 + (index % 5),
+    apr_v: 12 + (index % 12),
+    billType: "paydown",
+    owner: index % 2 ? "Member A" : "Owner",
+    planned_v: 1000,
+    paid_v: 999,
+  }));
+  const unknownApr = Array.from({ length: 10 }, (_, index) => ({
+    id: `debt-unknown-${index + 1}`,
+    name: `Synthetic Personal Loan ${index + 1}`,
+    cur_bal: 1200 + index * 50,
+    min_due_v: 80,
+    apr_v: "",
+    billType: "paydown",
+    owner: "Member B",
+  }));
+  const mortgages = Array.from({ length: 10 }, (_, index) => ({
+    id: `mortgage-${index + 1}`,
+    name: `Synthetic Mortgage ${index + 1}`,
+    cur_bal: 150000 + index * 1000,
+    min_due_v: 1400,
+    apr_v: 5 + (index % 3),
+    billType: "paydown",
+    owner: "Owner",
+  }));
+  const expenses = Array.from({ length: 50 }, (_, index) => ({
+    id: `expense-${index + 1}`,
+    name: `Synthetic Utility ${index + 1}`,
+    cur_bal: 0,
+    min_due_v: 75,
+    billType: "monthly",
+    category: index % 2 ? "Utilities" : "Subscriptions",
+  }));
+  const ambiguous = Array.from({ length: 10 }, (_, index) => ({
+    id: `ambiguous-${index + 1}`,
+    name: `Synthetic Family Record ${index + 1}`,
+    cur_bal: 100 + index,
+    min_due_v: 10,
+  }));
+  return {
+    legacyWorkspace: { id: "large-house", type: "household", memberIds: legacyMembers.map((member) => member.uid), ownerId: "large-owner" },
+    legacyMembers,
+    legacyAccounts: [...debtAccounts, ...unknownApr, ...mortgages, ...expenses, ...ambiguous],
+    legacyPlans: [
+      { id: "large-plan-avalanche", strategy: "avalanche", monthly_extra: 250, items: debtAccounts.slice(0, 20).map((account) => ({ account_id: account.id, include: true })) },
+      { id: "large-plan-snowball", strategy: "snowball", monthly_extra: 150, items: [...unknownApr, ...debtAccounts.slice(20, 30)].map((account) => ({ account_id: account.id, include: true })) },
+    ],
+    confirmations: Object.fromEntries(ambiguous.map((account) => [account.id, { classification: "not_debt" }])),
+  };
+};
 
 describe("Phase 4 migration preview", () => {
   it("is deterministic, zero-write, fingerprinted, and digest-bound", () => {
@@ -166,5 +257,104 @@ describe("Phase 4 migration execution, resume, validation, and rollback", () => 
     expect(repo.listPlans(preview.candidateWorkspace.id)).toEqual([]);
     expect(repo.getWorkspace("unrelated").id).toBe("unrelated");
     expect(repo.getMigrationRun(preview.candidateWorkspace.id, `migration-${preview.previewDigest}`).migrationState).toBe("rolled_back");
+  });
+
+  it("proves projection parity before vs after persistence migration", async () => {
+    const preview = confirmedPersonalPreview();
+    const repo = new InMemoryTrackToZeroRepository();
+    const beforeVersion = preview.candidatePlanVersions[0];
+    const beforeSummary = payoffSummary(preview.candidateDebts, beforeVersion);
+    const beforeCheckpoints = buildExpectedCheckpoints({ debts: preview.candidateDebts, planVersion: beforeVersion, startMonth: 8, startYear: 2026, maxMonths: 60 });
+
+    await executeMigrationPreview({
+      repository: repo,
+      preview,
+      sourceFingerprint: preview.sourceFingerprint,
+      confirmedPreviewDigest: preview.previewDigest,
+      explicitConfirmation: true,
+      actorId: "owner-a",
+    });
+
+    const persistedDebts = repo.listDebts(preview.candidateWorkspace.id);
+    const persistedVersion = repo.listPlanVersions(preview.candidateWorkspace.id, preview.candidateDraftPlans[0].id)[0];
+    const afterSummary = payoffSummary(persistedDebts, persistedVersion);
+    const afterCheckpoints = repo.listExpectedCheckpoints(preview.candidateWorkspace.id, persistedVersion.planId, persistedVersion.id);
+
+    expect(afterSummary).toEqual(beforeSummary);
+    expect(checkpointSummary(afterCheckpoints)).toEqual(checkpointSummary(beforeCheckpoints));
+  });
+
+  it("proves large synthetic fixture preview, execution, validation, and rollback", async () => {
+    const source = largeFixture();
+    const unresolved = buildMigrationPreview({ ...source, confirmations: {}, asOf: ts, previewGeneratedAt: ts });
+    expect(unresolved.ambiguousRecords).toHaveLength(10);
+
+    const preview = buildMigrationPreview({ ...source, asOf: ts, previewGeneratedAt: ts });
+    expect(preview.writesPerformed).toBe(0);
+    expect(source.legacyAccounts).toHaveLength(120);
+    expect(preview.candidateMemberships).toHaveLength(4);
+    expect(preview.candidateDebts).toHaveLength(60);
+    expect(preview.excludedLegacyExpenses).toHaveLength(60);
+    expect(preview.ambiguousRecords).toHaveLength(0);
+    expect(preview.initialBalanceSnapshots).toHaveLength(60);
+    expect(preview.candidateDraftPlans).toHaveLength(2);
+    expect(preview.expectedTargetPaths).toHaveLength(153);
+    expect(preview.expectedWriteCount).toBe(154);
+    expect(preview.candidateDebts.filter((debt) => debt.aprStatus === "unknown")).toHaveLength(10);
+    expect(preview.candidateDebts.filter((debt) => debt.debtType === "mortgage" && debt.includedInCorePayoffPlan === false)).toHaveLength(10);
+
+    const sourceBefore = structuredClone(source);
+    const repo = new InMemoryTrackToZeroRepository();
+    const result = await executeMigrationPreview({
+      repository: repo,
+      preview,
+      sourceFingerprint: preview.sourceFingerprint,
+      confirmedPreviewDigest: preview.previewDigest,
+      explicitConfirmation: true,
+      actorId: "large-owner",
+    });
+    expect(result.validation.ok).toBe(true);
+    expect(result.writesPerformed).toBe(153);
+    expect(repo.listDebts(preview.candidateWorkspace.id)).toHaveLength(60);
+    expect(repo.listPlans(preview.candidateWorkspace.id)).toHaveLength(2);
+    expect(repo.listBalanceSnapshots(preview.candidateWorkspace.id, preview.candidateDebts[0].id)).toHaveLength(1);
+    expect(source).toEqual(sourceBefore);
+
+    const rollback = await rollbackMigration({ repository: repo, preview, actorId: "large-owner" });
+    expect(rollback.manifest.migrationState).toBe("rolled_back");
+    expect(repo.listDebts(preview.candidateWorkspace.id)).toEqual([]);
+    expect(repo.listPlans(preview.candidateWorkspace.id)).toEqual([]);
+  });
+});
+
+describe("Phase 4 migration UX state contract", () => {
+  it("covers loading, preview, confirmation, ready, in-progress, success, rollback, and failure states safely", () => {
+    const needsConfirmation = buildMigrationPreview({ ...personalFixture(), asOf: ts, previewGeneratedAt: ts });
+    const ready = confirmedPersonalPreview();
+    const success = { manifest: { rollbackEligible: true }, validation: { ok: true } };
+    const validationFailed = { ok: false, mismatches: [{ path: "x" }] };
+
+    expect(describeMigrationUxState({ loading: true }).state).toBe(MIGRATION_UX_STATES.LOADING_SOURCE);
+    expect(describeMigrationUxState({ preview: { expectedTargetPaths: [] } }).state).toBe(MIGRATION_UX_STATES.PREVIEW_READY);
+    expect(describeMigrationUxState({ preview: needsConfirmation }).state).toBe(MIGRATION_UX_STATES.NEEDS_CONFIRMATION);
+    expect(describeMigrationUxState({ preview: ready }).state).toBe(MIGRATION_UX_STATES.READY_TO_MIGRATE);
+    expect(describeMigrationUxState({ migrating: true }).state).toBe(MIGRATION_UX_STATES.MIGRATING);
+    const failed = describeMigrationUxState({ migrationError: new Error("PERMISSION_DENIED raw Firebase stack") });
+    expect(failed.state).toBe(MIGRATION_UX_STATES.MIGRATION_FAILED);
+    expect(failed.showSuccess).toBe(false);
+    expect(failed.world2Authoritative).toBe(false);
+    expect(failed.message).not.toMatch(/PERMISSION_DENIED|Firebase/i);
+    const invalid = describeMigrationUxState({ validation: validationFailed });
+    expect(invalid.state).toBe(MIGRATION_UX_STATES.VALIDATION_FAILED);
+    expect(invalid.showSuccess).toBe(false);
+    const rollbackAvailable = describeMigrationUxState({ migrationResult: success });
+    expect(rollbackAvailable.state).toBe(MIGRATION_UX_STATES.ROLLBACK_AVAILABLE);
+    expect(rollbackAvailable.rollbackActionAvailable).toBe(true);
+    const succeeded = describeMigrationUxState({ migrationResult: { validation: { ok: true } } });
+    expect(succeeded.state).toBe(MIGRATION_UX_STATES.MIGRATION_SUCCEEDED);
+    expect(succeeded.showSuccess).toBe(true);
+    const blocked = describeMigrationUxState({ rollback: { blocked: true } });
+    expect(blocked.state).toBe(MIGRATION_UX_STATES.ROLLBACK_BLOCKED);
+    expect(blocked.rollbackActionAvailable).toBe(false);
   });
 });

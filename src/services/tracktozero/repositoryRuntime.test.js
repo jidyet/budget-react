@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   assertTrackToZeroV2EmulatorConfig,
+  assertTrackToZeroV2ProductionConfig,
   createTrackToZeroRepository,
   parseEmulatorHost,
   TRACKTOZERO_V2_EMULATOR_PROJECT_ID,
+  TRACKTOZERO_V2_PRODUCTION_PROJECT_ID,
   TRACKTOZERO_V2_REPOSITORY_MODES,
 } from "./repositoryRuntime";
 import { InMemoryTrackToZeroRepository } from "../repositories/tracktozeroRepositories";
@@ -44,5 +46,18 @@ describe("TrackToZero v2 repository runtime", () => {
       emulatorHost: "127.0.0.1:8080",
     });
     expect(repo).toBeInstanceOf(FirebaseTrackToZeroRepository);
+  });
+
+  it("allows production Firebase runtime only for the approved clean beta project", () => {
+    expect(() => assertTrackToZeroV2ProductionConfig({
+      mode: TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction,
+      configured: true,
+      projectId: TRACKTOZERO_V2_PRODUCTION_PROJECT_ID,
+    })).not.toThrow();
+    expect(() => assertTrackToZeroV2ProductionConfig({
+      mode: TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction,
+      configured: true,
+      projectId: "demo-budget-react-v2",
+    })).toThrow(/Production Firebase is not configured/i);
   });
 });

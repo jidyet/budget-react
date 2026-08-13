@@ -63,6 +63,33 @@ const SIM_DISPLAY_ROWS = 60;
 const EMPTY_STARTER_ACCOUNTS = [];
 const TrackToZeroV2App = lazy(() => import("./components/tracktozero/TrackToZeroV2App"));
 
+function TrackToZeroBetaDisabled() {
+  return (
+    <div style={{
+      minHeight: "100vh",
+      display: "grid",
+      placeItems: "center",
+      padding: 24,
+      background: "linear-gradient(135deg, #eaf6ff 0%, #f8fbff 55%, #effdf5 100%)",
+      color: "#10263d",
+      fontFamily: "'Instrument Sans', system-ui, sans-serif",
+    }}>
+      <section style={{
+        maxWidth: 620,
+        background: "rgba(255,255,255,0.9)",
+        border: "1px solid #b9dcf8",
+        borderRadius: 22,
+        padding: 28,
+        boxShadow: "0 18px 40px rgba(22, 86, 139, 0.08)",
+      }}>
+        <p style={{ margin: "0 0 8px", letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 900, color: "#2f6289", fontSize: 12 }}>TrackToZero beta</p>
+        <h1 style={{ margin: "0 0 12px", fontSize: 30 }}>TrackToZero is temporarily unavailable</h1>
+        <p style={{ margin: 0 }}>The clean-slate V2 beta is paused. No legacy workspace fallback is served from this switch.</p>
+      </section>
+    </div>
+  );
+}
+
 function debugDebtCalculation(bills, displayedTotalDebt = 0) {
   const report = {
     totalBills: bills.length,
@@ -2203,5 +2230,6 @@ export default function App() {
       </Suspense>
     );
   }
-  return <BudgetApp />;
+  void BudgetApp; // Legacy source is retained for rollback history, but the kill switch does not serve World 1.
+  return <TrackToZeroBetaDisabled />;
 }

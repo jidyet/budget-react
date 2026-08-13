@@ -30,7 +30,7 @@ export const getUserSafeTrackToZeroError = (error) => {
   if (/emulator|required|unavailable/i.test(message)) {
     return {
       kind: "repository_error",
-      message: "TrackToZero test persistence is unavailable. The Firebase emulator is required for this environment.",
+      message: "TrackToZero beta is temporarily unavailable. Nothing was changed. Try again shortly.",
     };
   }
   return {
@@ -85,6 +85,31 @@ export const createTrackToZeroV2AsyncAppService = ({
     (await repository.listWorkspaces())
       .map((workspace) => ({ ...workspace }))
       .sort((a, b) => a.type.localeCompare(b.type) || a.id.localeCompare(b.id));
+
+  const bootstrapOwnerWorkspace = async (workspaceId, { displayName = "", email = "" } = {}) => {
+    assertInteractive();
+    const existingMembership = await repository.getMembership(workspaceId, actorId).catch(() => null);
+    if (existingMembership?.status === "active") return getWorkspaceContext(workspaceId);
+    await repository.saveWorkspace({
+      id: workspaceId,
+      type: "solo",
+      status: "active",
+      activePlanId: "",
+      createdAt: asOf,
+      createdBy: actorId,
+    });
+    await repository.saveMembership({
+      workspaceId,
+      uid: actorId,
+      role: "owner",
+      status: "active",
+      displayName,
+      email,
+      createdAt: asOf,
+      createdBy: actorId,
+    });
+    return getWorkspaceContext(workspaceId);
+  };
 
   const getWorkspaceContext = async (workspaceId) => {
     const workspace = await repository.getWorkspace(workspaceId);
@@ -325,6 +350,7 @@ export const createTrackToZeroV2AsyncAppService = ({
     mode,
     actorId,
     getWorkspaces,
+    bootstrapOwnerWorkspace,
     getWorkspaceContext,
     getWorkspaceSnapshot,
     getActivePlanContext,

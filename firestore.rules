@@ -638,5 +638,225 @@ service cloud.firestore {
         allow write: if isActiveHouseholdMember(householdId) || isHouseholdOwnerFromRoot(householdId);
       }
     }
+
+    function v2MemberPath(workspaceId, uid) {
+      return /databases/$(database)/documents/workspaces/$(workspaceId)/members/$(uid);
+    }
+
+    function v2Membership(workspaceId) {
+      return get(v2MemberPath(workspaceId, request.auth.uid));
+    }
+
+    function v2IsMember(workspaceId) {
+      return signedIn()
+        && exists(v2MemberPath(workspaceId, request.auth.uid))
+        && v2Membership(workspaceId).data.status == "active";
+    }
+
+    function v2Role(workspaceId) {
+      return v2Membership(workspaceId).data.role;
+    }
+
+    function v2ViewerPlus(workspaceId) {
+      return v2IsMember(workspaceId) && v2Role(workspaceId) in ["owner", "admin", "contributor", "viewer"];
+    }
+
+    function v2ContributorPlus(workspaceId) {
+      return v2IsMember(workspaceId) && v2Role(workspaceId) in ["owner", "admin", "contributor"];
+    }
+
+    function v2AdminPlus(workspaceId) {
+      return v2IsMember(workspaceId) && v2Role(workspaceId) in ["owner", "admin"];
+    }
+
+    function v2Owner(workspaceId) {
+      return v2IsMember(workspaceId) && v2Role(workspaceId) == "owner";
+    }
+
+    function v2MigrationOperator(workspaceId) {
+      return v2AdminPlus(workspaceId)
+        && request.auth.token.trackToZeroMigrationOperator == true;
+    }
+
+    function v2ValidRole(value) {
+      return value in ["owner", "admin", "contributor", "viewer"];
+    }
+
+    function v2WorkspaceCreator(workspaceId) {
+      return signedIn()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.id == workspaceId;
+    }
+
+    function v2WorkspaceCreatedByAfter(workspaceId, uid) {
+      return existsAfter(/databases/$(database)/documents/workspaces/$(workspaceId))
+        && getAfter(/databases/$(database)/documents/workspaces/$(workspaceId)).data.createdBy == uid;
+    }
+
+    function v2OwnerMembershipAfter(workspaceId, uid) {
+      return existsAfter(v2MemberPath(workspaceId, uid))
+        && getAfter(v2MemberPath(workspaceId, uid)).data.workspaceId == workspaceId
+        && getAfter(v2MemberPath(workspaceId, uid)).data.uid == uid
+        && getAfter(v2MemberPath(workspaceId, uid)).data.role == "owner"
+        && getAfter(v2MemberPath(workspaceId, uid)).data.status == "active";
+    }
+
+    function v2InitialOwnerMembership(workspaceId, uid) {
+      return signedIn()
+        && uid == request.auth.uid
+        && request.resource.data.workspaceId == workspaceId
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.role == "owner"
+        && request.resource.data.status == "active"
+        && ((
+          exists(/databases/$(database)/documents/workspaces/$(workspaceId))
+          && get(/databases/$(database)/documents/workspaces/$(workspaceId)).data.createdBy == request.auth.uid
+        ) || v2WorkspaceCreatedByAfter(workspaceId, request.auth.uid));
+    }
+
+    function v2BootstrapMigrationRun(workspaceId) {
+      return signedIn()
+        && request.auth.token.trackToZeroMigrationOperator == true
+        && request.resource.data.workspaceId == workspaceId
+        && request.resource.data.actorId == request.auth.uid
+        && request.resource.data.migrationState == "in_progress"
+        && v2WorkspaceCreatedByAfter(workspaceId, request.auth.uid)
+        && v2OwnerMembershipAfter(workspaceId, request.auth.uid);
+    }
+
+    function v2RoleUnchanged() {
+      return request.resource.data.role == resource.data.role;
+    }
+
+    function v2TargetIsOwner(workspaceId, uid) {
+      return exists(v2MemberPath(workspaceId, uid)) && get(v2MemberPath(workspaceId, uid)).data.role == "owner";
+    }
+
+    function v2PaymentCoreUnchanged() {
+      return request.resource.data.workspaceId == resource.data.workspaceId
+        && request.resource.data.debtId == resource.data.debtId
+        && request.resource.data.amount == resource.data.amount
+        && request.resource.data.paidAt == resource.data.paidAt
+        && request.resource.data.createdBy == resource.data.createdBy;
+    }
+
+    function v2SnapshotCoreUnchanged() {
+      return request.resource.data.workspaceId == resource.data.workspaceId
+        && request.resource.data.debtId == resource.data.debtId
+        && request.resource.data.balance == resource.data.balance
+        && request.resource.data.observedAt == resource.data.observedAt
+        && request.resource.data.createdBy == resource.data.createdBy;
+    }
+
+    match /workspaces/{workspaceId} {
+      allow create: if v2WorkspaceCreator(workspaceId);
+      allow read: if v2ViewerPlus(workspaceId);
+      allow update: if v2AdminPlus(workspaceId);
+      allow delete: if v2Owner(workspaceId) || v2MigrationOperator(workspaceId);
+
+      match /members/{uid} {
+        allow read: if v2ViewerPlus(workspaceId);
+        allow create: if v2InitialOwnerMembership(workspaceId, uid)
+          || (v2Owner(workspaceId)
+            && uid != request.auth.uid
+            && request.resource.data.workspaceId == workspaceId
+            && request.resource.data.uid == uid
+            && v2ValidRole(request.resource.data.role)
+            && request.resource.data.role != "owner")
+          || (v2Role(workspaceId) == "admin"
+            && uid != request.auth.uid
+            && request.resource.data.workspaceId == workspaceId
+            && request.resource.data.uid == uid
+            && request.resource.data.role in ["admin", "contributor", "viewer"]);
+        allow update: if v2Owner(workspaceId)
+          && uid != request.auth.uid
+          && !v2TargetIsOwner(workspaceId, uid)
+          && v2ValidRole(request.resource.data.role)
+          && request.resource.data.role != "owner";
+        allow update: if v2AdminPlus(workspaceId)
+          && uid != request.auth.uid
+          && !v2TargetIsOwner(workspaceId, uid)
+          && v2RoleUnchanged();
+        allow delete: if (v2Owner(workspaceId) && !v2TargetIsOwner(workspaceId, uid))
+          || v2MigrationOperator(workspaceId);
+      }
+
+      match /debts/{debtId} {
+        allow read: if v2ViewerPlus(workspaceId);
+        allow create, update: if v2AdminPlus(workspaceId)
+          && request.resource.data.workspaceId == workspaceId;
+        allow delete: if v2AdminPlus(workspaceId)
+          && resource.data.workspaceId == workspaceId;
+
+        match /payment_events/{eventId} {
+          allow read: if v2ViewerPlus(workspaceId);
+          allow create: if v2ContributorPlus(workspaceId)
+            && request.resource.data.workspaceId == workspaceId
+            && request.resource.data.debtId == debtId
+            && request.resource.data.createdBy == request.auth.uid
+            && request.resource.data.amount > 0;
+          allow update: if v2AdminPlus(workspaceId) && v2PaymentCoreUnchanged();
+          allow delete: if v2MigrationOperator(workspaceId)
+            && resource.data.workspaceId == workspaceId
+            && resource.data.debtId == debtId;
+        }
+
+        match /balance_snapshots/{snapshotId} {
+          allow read: if v2ViewerPlus(workspaceId);
+          allow create: if v2ContributorPlus(workspaceId)
+            && request.resource.data.workspaceId == workspaceId
+            && request.resource.data.debtId == debtId
+            && request.resource.data.createdBy == request.auth.uid
+            && request.resource.data.balance >= 0;
+          allow update: if v2AdminPlus(workspaceId) && v2SnapshotCoreUnchanged();
+          allow delete: if v2MigrationOperator(workspaceId)
+            && resource.data.workspaceId == workspaceId
+            && resource.data.debtId == debtId;
+        }
+      }
+
+      match /plans/{planId} {
+        allow read: if v2ViewerPlus(workspaceId);
+        allow create, update: if v2AdminPlus(workspaceId)
+          && request.resource.data.workspaceId == workspaceId;
+        allow delete: if v2AdminPlus(workspaceId)
+          && resource.data.workspaceId == workspaceId;
+
+        match /versions/{versionId} {
+          allow read: if v2ViewerPlus(workspaceId);
+          allow create: if v2AdminPlus(workspaceId)
+            && request.resource.data.workspaceId == workspaceId
+            && request.resource.data.planId == planId;
+          allow update: if v2AdminPlus(workspaceId) && request.resource.data == resource.data;
+          allow delete: if v2MigrationOperator(workspaceId)
+            && resource.data.workspaceId == workspaceId
+            && resource.data.planId == planId;
+
+          match /expected_schedule/{checkpointId} {
+            allow read: if v2ViewerPlus(workspaceId);
+            allow create: if v2AdminPlus(workspaceId)
+              && request.resource.data.workspaceId == workspaceId
+              && request.resource.data.planId == planId
+              && request.resource.data.planVersionId == versionId;
+            allow update: if false;
+            allow delete: if v2MigrationOperator(workspaceId)
+              && resource.data.workspaceId == workspaceId
+              && resource.data.planId == planId
+              && resource.data.planVersionId == versionId;
+          }
+        }
+      }
+
+      match /migration_runs/{runId} {
+        allow read: if v2AdminPlus(workspaceId);
+        allow create: if (v2MigrationOperator(workspaceId) || v2BootstrapMigrationRun(workspaceId))
+          && request.resource.data.workspaceId == workspaceId
+          && request.resource.data.actorId == request.auth.uid;
+        allow update: if v2MigrationOperator(workspaceId)
+          && request.resource.data.workspaceId == workspaceId
+          && request.resource.data.actorId == request.auth.uid;
+        allow delete: if false;
+      }
+    }
   }
 }

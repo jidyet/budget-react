@@ -19,7 +19,7 @@ export const LAUNCH_FLAGS = {
   founderOpsEnabled: parseFlag(env.VITE_LAUNCH_FOUNDER_OPS, false),
   localAuthEnabled: parseFlag(env.VITE_LAUNCH_LOCAL_AUTH, false),
   starterTemplateEnabled: parseFlag(env.VITE_LAUNCH_STARTER_TEMPLATE, false),
-  trackToZeroV2Enabled: parseFlag(env.VITE_TRACKTOZERO_V2_ENABLED, false),
+  trackToZeroV2Enabled: parseFlag(env.VITE_TRACKTOZERO_V2_ENABLED, true),
   trackToZeroMigrationEnabled: parseFlag(env.VITE_TRACKTOZERO_MIGRATION_ENABLED, false),
 };
 

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { onAuthStateChanged } from "firebase/auth";
+import { auth, getFirebaseConfig, getFirebaseStatus, login, logout, signup } from "../../firebase";
 import {
   createTrackToZeroRepository,
   ensureTrackToZeroV2EmulatorActor,
@@ -81,6 +83,42 @@ function Field({ label, children }) {
   return <label style={styles.label}><span>{label}</span>{children}</label>;
 }
 
+function AuthScreen({ onSubmit, state, setState, error, busy, firebaseReady }) {
+  const title = state.mode === "signup" ? "Create your TrackToZero beta account" : "Sign in to TrackToZero beta";
+  return (
+    <main style={styles.shell}>
+      <div style={styles.wrap}>
+        <Section title={firebaseReady ? title : "TrackToZero beta is temporarily unavailable"} eyebrow="Clean beta">
+          {!firebaseReady ? (
+            <p>Production Firebase is not configured for this release. The app is in a safe disabled state.</p>
+          ) : (
+            <form onSubmit={onSubmit} style={{ display: "grid", gap: 12, maxWidth: 460 }}>
+              <p>Start fresh in the V2 command center. No demo debts are loaded.</p>
+              <Field label="Email">
+                <input style={styles.input} type="email" value={state.email} onChange={(event) => setState({ ...state, email: event.target.value })} required />
+              </Field>
+              <Field label="Password">
+                <input style={styles.input} type="password" value={state.password} onChange={(event) => setState({ ...state, password: event.target.value })} minLength={6} required />
+              </Field>
+              {error && <p role="alert" style={{ color: "#991b1b", fontWeight: 800 }}>{error}</p>}
+              <button type="submit" disabled={busy} style={busy ? styles.disabledButton : styles.primaryButton}>
+                {busy ? "Please wait..." : state.mode === "signup" ? "Create account" : "Sign in"}
+              </button>
+              <button
+                type="button"
+                style={styles.button}
+                onClick={() => setState({ ...state, mode: state.mode === "signup" ? "login" : "signup" })}
+              >
+                {state.mode === "signup" ? "I already have an account" : "Create a new account"}
+              </button>
+            </form>
+          )}
+        </Section>
+      </div>
+    </main>
+  );
+}
+
 function StatusBadge({ status }) {
   const palette = {
     ahead: ["#dcfce7", "#166534"],
@@ -97,33 +135,55 @@ function StatusBadge({ status }) {
   );
 }
 
-function WorkspaceBar({ workspaces, workspaceId, setWorkspaceId, members, actorId, setActorId, membership, mode, allowNonMemberPreview = false }) {
+function WorkspaceBar({
+  workspaces,
+  workspaceId,
+  setWorkspaceId,
+  members,
+  actorId,
+  setActorId,
+  membership,
+  mode,
+  repositoryMode,
+  allowNonMemberPreview = false,
+  canSwitchWorkspace = true,
+  canSwitchRole = true,
+  onSignOut = null,
+}) {
   const previewMembers = allowNonMemberPreview
     ? [...members, { uid: "seed-outsider", role: "non-member", displayName: "Non-member" }]
     : members;
+  const modeLabel = repositoryMode === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction
+    ? "Clean beta workspace"
+    : mode === "legacy_preview" ? "Read-only legacy preview" : "Interactive seed workspace";
   return (
     <div style={{ ...styles.card, display: "grid", gridTemplateColumns: "1fr auto", gap: 12, alignItems: "center" }}>
       <div>
-        <p style={{ margin: 0, color: "#2f6289", fontWeight: 900 }}>TrackToZero 2.0 · {mode === "legacy_preview" ? "Read-only legacy preview" : "Interactive seed workspace"}</p>
+        <p style={{ margin: 0, color: "#2f6289", fontWeight: 900 }}>TrackToZero 2.0 - {modeLabel}</p>
         <h1 style={{ margin: "4px 0 0", fontSize: 30 }}>Debt payoff command center</h1>
         <p style={{ margin: "8px 0 0", color: "#365a78" }}>Planning estimates only — not lender payoff quotes.</p>
       </div>
       <div style={{ display: "grid", gap: 8, minWidth: 260 }}>
-        <Field label="Workspace">
-          <select style={styles.input} value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)}>
-            {workspaces.map((workspace) => (
-              <option key={workspace.id} value={workspace.id}>{workspace.type === "household" ? "Household" : "Personal"} · {workspace.id}</option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Role preview">
-          <select style={styles.input} value={actorId} onChange={(event) => setActorId(event.target.value)}>
-            {previewMembers.map((member) => (
-              <option key={member.uid} value={member.uid}>{member.displayName || member.uid} · {member.role}</option>
-            ))}
-          </select>
-        </Field>
+        {canSwitchWorkspace ? (
+          <Field label="Workspace">
+            <select style={styles.input} value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)}>
+              {workspaces.map((workspace) => (
+                <option key={workspace.id} value={workspace.id}>{workspace.type === "household" ? "Household" : "Personal"} · {workspace.id}</option>
+              ))}
+            </select>
+          </Field>
+        ) : <span style={styles.pill}>Workspace: Personal beta</span>}
+        {canSwitchRole ? (
+          <Field label="Role preview">
+            <select style={styles.input} value={actorId} onChange={(event) => setActorId(event.target.value)}>
+              {previewMembers.map((member) => (
+                <option key={member.uid} value={member.uid}>{member.displayName || member.uid} · {member.role}</option>
+              ))}
+            </select>
+          </Field>
+        ) : <span style={styles.pill}>Signed in as owner</span>}
         <span style={styles.pill}>Current role: {membership?.role || "viewer"}</span>
+        {onSignOut && <button type="button" style={styles.button} onClick={onSignOut}>Sign out</button>}
       </div>
     </div>
   );
@@ -348,15 +408,18 @@ function MigrationPanel() {
   );
 }
 
-function Settings({ snapshot }) {
+function Settings({ snapshot, repositoryMode }) {
   const flags = getLaunchFlags();
+  const dataMode = repositoryMode === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction
+    ? "Clean V2 beta"
+    : snapshot.mode === "legacy_preview" ? "Read-only legacy preview" : "Interactive v2 seed/test workspace";
   return (
     <Section title="Workspace settings" eyebrow="Settings">
       <div style={styles.grid}>
         <div>
           <p><strong>Workspace type:</strong> {snapshot.workspace.type}</p>
           <p><strong>Your role:</strong> {snapshot.membership?.role}</p>
-          <p><strong>Data mode:</strong> {snapshot.mode === "legacy_preview" ? "Read-only legacy preview" : "Interactive v2 seed/test workspace"}</p>
+          <p><strong>Data mode:</strong> {dataMode}</p>
         </div>
         <div>
           <h3>Members</h3>
@@ -364,7 +427,7 @@ function Settings({ snapshot }) {
         </div>
         <div>
           <h3>Privacy note</h3>
-          <p>Phase 3 does not migrate production users, write legacy records, or deploy v2 Firestore rules.</p>
+          <p>TrackToZero provides planning projections based on the information you enter. Actual balances, interest, fees, and payoff amounts may differ from your creditor's records.</p>
         </div>
       </div>
       {flags.trackToZeroMigrationEnabled && <MigrationPanel />}
@@ -374,16 +437,18 @@ function Settings({ snapshot }) {
 
 const getRuntimeMode = () => {
   const env = typeof import.meta !== "undefined" ? import.meta.env || {} : {};
-  return env.VITE_TRACKTOZERO_V2_REPOSITORY_MODE === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseEmulator
-    ? TRACKTOZERO_V2_REPOSITORY_MODES.firebaseEmulator
-    : TRACKTOZERO_V2_REPOSITORY_MODES.inMemory;
+  const requested = env.VITE_TRACKTOZERO_V2_REPOSITORY_MODE;
+  if (requested === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseEmulator) return TRACKTOZERO_V2_REPOSITORY_MODES.firebaseEmulator;
+  if (requested === TRACKTOZERO_V2_REPOSITORY_MODES.inMemory) return TRACKTOZERO_V2_REPOSITORY_MODES.inMemory;
+  return TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction;
 };
 
 const getRuntimeConfig = () => {
   const env = typeof import.meta !== "undefined" ? import.meta.env || {} : {};
+  const mode = getRuntimeMode();
   return {
-    mode: getRuntimeMode(),
-    firebaseConfig: {
+    mode,
+    firebaseConfig: mode === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction ? getFirebaseConfig() : {
       projectId: env.VITE_TRACKTOZERO_V2_FIREBASE_PROJECT_ID || "demo-budget-react-v2",
       apiKey: env.VITE_TRACKTOZERO_V2_FIREBASE_API_KEY || "demo",
     },
@@ -405,32 +470,80 @@ const getRuntimeRepository = () => {
   });
 };
 
+const workspaceIdForUser = (uid) => `workspace-${String(uid || "").replace(/[\\/]/g, "_")}`;
+
 export default function TrackToZeroV2App() {
   const runtime = useMemo(() => getRuntimeConfig(), []);
+  const isProductionRuntime = runtime.mode === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction;
   const repository = useMemo(() => getRuntimeRepository(), []);
-  const [workspaceId, setWorkspaceId] = useState("personal-seed");
-  const [actorId, setActorId] = useState(V2_TEST_ACTOR_ID);
+  const [authState, setAuthState] = useState({ status: isProductionRuntime ? "loading" : "ready", user: null, error: "" });
+  const [authForm, setAuthForm] = useState({ mode: "signup", email: "", password: "" });
+  const [authBusy, setAuthBusy] = useState(false);
+  const [workspaceId, setWorkspaceId] = useState(isProductionRuntime ? "" : "personal-seed");
+  const [actorId, setActorId] = useState(isProductionRuntime ? "" : V2_TEST_ACTOR_ID);
   const [tab, setTab] = useState("home");
   const [scenario, setScenario] = useState(null);
   const [runtimeState, setRuntimeState] = useState({ status: "idle", snapshot: null, workspaces: [], error: "" });
   const [writeState, setWriteState] = useState({ inProgress: false, action: "", error: "", success: "" });
   const requestSeq = useRef(0);
-  const service = useMemo(() => createTrackToZeroV2AsyncAppService({ repository, actorId, asOf: V2_TEST_NOW }), [repository, actorId]);
+  const asOf = useMemo(() => isProductionRuntime ? new Date().toISOString() : V2_TEST_NOW, [isProductionRuntime]);
+  const service = useMemo(() => createTrackToZeroV2AsyncAppService({ repository, actorId, asOf }), [repository, actorId, asOf]);
+
+  useEffect(() => {
+    if (!isProductionRuntime) return undefined;
+    if (!auth) {
+      setAuthState({ status: "unavailable", user: null, error: "Production Firebase is not configured for this release." });
+      return undefined;
+    }
+    return onAuthStateChanged(auth, (user) => {
+      setAuthState({ status: "ready", user, error: "" });
+      setActorId(user?.uid || "");
+      setWorkspaceId(user ? workspaceIdForUser(user.uid) : "");
+      setScenario(null);
+      setWriteState({ inProgress: false, action: "", error: "", success: "" });
+    }, () => {
+      setAuthState({ status: "unavailable", user: null, error: "TrackToZero could not connect to Firebase Auth." });
+    });
+  }, [isProductionRuntime]);
+
+  const submitAuth = async (event) => {
+    event.preventDefault();
+    setAuthBusy(true);
+    setAuthState((state) => ({ ...state, error: "" }));
+    try {
+      if (authForm.mode === "signup") await signup(authForm.email, authForm.password);
+      else await login(authForm.email, authForm.password);
+    } catch (error) {
+      setAuthState((state) => ({ ...state, error: error?.message || "Authentication failed." }));
+    } finally {
+      setAuthBusy(false);
+    }
+  };
 
   const refresh = useCallback(async (nextWorkspaceId = workspaceId) => {
     const requestId = requestSeq.current + 1;
     requestSeq.current = requestId;
     setRuntimeState((state) => ({ ...state, status: "loading", error: "", snapshot: null }));
     try {
-      await ensureTrackToZeroV2EmulatorActor({
-        actorId,
-        mode: runtime.mode,
-        firebaseConfig: runtime.firebaseConfig,
-        emulatorHost: runtime.emulatorHost,
-        authEmulatorHost: runtime.authEmulatorHost,
-      });
+      if (isProductionRuntime) {
+        if (!authState.user || !actorId || !nextWorkspaceId) return;
+        await service.bootstrapOwnerWorkspace(nextWorkspaceId, {
+          displayName: authState.user.displayName || authState.user.email || "Owner",
+          email: authState.user.email || "",
+        });
+      } else {
+        await ensureTrackToZeroV2EmulatorActor({
+          actorId,
+          mode: runtime.mode,
+          firebaseConfig: runtime.firebaseConfig,
+          emulatorHost: runtime.emulatorHost,
+          authEmulatorHost: runtime.authEmulatorHost,
+        });
+      }
       const snapshot = await service.getWorkspaceSnapshot(nextWorkspaceId);
-      const workspaces = runtime.mode === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseEmulator
+      const workspaces = isProductionRuntime
+        ? [{ id: nextWorkspaceId, type: "solo" }]
+        : runtime.mode === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseEmulator
         ? runtime.seedWorkspaceIds.map((id) => ({ id, type: id.includes("household") ? "household" : "personal" }))
         : await service.getWorkspaces();
       if (requestSeq.current !== requestId) return;
@@ -440,7 +553,7 @@ export default function TrackToZeroV2App() {
       const safe = getUserSafeTrackToZeroError(error);
       setRuntimeState({ status: safe.kind, workspaces: [], snapshot: null, error: safe.message });
     }
-  }, [actorId, runtime, service, workspaceId]);
+  }, [actorId, authState.user, isProductionRuntime, runtime, service, workspaceId]);
 
   const runAction = async (action, callback, { write = true } = {}) => {
     setWriteState({ inProgress: write, action, error: "", success: "" });
@@ -468,6 +581,20 @@ export default function TrackToZeroV2App() {
 
   const snapshot = runtimeState.snapshot;
   const workspaces = runtimeState.workspaces;
+  const firebaseReady = !isProductionRuntime || (getFirebaseStatus().configured && getFirebaseConfig().projectId === "budgetapp-c9306");
+
+  if (isProductionRuntime && (authState.status === "loading" || !authState.user)) {
+    return (
+      <AuthScreen
+        onSubmit={submitAuth}
+        state={authForm}
+        setState={setAuthForm}
+        error={authState.error}
+        busy={authBusy}
+        firebaseReady={firebaseReady && authState.status !== "unavailable"}
+      />
+    );
+  }
 
   if (runtimeState.status === "loading" || runtimeState.status === "idle") {
     return (
@@ -506,7 +633,11 @@ export default function TrackToZeroV2App() {
           setActorId={setActorId}
           membership={snapshot.membership}
           mode={snapshot.mode}
+          repositoryMode={runtime.mode}
           allowNonMemberPreview={runtime.mode === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseEmulator}
+          canSwitchWorkspace={!isProductionRuntime}
+          canSwitchRole={!isProductionRuntime}
+          onSignOut={isProductionRuntime ? logout : null}
         />
         <nav aria-label="TrackToZero 2.0 primary navigation" style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
           {["home", "debts", "plan", "settings"].map((item) => (
@@ -523,7 +654,7 @@ export default function TrackToZeroV2App() {
         }, { write: false })} />}
         {tab === "debts" && <Debts snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} />}
         {tab === "plan" && <Plan snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} />}
-        {tab === "settings" && <Settings snapshot={snapshot} />}
+        {tab === "settings" && <Settings snapshot={snapshot} repositoryMode={runtime.mode} />}
       </div>
     </main>
   );

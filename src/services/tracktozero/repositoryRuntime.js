@@ -1,6 +1,7 @@
 import { initializeApp, getApps } from "firebase/app";
 import { connectAuthEmulator, getAuth, signInWithEmailAndPassword } from "firebase/auth";
 import { connectFirestoreEmulator, getFirestore } from "firebase/firestore";
+import { db as productionDb, getFirebaseConfig, getFirebaseStatus } from "../../firebase.js";
 import { InMemoryTrackToZeroRepository } from "../repositories/tracktozeroRepositories.js";
 import { FirebaseTrackToZeroRepository } from "../repositories/firebaseTrackToZeroRepository.js";
 import { createTrackToZeroV2Seed } from "./v2SeedData.js";
@@ -8,9 +9,11 @@ import { createTrackToZeroV2Seed } from "./v2SeedData.js";
 export const TRACKTOZERO_V2_REPOSITORY_MODES = Object.freeze({
   inMemory: "inMemory",
   firebaseEmulator: "firebaseEmulator",
+  firebaseProduction: "firebaseProduction",
 });
 
 export const TRACKTOZERO_V2_EMULATOR_PROJECT_ID = "demo-budget-react-v2";
+export const TRACKTOZERO_V2_PRODUCTION_PROJECT_ID = "budgetapp-c9306";
 export const TRACKTOZERO_V2_TEST_PASSWORD = "TrackToZero123!";
 
 const connectedFirestoreEmulators = new Set();
@@ -42,6 +45,18 @@ export const assertTrackToZeroV2EmulatorConfig = ({
   return true;
 };
 
+export const assertTrackToZeroV2ProductionConfig = ({
+  projectId,
+  configured,
+  mode = TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction,
+} = {}) => {
+  if (mode !== TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction) return true;
+  if (!configured || projectId !== TRACKTOZERO_V2_PRODUCTION_PROJECT_ID) {
+    throw new Error("TrackToZero beta is temporarily unavailable. Production Firebase is not configured for this release.");
+  }
+  return true;
+};
+
 export const createTrackToZeroRepository = ({
   mode = TRACKTOZERO_V2_REPOSITORY_MODES.inMemory,
   firestoreInstance = null,
@@ -50,6 +65,16 @@ export const createTrackToZeroRepository = ({
 } = {}) => {
   if (mode === TRACKTOZERO_V2_REPOSITORY_MODES.inMemory) {
     return new InMemoryTrackToZeroRepository(createTrackToZeroV2Seed());
+  }
+  if (mode === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction) {
+    const status = getFirebaseStatus();
+    const config = firebaseConfig || getFirebaseConfig();
+    assertTrackToZeroV2ProductionConfig({
+      projectId: config.projectId || status.projectId,
+      configured: Boolean(firestoreInstance || productionDb) && status.configured,
+      mode,
+    });
+    return new FirebaseTrackToZeroRepository(firestoreInstance || productionDb);
   }
   if (mode !== TRACKTOZERO_V2_REPOSITORY_MODES.firebaseEmulator) {
     throw new Error(`Unknown TrackToZero v2 repository mode: ${mode}`);

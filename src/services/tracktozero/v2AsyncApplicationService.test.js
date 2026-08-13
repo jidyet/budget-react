@@ -64,6 +64,6 @@ describe("TrackToZero v2 async application service", () => {
       kind: "permission_denied",
       message: "Your role allows viewing this information, but not changing it.",
     });
-    expect(getUserSafeTrackToZeroError(new Error("FIRESTORE_EMULATOR_HOST missing")).message).toMatch(/Firebase emulator/);
+    expect(getUserSafeTrackToZeroError(new Error("FIRESTORE_EMULATOR_HOST missing")).message).toMatch(/temporarily unavailable/);
   });
 });

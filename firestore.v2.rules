@@ -40,6 +40,17 @@ service cloud.firestore {
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.id == workspaceId;
     }
+    function workspaceCreatedByAfter(workspaceId, uid) {
+      return existsAfter(/databases/$(database)/documents/workspaces/$(workspaceId))
+        && getAfter(/databases/$(database)/documents/workspaces/$(workspaceId)).data.createdBy == uid;
+    }
+    function ownerMembershipAfter(workspaceId, uid) {
+      return existsAfter(memberPath(workspaceId, uid))
+        && getAfter(memberPath(workspaceId, uid)).data.workspaceId == workspaceId
+        && getAfter(memberPath(workspaceId, uid)).data.uid == uid
+        && getAfter(memberPath(workspaceId, uid)).data.role == "owner"
+        && getAfter(memberPath(workspaceId, uid)).data.status == "active";
+    }
     function isInitialOwnerMembership(workspaceId, uid) {
       return signedIn()
         && uid == request.auth.uid
@@ -47,8 +58,19 @@ service cloud.firestore {
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.role == "owner"
         && request.resource.data.status == "active"
-        && exists(/databases/$(database)/documents/workspaces/$(workspaceId))
-        && get(/databases/$(database)/documents/workspaces/$(workspaceId)).data.createdBy == request.auth.uid;
+        && ((
+          exists(/databases/$(database)/documents/workspaces/$(workspaceId))
+          && get(/databases/$(database)/documents/workspaces/$(workspaceId)).data.createdBy == request.auth.uid
+        ) || workspaceCreatedByAfter(workspaceId, request.auth.uid));
+    }
+    function isBootstrapMigrationRun(workspaceId) {
+      return signedIn()
+        && request.auth.token.trackToZeroMigrationOperator == true
+        && request.resource.data.workspaceId == workspaceId
+        && request.resource.data.actorId == request.auth.uid
+        && request.resource.data.migrationState == "in_progress"
+        && workspaceCreatedByAfter(workspaceId, request.auth.uid)
+        && ownerMembershipAfter(workspaceId, request.auth.uid);
     }
     function roleUnchanged() {
       return request.resource.data.role == resource.data.role;
@@ -175,7 +197,10 @@ service cloud.firestore {
 
       match /migration_runs/{runId} {
         allow read: if isAdminPlus(workspaceId);
-        allow create, update: if isMigrationOperator(workspaceId)
+        allow create: if (isMigrationOperator(workspaceId) || isBootstrapMigrationRun(workspaceId))
+          && request.resource.data.workspaceId == workspaceId
+          && request.resource.data.actorId == request.auth.uid;
+        allow update: if isMigrationOperator(workspaceId)
           && request.resource.data.workspaceId == workspaceId
           && request.resource.data.actorId == request.auth.uid;
         allow delete: if false;

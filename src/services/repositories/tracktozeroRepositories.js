@@ -150,6 +150,12 @@ export class InMemoryTrackToZeroRepository {
     this.migrationRuns.set(this.key(run.workspaceId, run.id), run);
     return clone(run);
   }
+  saveMigrationBootstrap({ workspace, ownerMembership, manifest }) {
+    const savedWorkspace = this.saveWorkspace(workspace);
+    const savedMembership = this.saveMembership(ownerMembership);
+    const savedManifest = this.saveMigrationRun(manifest);
+    return { workspace: savedWorkspace, ownerMembership: savedMembership, manifest: savedManifest };
+  }
   getMigrationRun(workspaceId, runId) {
     const key = this.key(workspaceId, runId);
     return this.migrationRuns.has(key) ? clone(this.migrationRuns.get(key)) : null;

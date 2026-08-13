@@ -8,6 +8,7 @@ import {
   query,
   runTransaction,
   setDoc,
+  writeBatch,
 } from "firebase/firestore";
 import {
   createBalanceSnapshot,
@@ -206,6 +207,20 @@ export class FirebaseTrackToZeroRepository {
     const run = { ...input };
     await setDoc(doc(this.db, v2Paths.migrationRun(run.workspaceId, run.id)), toFirestoreDoc("migrationRun", run));
     return run;
+  }
+  async saveMigrationBootstrap({ workspace, ownerMembership, manifest }) {
+    const batch = writeBatch(this.db);
+    batch.set(doc(this.db, v2Paths.workspace(workspace.id)), toFirestoreDoc("workspace", createWorkspace(workspace)));
+    batch.set(
+      doc(this.db, v2Paths.member(ownerMembership.workspaceId, ownerMembership.uid)),
+      toFirestoreDoc("member", createWorkspaceMembership(ownerMembership))
+    );
+    batch.set(
+      doc(this.db, v2Paths.migrationRun(manifest.workspaceId, manifest.id)),
+      toFirestoreDoc("migrationRun", { ...manifest })
+    );
+    await batch.commit();
+    return { workspace, ownerMembership, manifest };
   }
   async getMigrationRun(workspaceId, runId) {
     const snap = await getDoc(doc(this.db, v2Paths.migrationRun(workspaceId, runId)));

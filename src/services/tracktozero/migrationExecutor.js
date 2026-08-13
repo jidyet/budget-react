@@ -141,18 +141,55 @@ export const executeMigrationPreview = async ({
   const completedPaths = [...(existingRun?.completedPaths || [])];
   let manifest = buildMigrationManifest({ preview, actorId, migrationRunId, at: startedAt, completedPaths });
 
-  // Bootstrap workspace and owner membership first; the manifest lives under the
-  // workspace and therefore cannot be rules-gated before an owner exists.
+  const workspacePath = v2Paths.workspace(preview.candidateWorkspace.id);
+  const actorMembership = preview.candidateMemberships.find((member) => member.uid === actorId);
+  const actorMembershipPath = v2Paths.member(preview.candidateWorkspace.id, actorId);
+  if (preview.candidateWorkspace.createdBy !== actorId || actorMembership?.role !== "owner") {
+    throw new Error("Migration bootstrap requires the actor to be the deterministic workspace owner");
+  }
+
+  // Bootstrap workspace + actor owner membership + manifest as one recoverable
+  // unit. Production member order is not guaranteed, so non-owner memberships
+  // must not be attempted until owner authority exists.
   const orderedPaths = [
-    v2Paths.workspace(preview.candidateWorkspace.id),
-    ...preview.candidateMemberships.map((member) => v2Paths.member(preview.candidateWorkspace.id, member.uid)),
+    ...preview.candidateMemberships
+      .filter((member) => member.uid !== actorId)
+      .map((member) => v2Paths.member(preview.candidateWorkspace.id, member.uid)),
     ...preview.expectedTargetPaths.filter((path) => path !== v2Paths.workspace(preview.candidateWorkspace.id)
       && !preview.candidateMemberships.some((member) => path === v2Paths.member(preview.candidateWorkspace.id, member.uid))),
   ];
 
   try {
+    if (!existingRun) {
+      const existingWorkspace = await safe(() => repository.getEntityAtPath(workspacePath), null);
+      const existingActorMembership = await safe(() => repository.getEntityAtPath(actorMembershipPath), null);
+      if (existingWorkspace || existingActorMembership) {
+        throw new Error("Unjournaled migration bootstrap state exists; perform supervised recovery before retrying");
+      }
+      manifest = {
+        ...manifest,
+        completedPaths: [workspacePath, actorMembershipPath],
+        updatedAt: nowIso(),
+      };
+      if (typeof repository.saveMigrationBootstrap === "function") {
+        await repository.saveMigrationBootstrap({
+          workspace: preview.candidateWorkspace,
+          ownerMembership: actorMembership,
+          manifest,
+        });
+      } else {
+        await repository.saveWorkspace(preview.candidateWorkspace);
+        await repository.saveMembership(actorMembership);
+        await repository.saveMigrationRun(manifest);
+      }
+      completedPaths.push(workspacePath, actorMembershipPath);
+    }
+
     let writeCount = completedPaths.length;
-    const actorMembershipPath = v2Paths.member(preview.candidateWorkspace.id, actorId);
+    if (failAfterWrites != null && writeCount >= failAfterWrites) {
+      throw new Error("Injected migration failure after controlled writes");
+    }
+
     for (const path of orderedPaths) {
       const entity = entityFromPath(preview, path);
       const existing = await safe(() => repository.getEntityAtPath(path), null);
@@ -161,9 +198,7 @@ export const executeMigrationPreview = async ({
       if (!completedPaths.includes(path)) completedPaths.push(path);
       writeCount += 1;
       manifest = { ...manifest, completedPaths: [...completedPaths], updatedAt: nowIso() };
-      if (completedPaths.includes(v2Paths.workspace(preview.candidateWorkspace.id)) && completedPaths.includes(actorMembershipPath)) {
-        await repository.saveMigrationRun(manifest);
-      }
+      await repository.saveMigrationRun(manifest);
       if (failAfterWrites != null && writeCount >= failAfterWrites) {
         throw new Error("Injected migration failure after controlled writes");
       }

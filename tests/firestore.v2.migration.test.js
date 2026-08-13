@@ -33,6 +33,21 @@ const previewFixture = () => buildMigrationPreview({
   previewGeneratedAt: ts,
 });
 
+const productionShapedMemberOrderFixture = () => buildMigrationPreview({
+  legacyWorkspace: { id: "prod-shaped-house", type: "household", memberIds: ["contrib", "owner"], ownerId: "owner" },
+  legacyMembers: [
+    { uid: "contrib", role: "member", status: "active" },
+    { uid: "owner", role: "owner", status: "active" },
+  ],
+  legacyAccounts: [
+    { id: "card", name: "Shared Credit Card", cur_bal: 1200, base_bal_v: 1500, min_due_v: 60, apr_v: 24, billType: "paydown" },
+  ],
+  legacyPlans: [],
+  confirmations: {},
+  asOf: ts,
+  previewGeneratedAt: ts,
+});
+
 const largeFixture = () => {
   const members = [
     { uid: "large-owner", role: "owner", status: "active" },
@@ -128,6 +143,57 @@ test("Phase 4 migration executes, validates, rolls back, and respects emulator v
   assert.equal(rollback.manifest.migrationState, "rolled_back");
   assert.equal((await ownerRepo.listDebts(preview.candidateWorkspace.id)).length, 0);
   assert.equal((await ownerRepo.listPlans(preview.candidateWorkspace.id)).length, 0);
+});
+
+test("Phase 4 production-shaped bootstrap is owner-order independent and journaled", async () => {
+  const preview = productionShapedMemberOrderFixture();
+  assert.equal(preview.candidateMemberships[0].uid, "contrib");
+  assert.equal(preview.candidateMemberships[1].uid, "owner");
+  const ownerRepo = repoAs("owner", { trackToZeroMigrationOperator: true });
+
+  await ownerRepo.saveWorkspace(preview.candidateWorkspace);
+  await assert.rejects(
+    ownerRepo.saveMembership(preview.candidateMemberships[0]),
+    /Missing or insufficient permissions|permission|PERMISSION_DENIED/i
+  );
+
+  await testEnv.clearFirestore();
+  const result = await executeMigrationPreview({
+    repository: ownerRepo,
+    preview,
+    sourceFingerprint: preview.sourceFingerprint,
+    confirmedPreviewDigest: preview.previewDigest,
+    explicitConfirmation: true,
+    actorId: "owner",
+  });
+  assert.equal(result.validation.ok, true);
+  assert.equal((await ownerRepo.listMemberships(preview.candidateWorkspace.id)).length, 2);
+  assert.equal((await ownerRepo.getMigrationRun(preview.candidateWorkspace.id, `migration-${preview.previewDigest}`)).migrationState, "rollback_allowed");
+});
+
+test("Phase 4 early failure after corrected bootstrap is manifest-tracked", async () => {
+  const preview = productionShapedMemberOrderFixture();
+  const ownerRepo = repoAs("owner", { trackToZeroMigrationOperator: true });
+  await assert.rejects(
+    executeMigrationPreview({
+      repository: ownerRepo,
+      preview,
+      sourceFingerprint: preview.sourceFingerprint,
+      confirmedPreviewDigest: preview.previewDigest,
+      explicitConfirmation: true,
+      actorId: "owner",
+      failAfterWrites: 2,
+    }),
+    /Injected migration failure/
+  );
+  const run = await ownerRepo.getMigrationRun(preview.candidateWorkspace.id, `migration-${preview.previewDigest}`);
+  assert.equal(run.migrationState, "partial_failed");
+  assert.deepEqual(run.completedPaths.sort(), [
+    `workspaces/${preview.candidateWorkspace.id}`,
+    `workspaces/${preview.candidateWorkspace.id}/members/owner`,
+  ].sort());
+  assert.equal((await ownerRepo.listMemberships(preview.candidateWorkspace.id)).length, 1);
+  assert.equal((await ownerRepo.listDebts(preview.candidateWorkspace.id)).length, 0);
 });
 
 test("Phase 4 migration denies non-owner operators and blocks rollback after native writes", async () => {

@@ -27,6 +27,7 @@ import {
   summarizeLargestBalances,
 } from "../services/aiCoachPayload";
 import { canAccessAICoach } from "../config/launchFlags";
+import { getDisplayPlannedPayment } from "../services/calc/planPaymentDerivation";
 
 export default function AccountsPage(props) {
   const {
@@ -34,6 +35,8 @@ export default function AccountsPage(props) {
     c = {},
     isMobile = false,
     allAccts = [],
+    plans = [],
+    planId = "",
     acctOwnerF = "All",
     setAcctOwnerF = () => {},
     acctCatF = "All",
@@ -72,6 +75,7 @@ export default function AccountsPage(props) {
   } = props || {};
       const [hoveredId, setHoveredId] = useState(null);
       const [expandedBreakdown, setExpandedBreakdown] = useState(() => new Set());
+      const resolvePlannedPayment = (account) => getDisplayPlannedPayment({ plans, planId, account });
       const statusToneStyles = {
         success: { background: `${c.go}18`, border: `1px solid ${c.go}40`, color: c.go, fontWeight: 900 },
         warning: { background: `${c.wa}12`, border: `1px solid ${c.wa}45`, color: c.wa, fontWeight: 900 },
@@ -466,7 +470,7 @@ export default function AccountsPage(props) {
                                 const aprDec = a.apr_v ?? (Number(a.apr ?? 0) > 1 ? Number(a.apr) / 100 : Number(a.apr ?? 0));
                                 const bal = Number(a.cur_bal || 0);
                                 const monthlyInterest = bal > 0 && aprDec > 0 ? (aprDec / 12) * bal : 0;
-                                const planned = Number(a.planned_v || 0);
+                                const planned = resolvePlannedPayment(a);
                                 const actualPaid = Number(a.paid_v || 0);
                                 const effectivePayment = planned > 0 ? planned : actualPaid > 0 ? actualPaid : Number(a.min_due_v || 0);
                                 const principalApplied = effectivePayment > 0 ? Math.max(0, effectivePayment - monthlyInterest) : 0;
@@ -1017,7 +1021,7 @@ export default function AccountsPage(props) {
                           const apr = a.effectiveApr ?? getEffectiveApr(a);
                           const bal = Number(a.cur_bal || 0);
                           const minDue = Number(a.min_due_v || a.budgeted_min || 0);
-                          const planned = Number(a.planned_v || 0);
+                          const planned = resolvePlannedPayment(a);
                           const paymentBasis = planned > 0 ? planned : Number(a.paid_v || 0) > 0 ? Number(a.paid_v || 0) : minDue;
                           if (apr <= 0 || bal <= 0 || paymentBasis <= 0) return null;
                           const monthlyInterest = (apr / 12) * bal;
@@ -1039,8 +1043,8 @@ export default function AccountsPage(props) {
                       </td>
                       <td style={{padding:"9px 10px",fontFamily:"'DM Mono',monospace"}}>
                         {fx(a.min_due_v)}
-                        {Number(a.planned_v || 0) > 0 && Number(a.planned_v) !== Number(a.min_due_v || 0) && (
-                          <div style={{ fontSize: 10, color: c.ac, fontWeight: 800, marginTop: 1 }}>Plan {fx(a.planned_v)}</div>
+                        {resolvePlannedPayment(a) > 0 && resolvePlannedPayment(a) !== Number(a.min_due_v || 0) && (
+                          <div style={{ fontSize: 10, color: c.ac, fontWeight: 800, marginTop: 1 }}>Plan {fx(resolvePlannedPayment(a))}</div>
                         )}
                       </td>
                       <td style={{padding:"9px 10px"}}>

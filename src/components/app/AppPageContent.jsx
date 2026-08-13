@@ -187,6 +187,8 @@ export default function AppPageContent(props) {
               c={c}
               isMobile={isMobile}
               allAccts={allAccts}
+              plans={props.plans}
+              planId={props.planId}
               acctOwnerF={props.acctOwnerF}
               setAcctOwnerF={props.setAcctOwnerF}
               acctCatF={props.acctCatF}

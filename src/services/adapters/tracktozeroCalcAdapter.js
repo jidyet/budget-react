@@ -1,4 +1,4 @@
-import { payoffSimulate } from "../calc/payoffEngine";
+import { payoffSimulate } from "../calc/payoffEngine.js";
 
 export const debtToEngineAccount = (debt) => ({
   id: debt.id,
@@ -47,4 +47,3 @@ export const buildExpectedCheckpoints = ({ debts = [], planVersion, startMonth, 
     projectedZeroDate: rows.at(-1)?.month || "",
   }));
 };
-

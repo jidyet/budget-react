@@ -1,4 +1,5 @@
 import { createBalanceSnapshot, createDebt, createExpectedCheckpoint, createPaymentEvent, createPayoffPlan, createPlanVersion, createWorkspace, createWorkspaceMembership } from "../../domain/tracktozero/models.js";
+import { activatePlanTransaction } from "../tracktozero/activePlanService.js";
 
 const clone = (value) => structuredClone(value);
 
@@ -89,6 +90,12 @@ export class InMemoryTrackToZeroRepository {
     const key = this.key(`${workspaceId}/${debtId}`, eventId);
     return this.paymentEvents.has(key) ? clone(this.paymentEvents.get(key)) : null;
   }
+  listPaymentEvents(workspaceId, debtId) {
+    return [...this.paymentEvents.values()]
+      .filter((e) => e.workspaceId === workspaceId && e.debtId === debtId)
+      .sort((a, b) => Date.parse(b.paidAt) - Date.parse(a.paidAt) || String(b.id).localeCompare(String(a.id)))
+      .map(clone);
+  }
   updatePaymentEvent() { throw new Error("PaymentEvent core facts are append-only; create a correction record"); }
 
   createBalanceSnapshot(input) {
@@ -123,4 +130,34 @@ export class InMemoryTrackToZeroRepository {
       .map(clone);
   }
   updateExpectedCheckpoint() { throw new Error("ExpectedCheckpoint is immutable once created"); }
+
+  activatePlan({ workspaceId, planId, versionId, actorId, activatedAt }) {
+    return activatePlanTransaction({ repository: this, workspaceId, planId, versionId, actorId, activatedAt });
+  }
+
+  reforecastActivePlan({ workspaceId, planId, priorVersionId, nextVersion, actorId, appliedAt }) {
+    const workspace = this.getWorkspace(workspaceId);
+    if (!workspace) throw new Error("Workspace not found");
+    if (workspace.activePlanId !== planId) throw new Error("Plan is not the active workspace plan");
+    const plan = this.getPlan(workspaceId, planId);
+    if (!plan) throw new Error("Plan not found");
+    if (plan.activeVersionId !== priorVersionId) throw new Error("Prior version is no longer authoritative");
+    const priorVersion = this.getPlanVersion(workspaceId, planId, priorVersionId);
+    if (!priorVersion) throw new Error("Prior PlanVersion not found");
+
+    const savedVersion = this.savePlanVersion(nextVersion);
+    this.putPlan({
+      ...plan,
+      status: "active",
+      activeVersionId: savedVersion.id,
+      updatedAt: appliedAt,
+      updatedBy: actorId,
+    });
+    return {
+      workspace: this.getWorkspace(workspaceId),
+      plan: this.getPlan(workspaceId, planId),
+      priorVersion,
+      version: savedVersion,
+    };
+  }
 }

@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
-import { InMemoryTrackToZeroRepository } from "../../services/repositories/tracktozeroRepositories";
-import { createTrackToZeroV2AppService } from "../../services/tracktozero/v2ApplicationService";
-import { createTrackToZeroV2Seed, V2_TEST_ACTOR_ID, V2_TEST_NOW } from "../../services/tracktozero/v2SeedData";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createTrackToZeroRepository, TRACKTOZERO_V2_REPOSITORY_MODES } from "../../services/tracktozero/repositoryRuntime";
+import { createTrackToZeroV2AsyncAppService, getUserSafeTrackToZeroError } from "../../services/tracktozero/v2AsyncApplicationService";
+import { V2_TEST_ACTOR_ID, V2_TEST_NOW } from "../../services/tracktozero/v2SeedData";
 
 const money = (value) =>
   Number(value || 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
@@ -159,7 +159,7 @@ function Home({ snapshot, scenario, onScenario }) {
   );
 }
 
-function Debts({ snapshot, service, refresh }) {
+function Debts({ snapshot, service, refresh, runAction, writeState }) {
   const [payment, setPayment] = useState({ debtId: snapshot.debts[0]?.id || "", amount: "" });
   const [balance, setBalance] = useState({ debtId: snapshot.debts[0]?.id || "", amount: "" });
   const [newDebt, setNewDebt] = useState({ name: "", currentBalance: "", minimumRequiredPayment: "", aprStatus: "unknown", apr: "", debtType: "credit_card" });
@@ -185,34 +185,44 @@ function Debts({ snapshot, service, refresh }) {
         <div style={styles.grid}>
           <form onSubmit={(event) => {
             event.preventDefault();
-            service.recordPayment(snapshot.workspace.id, payment.debtId, { amount: Number(payment.amount) });
-            setPayment({ ...payment, amount: "" });
-            refresh();
+            runAction("record payment", async () => {
+              await service.recordPayment(snapshot.workspace.id, payment.debtId, { amount: Number(payment.amount) });
+              setPayment({ ...payment, amount: "" });
+              await refresh();
+            });
           }}>
             <Field label="Record payment">
               <select style={styles.input} value={payment.debtId} onChange={(event) => setPayment({ ...payment, debtId: event.target.value })}>{snapshot.debts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select>
             </Field>
             <Field label="Amount"><input style={styles.input} value={payment.amount} onChange={(event) => setPayment({ ...payment, amount: event.target.value })} /></Field>
-            <button disabled={!canObserve} style={canObserve ? styles.primaryButton : styles.disabledButton}>Record payment</button>
+            <button disabled={!canObserve || writeState.inProgress} style={canObserve && !writeState.inProgress ? styles.primaryButton : styles.disabledButton}>
+              {writeState.action === "record payment" ? "Recording..." : "Record payment"}
+            </button>
             {!canObserve && <p>Your role is read-only for payment recording.</p>}
           </form>
           <form onSubmit={(event) => {
             event.preventDefault();
-            service.recordBalanceSnapshot(snapshot.workspace.id, balance.debtId, { balance: Number(balance.amount) });
-            setBalance({ ...balance, amount: "" });
-            refresh();
+            runAction("confirm balance", async () => {
+              await service.recordBalanceSnapshot(snapshot.workspace.id, balance.debtId, { balance: Number(balance.amount) });
+              setBalance({ ...balance, amount: "" });
+              await refresh();
+            });
           }}>
             <Field label="Update confirmed balance">
               <select style={styles.input} value={balance.debtId} onChange={(event) => setBalance({ ...balance, debtId: event.target.value })}>{snapshot.debts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select>
             </Field>
             <Field label="Current balance"><input style={styles.input} value={balance.amount} onChange={(event) => setBalance({ ...balance, amount: event.target.value })} /></Field>
-            <button disabled={!canObserve} style={canObserve ? styles.primaryButton : styles.disabledButton}>Confirm balance</button>
+            <button disabled={!canObserve || writeState.inProgress} style={canObserve && !writeState.inProgress ? styles.primaryButton : styles.disabledButton}>
+              {writeState.action === "confirm balance" ? "Saving..." : "Confirm balance"}
+            </button>
           </form>
           <form onSubmit={(event) => {
             event.preventDefault();
-            service.createNewDebt(snapshot.workspace.id, { ...newDebt, currentBalance: Number(newDebt.currentBalance), minimumRequiredPayment: Number(newDebt.minimumRequiredPayment), apr: newDebt.aprStatus === "unknown" ? null : Number(newDebt.apr), ownerLabel: snapshot.membership?.displayName || "Workspace" });
-            setNewDebt({ name: "", currentBalance: "", minimumRequiredPayment: "", aprStatus: "unknown", apr: "", debtType: "credit_card" });
-            refresh();
+            runAction("add debt", async () => {
+              await service.createNewDebt(snapshot.workspace.id, { ...newDebt, currentBalance: Number(newDebt.currentBalance), minimumRequiredPayment: Number(newDebt.minimumRequiredPayment), apr: newDebt.aprStatus === "unknown" ? null : Number(newDebt.apr), ownerLabel: snapshot.membership?.displayName || "Workspace" });
+              setNewDebt({ name: "", currentBalance: "", minimumRequiredPayment: "", aprStatus: "unknown", apr: "", debtType: "credit_card" });
+              await refresh();
+            });
           }}>
             <Field label="Add debt"><input style={styles.input} placeholder="Debt name" value={newDebt.name} onChange={(event) => setNewDebt({ ...newDebt, name: event.target.value })} /></Field>
             <Field label="Balance"><input style={styles.input} value={newDebt.currentBalance} onChange={(event) => setNewDebt({ ...newDebt, currentBalance: event.target.value })} /></Field>
@@ -225,7 +235,9 @@ function Debts({ snapshot, service, refresh }) {
               </select>
             </Field>
             {newDebt.aprStatus !== "unknown" && <Field label="APR"><input style={styles.input} value={newDebt.apr} onChange={(event) => setNewDebt({ ...newDebt, apr: event.target.value })} /></Field>}
-            <button disabled={!canManage} style={canManage ? styles.primaryButton : styles.disabledButton}>Add debt</button>
+            <button disabled={!canManage || writeState.inProgress} style={canManage && !writeState.inProgress ? styles.primaryButton : styles.disabledButton}>
+              {writeState.action === "add debt" ? "Adding..." : "Add debt"}
+            </button>
           </form>
         </div>
       </Section>
@@ -233,7 +245,7 @@ function Debts({ snapshot, service, refresh }) {
   );
 }
 
-function Plan({ snapshot, service, refresh }) {
+function Plan({ snapshot, service, refresh, runAction, writeState }) {
   const [draft, setDraft] = useState({ strategy: "avalanche", extraMonthlyPayment: "100" });
   const [reforecast, setReforecast] = useState(null);
   const canPlan = snapshot.permissions.managePlans && snapshot.mode !== "legacy_preview";
@@ -260,9 +272,11 @@ function Plan({ snapshot, service, refresh }) {
         <div style={styles.grid}>
           <form onSubmit={(event) => {
             event.preventDefault();
-            const { plan, version } = service.createDraftPlan(snapshot.workspace.id, { strategy: draft.strategy, extraMonthlyPayment: Number(draft.extraMonthlyPayment) });
-            service.activatePlan(snapshot.workspace.id, plan.id, version.id);
-            refresh();
+            runAction("activate plan", async () => {
+              const { plan, version } = await service.createDraftPlan(snapshot.workspace.id, { strategy: draft.strategy, extraMonthlyPayment: Number(draft.extraMonthlyPayment) });
+              await service.activatePlan(snapshot.workspace.id, plan.id, version.id);
+              await refresh();
+            });
           }}>
             <Field label="Strategy">
               <select style={styles.input} value={draft.strategy} onChange={(event) => setDraft({ ...draft, strategy: event.target.value })}>
@@ -271,15 +285,27 @@ function Plan({ snapshot, service, refresh }) {
               </select>
             </Field>
             <Field label="Extra monthly payment"><input style={styles.input} value={draft.extraMonthlyPayment} onChange={(event) => setDraft({ ...draft, extraMonthlyPayment: event.target.value })} /></Field>
-            <button disabled={!canPlan} style={canPlan ? styles.primaryButton : styles.disabledButton}>Create + activate plan</button>
+            <button disabled={!canPlan || writeState.inProgress} style={canPlan && !writeState.inProgress ? styles.primaryButton : styles.disabledButton}>
+              {writeState.action === "activate plan" ? "Activating..." : "Create + activate plan"}
+            </button>
           </form>
           <div>
-            <button disabled={!canPlan || !active?.version} style={canPlan ? styles.button : styles.disabledButton} onClick={() => setReforecast(service.previewReforecast(snapshot.workspace.id, { extraMonthlyPayment: Number(active.version.extraMonthlyPayment || 0) + 50 }))}>Preview reforecast +$50/mo</button>
+            <button disabled={!canPlan || !active?.version || writeState.inProgress} style={canPlan && !writeState.inProgress ? styles.button : styles.disabledButton} onClick={() => {
+              runAction("preview reforecast", async () => {
+                setReforecast(await service.previewReforecast(snapshot.workspace.id, { extraMonthlyPayment: Number(active.version.extraMonthlyPayment || 0) + 50 }));
+              }, { write: false });
+            }}>Preview reforecast +$50/mo</button>
             {reforecast && (
               <div>
                 <p>Old estimate: {reforecast.oldProjectedZeroDate || "n/a"}</p>
                 <p>Proposed estimate: {reforecast.proposedZeroDate || "n/a"}</p>
-                <button style={styles.primaryButton} onClick={() => { service.applyReforecast(snapshot.workspace.id, { extraMonthlyPayment: Number(active.version.extraMonthlyPayment || 0) + 50 }); setReforecast(null); refresh(); }}>Apply reforecast</button>
+                <button style={writeState.inProgress ? styles.disabledButton : styles.primaryButton} disabled={writeState.inProgress} onClick={() => {
+                  runAction("apply reforecast", async () => {
+                    await service.applyReforecast(snapshot.workspace.id, { extraMonthlyPayment: Number(active.version.extraMonthlyPayment || 0) + 50 });
+                    setReforecast(null);
+                    await refresh();
+                  });
+                }}>{writeState.action === "apply reforecast" ? "Applying..." : "Apply reforecast"}</button>
               </div>
             )}
           </div>
@@ -311,17 +337,102 @@ function Settings({ snapshot }) {
   );
 }
 
+const getRuntimeMode = () => {
+  const env = typeof import.meta !== "undefined" ? import.meta.env || {} : {};
+  return env.VITE_TRACKTOZERO_V2_REPOSITORY_MODE === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseEmulator
+    ? TRACKTOZERO_V2_REPOSITORY_MODES.firebaseEmulator
+    : TRACKTOZERO_V2_REPOSITORY_MODES.inMemory;
+};
+
+const getRuntimeRepository = () => {
+  const env = typeof import.meta !== "undefined" ? import.meta.env || {} : {};
+  return createTrackToZeroRepository({
+    mode: getRuntimeMode(),
+    firebaseConfig: { projectId: env.VITE_TRACKTOZERO_V2_FIREBASE_PROJECT_ID || "demo-budget-react-v2" },
+    emulatorHost: env.VITE_TRACKTOZERO_V2_FIRESTORE_EMULATOR_HOST || "",
+  });
+};
+
 export default function TrackToZeroV2App() {
-  const repository = useMemo(() => new InMemoryTrackToZeroRepository(createTrackToZeroV2Seed()), []);
+  const repository = useMemo(() => getRuntimeRepository(), []);
   const [workspaceId, setWorkspaceId] = useState("personal-seed");
   const [actorId, setActorId] = useState(V2_TEST_ACTOR_ID);
   const [tab, setTab] = useState("home");
-  const [, setTick] = useState(0);
   const [scenario, setScenario] = useState(null);
-  const service = useMemo(() => createTrackToZeroV2AppService({ repository, actorId, asOf: V2_TEST_NOW }), [repository, actorId]);
-  const snapshot = service.getWorkspaceSnapshot(workspaceId);
-  const workspaces = service.getWorkspaces();
-  const refresh = () => setTick((value) => value + 1);
+  const [runtimeState, setRuntimeState] = useState({ status: "idle", snapshot: null, workspaces: [], error: "" });
+  const [writeState, setWriteState] = useState({ inProgress: false, action: "", error: "", success: "" });
+  const requestSeq = useRef(0);
+  const service = useMemo(() => createTrackToZeroV2AsyncAppService({ repository, actorId, asOf: V2_TEST_NOW }), [repository, actorId]);
+
+  const refresh = useCallback(async (nextWorkspaceId = workspaceId) => {
+    const requestId = requestSeq.current + 1;
+    requestSeq.current = requestId;
+    setRuntimeState((state) => ({ ...state, status: "loading", error: "", snapshot: null }));
+    try {
+      const [workspaces, snapshot] = await Promise.all([
+        service.getWorkspaces(),
+        service.getWorkspaceSnapshot(nextWorkspaceId),
+      ]);
+      if (requestSeq.current !== requestId) return;
+      setRuntimeState({ status: "loaded", workspaces, snapshot, error: "" });
+    } catch (error) {
+      if (requestSeq.current !== requestId) return;
+      const safe = getUserSafeTrackToZeroError(error);
+      setRuntimeState({ status: safe.kind, workspaces: [], snapshot: null, error: safe.message });
+    }
+  }, [service, workspaceId]);
+
+  const runAction = async (action, callback, { write = true } = {}) => {
+    setWriteState({ inProgress: write, action, error: "", success: "" });
+    try {
+      await callback();
+      setWriteState({ inProgress: false, action: "", error: "", success: write ? `${action} saved.` : "" });
+    } catch (error) {
+      const safe = getUserSafeTrackToZeroError(error);
+      setWriteState({ inProgress: false, action: "", error: `${action}: ${safe.message}`, success: "" });
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      refresh(workspaceId);
+      setScenario(null);
+      setWriteState({ inProgress: false, action: "", error: "", success: "" });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [refresh, workspaceId]);
+
+  const snapshot = runtimeState.snapshot;
+  const workspaces = runtimeState.workspaces;
+
+  if (runtimeState.status === "loading" || runtimeState.status === "idle") {
+    return (
+      <main style={styles.shell}>
+        <div style={styles.wrap}>
+          <Section title="Loading TrackToZero 2.0" eyebrow="Firebase runtime">
+            <p aria-live="polite">Loading workspace, debts, active plan, and balance history...</p>
+          </Section>
+        </div>
+      </main>
+    );
+  }
+
+  if (!snapshot) {
+    return (
+      <main style={styles.shell}>
+        <div style={styles.wrap}>
+          <Section title="TrackToZero test persistence is unavailable" eyebrow={runtimeState.status}>
+            <p>{runtimeState.error || "We could not load the TrackToZero 2.0 workspace."}</p>
+            <button style={styles.button} onClick={() => refresh(workspaceId)}>Retry</button>
+          </Section>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main style={styles.shell}>
@@ -341,9 +452,16 @@ export default function TrackToZeroV2App() {
             <button key={item} style={tab === item ? styles.primaryButton : styles.button} onClick={() => setTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>
           ))}
         </nav>
-        {tab === "home" && <Home snapshot={snapshot} scenario={scenario} onScenario={(extra) => setScenario(service.previewScenario(workspaceId, { extraMonthlyPayment: extra }))} />}
-        {tab === "debts" && <Debts snapshot={snapshot} service={service} refresh={refresh} />}
-        {tab === "plan" && <Plan snapshot={snapshot} service={service} refresh={refresh} />}
+        {(writeState.error || writeState.success) && (
+          <div role="status" aria-live="polite" style={{ ...styles.card, marginTop: 16, borderColor: writeState.error ? "#fecaca" : "#86efac" }}>
+            {writeState.error || writeState.success}
+          </div>
+        )}
+        {tab === "home" && <Home snapshot={snapshot} scenario={scenario} onScenario={(extra) => runAction("preview scenario", async () => {
+          setScenario(await service.previewScenario(workspaceId, { extraMonthlyPayment: extra }));
+        }, { write: false })} />}
+        {tab === "debts" && <Debts snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} />}
+        {tab === "plan" && <Plan snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} />}
         {tab === "settings" && <Settings snapshot={snapshot} />}
       </div>
     </main>

@@ -62,10 +62,9 @@ const env = {
   ...(javaHome ? { JAVA_HOME: javaHome } : {}),
 };
 
-const command = "node --test tests/firestore.v2.rules.test.js tests/firestore.v2.repository.test.js";
+const command = "node --test --test-concurrency=1 tests/firestore.v2.rules.test.js tests/firestore.v2.repository.test.js tests/firestore.v2.ui-runtime.test.js";
 const result = process.platform === "win32"
   ? spawnSync("powershell.exe", ["-NoProfile", "-Command", `$testCommand = '${command}'; firebase emulators:exec --config "${tempFirebaseConfigPath}" --project demo-budget-react-v2 --only firestore -- $testCommand`], { cwd: workspaceRoot, stdio: "inherit", env })
   : spawnSync("firebase", ["emulators:exec", "--config", tempFirebaseConfigPath, "--project", "demo-budget-react-v2", "--only", "firestore", "--", command], { cwd: workspaceRoot, stdio: "inherit", env });
 
 process.exit(result.status ?? 1);
-

@@ -1,4 +1,4 @@
-import { getBillDisplayStatus } from "../services/billModel";
+import { getBillDisplayStatus } from "../services/billModel.js";
 
 export const CURRENCY_OPTIONS = [
   { code: "USD", label: "US Dollar", symbol: "$" },

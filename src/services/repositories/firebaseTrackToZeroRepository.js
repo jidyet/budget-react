@@ -135,6 +135,11 @@ export class FirebaseTrackToZeroRepository {
     const snap = await getDoc(doc(this.db, v2Paths.paymentEvent(workspaceId, debtId, eventId)));
     return snap.exists() ? fromFirestoreDoc("paymentEvent", snap.data()) : null;
   }
+  async listPaymentEvents(workspaceId, debtId) {
+    const colRef = collection(this.db, "workspaces", workspaceId, "debts", debtId, "payment_events");
+    const snap = await getDocs(query(colRef, orderBy("paidAt", "desc"), orderBy("id", "desc")));
+    return snap.docs.map((d) => fromFirestoreDoc("paymentEvent", d.data()));
+  }
   updatePaymentEvent() {
     throw new Error("PaymentEvent core facts are append-only; create a correction record");
   }
@@ -235,6 +240,43 @@ export class FirebaseTrackToZeroRepository {
       // Build the result from already-known local state - no re-read/re-query
       // after writes (also forbidden, and unnecessary).
       return { workspace: updatedWorkspace, plan: updatedNextPlan, version };
+    });
+  }
+
+  async reforecastActivePlan({ workspaceId, planId, priorVersionId, nextVersion, actorId, appliedAt }) {
+    const validatedVersion = createPlanVersion(nextVersion);
+    return runTransaction(this.db, async (tx) => {
+      const workspaceRef = doc(this.db, v2Paths.workspace(workspaceId));
+      const planRef = doc(this.db, v2Paths.plan(workspaceId, planId));
+      const priorVersionRef = doc(this.db, v2Paths.version(workspaceId, planId, priorVersionId));
+      const nextVersionRef = doc(this.db, v2Paths.version(workspaceId, planId, validatedVersion.id));
+
+      const workspaceSnap = await tx.get(workspaceRef);
+      const planSnap = await tx.get(planRef);
+      const priorVersionSnap = await tx.get(priorVersionRef);
+      const existingNextVersionSnap = await tx.get(nextVersionRef);
+      if (!workspaceSnap.exists()) throw new Error("Workspace not found");
+      if (!planSnap.exists()) throw new Error("Plan not found");
+      if (!priorVersionSnap.exists()) throw new Error("Prior PlanVersion not found");
+      if (existingNextVersionSnap.exists()) throw new Error("Next PlanVersion already exists");
+
+      const workspace = fromFirestoreDoc("workspace", workspaceSnap.data());
+      const plan = fromFirestoreDoc("plan", planSnap.data());
+      const priorVersion = fromFirestoreDoc("version", priorVersionSnap.data());
+      if (workspace.activePlanId !== planId) throw new Error("Plan is not the active workspace plan");
+      if (plan.activeVersionId !== priorVersionId) throw new Error("Prior version is no longer authoritative");
+
+      const updatedPlan = {
+        ...plan,
+        status: "active",
+        activeVersionId: validatedVersion.id,
+        updatedAt: appliedAt,
+        updatedBy: actorId,
+      };
+      tx.set(nextVersionRef, toFirestoreDoc("version", validatedVersion));
+      tx.set(planRef, toFirestoreDoc("plan", updatedPlan));
+
+      return { workspace, plan: updatedPlan, priorVersion, version: validatedVersion };
     });
   }
 }

@@ -1,5 +1,5 @@
-import { MAX_SIMULATION_MONTHS, payoffSimulate } from "../calc/payoffEngine";
-import { debtToEngineAccount } from "../adapters/tracktozeroCalcAdapter";
+import { MAX_SIMULATION_MONTHS, payoffSimulate } from "../calc/payoffEngine.js";
+import { debtToEngineAccount } from "../adapters/tracktozeroCalcAdapter.js";
 
 export const TRACKTOZERO_STATUS_THRESHOLDS = Object.freeze({
   staleBalanceDays: 45,

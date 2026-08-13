@@ -1,4 +1,4 @@
-import { getEffectiveApr } from "../../utils/budgetUtils";
+import { getEffectiveApr } from "../../utils/budgetUtils.js";
 
 export const MAX_SIMULATION_MONTHS = 240;
 
@@ -113,4 +113,3 @@ export const payoffSimulate = (
 
   return rows;
 };
-

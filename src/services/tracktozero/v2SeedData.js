@@ -1,5 +1,5 @@
-import { buildExpectedCheckpoints } from "../adapters/tracktozeroCalcAdapter";
-import { createStartingDebtSnapshotItem } from "../../domain/tracktozero/models";
+import { buildExpectedCheckpoints } from "../adapters/tracktozeroCalcAdapter.js";
+import { createStartingDebtSnapshotItem } from "../../domain/tracktozero/models.js";
 
 export const V2_TEST_ACTOR_ID = "seed-owner";
 export const V2_TEST_NOW = "2026-08-13T12:00:00.000Z";

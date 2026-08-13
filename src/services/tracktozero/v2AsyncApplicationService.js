@@ -2,22 +2,14 @@ import { ROLE_PERMISSIONS } from "../../domain/tracktozero/constants.js";
 import { createDebt, createStartingDebtSnapshotItem } from "../../domain/tracktozero/models.js";
 import { buildExpectedCheckpoints } from "../adapters/tracktozeroCalcAdapter.js";
 import { calculateWhatIfComparison } from "../calc/scenarioComparison.js";
-import { activatePlanTransaction, resolveActivePlanContext } from "./activePlanService.js";
 import {
   buildProjectionWithWarnings,
   classifyPlanStatus,
   getIncludedDebts,
   monthKeyFromDate,
 } from "./projectionStatusService.js";
+import { V2_DATA_MODES, hasPermission } from "./v2ApplicationService.js";
 import { V2_TEST_NOW } from "./v2SeedData.js";
-
-export const V2_DATA_MODES = Object.freeze({
-  interactive: "interactive_v2",
-  legacyPreview: "legacy_preview",
-});
-
-export const hasPermission = (membership, permission) =>
-  Boolean(ROLE_PERMISSIONS[membership?.role]?.[permission]);
 
 const id = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -26,18 +18,62 @@ const parseAsOf = (asOf) => {
   return { month: date.getUTCMonth() + 1, year: date.getUTCFullYear() };
 };
 
-const latestSnapshotsByDebt = (repository, workspaceId, debts) =>
-  Object.fromEntries(
-    debts.map((debt) => [debt.id, repository.listBalanceSnapshots(workspaceId, debt.id)[0] || null])
-  );
+export const getUserSafeTrackToZeroError = (error) => {
+  const code = String(error?.code || "");
+  const message = String(error?.message || error || "");
+  if (code.includes("permission-denied") || /permission|insufficient/i.test(message)) {
+    return {
+      kind: "permission_denied",
+      message: "Your role allows viewing this information, but not changing it.",
+    };
+  }
+  if (/emulator|required|unavailable/i.test(message)) {
+    return {
+      kind: "repository_error",
+      message: "TrackToZero test persistence is unavailable. The Firebase emulator is required for this environment.",
+    };
+  }
+  return {
+    kind: "repository_error",
+    message: "TrackToZero could not complete that action. Nothing was changed. Try again.",
+  };
+};
 
-export const createTrackToZeroV2AppService = ({
+const resolveActivePlanContextAsync = async ({ repository, workspaceId }) => {
+  const workspace = await repository.getWorkspace(workspaceId);
+  if (!workspace?.activePlanId) return null;
+  const plan = await repository.getPlan(workspaceId, workspace.activePlanId);
+  if (!plan) return { workspace, plan: null, version: null };
+  const version = plan.activeVersionId
+    ? await repository.getPlanVersion(workspaceId, plan.id, plan.activeVersionId)
+    : null;
+  return { workspace, plan, version };
+};
+
+const latestSnapshotsByDebtAsync = async (repository, workspaceId, debts) => {
+  const pairs = await Promise.all(debts.map(async (debt) => [
+    debt.id,
+    (await repository.listBalanceSnapshots(workspaceId, debt.id))[0] || null,
+  ]));
+  return Object.fromEntries(pairs);
+};
+
+const paymentEventsByDebtAsync = async (repository, workspaceId, debts) => {
+  if (typeof repository.listPaymentEvents !== "function") return {};
+  const pairs = await Promise.all(debts.map(async (debt) => [
+    debt.id,
+    await repository.listPaymentEvents(workspaceId, debt.id),
+  ]));
+  return Object.fromEntries(pairs);
+};
+
+export const createTrackToZeroV2AsyncAppService = ({
   repository,
   actorId = "seed-owner",
   mode = V2_DATA_MODES.interactive,
   asOf = V2_TEST_NOW,
 } = {}) => {
-  if (!repository) throw new Error("TrackToZero v2 application service requires a repository");
+  if (!repository) throw new Error("TrackToZero v2 async application service requires a repository");
 
   const assertInteractive = () => {
     if (mode !== V2_DATA_MODES.interactive) {
@@ -45,37 +81,40 @@ export const createTrackToZeroV2AppService = ({
     }
   };
 
-  const getWorkspaces = () =>
-    repository.listWorkspaces()
+  const getWorkspaces = async () =>
+    (await repository.listWorkspaces())
       .map((workspace) => ({ ...workspace }))
       .sort((a, b) => a.type.localeCompare(b.type) || a.id.localeCompare(b.id));
 
-  const getWorkspaceContext = (workspaceId) => {
-    const workspace = repository.getWorkspace(workspaceId);
+  const getWorkspaceContext = async (workspaceId) => {
+    const workspace = await repository.getWorkspace(workspaceId);
     if (!workspace) throw new Error("Workspace not found");
-    const membership = repository.getMembership(workspaceId, actorId) || repository.listMemberships?.(workspaceId)?.[0] || null;
-    const members = repository.listMemberships?.(workspaceId) || [];
-    return { workspace, membership, members, permissions: ROLE_PERMISSIONS[membership?.role] || ROLE_PERMISSIONS.viewer };
+    const [membership, members] = await Promise.all([
+      repository.getMembership(workspaceId, actorId),
+      repository.listMemberships?.(workspaceId) || [],
+    ]);
+    return {
+      workspace,
+      membership,
+      members,
+      permissions: ROLE_PERMISSIONS[membership?.role] || ROLE_PERMISSIONS.viewer,
+    };
   };
 
-  const getActivePlanContext = (workspaceId) => {
-    const workspace = repository.getWorkspace(workspaceId);
-    const plans = repository.listPlans(workspaceId);
-    const versions = plans.flatMap((plan) => repository.listPlanVersions?.(workspaceId, plan.id) || []);
-    return resolveActivePlanContext({ workspace, plans, versions });
-  };
+  const getActivePlanContext = (workspaceId) => resolveActivePlanContextAsync({ repository, workspaceId });
 
-  const getExpectedCheckpoints = (workspaceId, activeContext) => {
+  const getExpectedCheckpoints = async (workspaceId, activeContext) => {
     if (!activeContext?.plan || !activeContext?.version) return [];
     return repository.listExpectedCheckpoints?.(workspaceId, activeContext.plan.id, activeContext.version.id) || [];
   };
 
-  const getWorkspaceSnapshot = (workspaceId) => {
-    const context = getWorkspaceContext(workspaceId);
-    const debts = repository.listDebts(workspaceId);
-    const activeContext = getActivePlanContext(workspaceId);
-    const expectedCheckpoints = getExpectedCheckpoints(workspaceId, activeContext);
-    const snapshotsByDebt = latestSnapshotsByDebt(repository, workspaceId, debts);
+  const getWorkspaceSnapshot = async (workspaceId) => {
+    const context = await getWorkspaceContext(workspaceId);
+    const debts = await repository.listDebts(workspaceId);
+    const activeContext = await getActivePlanContext(workspaceId);
+    const expectedCheckpoints = await getExpectedCheckpoints(workspaceId, activeContext);
+    const snapshotsByDebt = await latestSnapshotsByDebtAsync(repository, workspaceId, debts);
+    const paymentEventsByDebt = await paymentEventsByDebtAsync(repository, workspaceId, debts);
     const { month, year } = parseAsOf(asOf);
     const projectionWithWarnings = activeContext?.version
       ? buildProjectionWithWarnings({ debts, planVersion: activeContext.version, startMonth: month, startYear: year })
@@ -95,7 +134,8 @@ export const createTrackToZeroV2AppService = ({
       || debts.find((debt) => debt.id === frozenTargetId)
       || includedDebts[0]
       || null;
-    const totalIncludedDebt = includedDebts.reduce((sum, debt) => sum + Number(snapshotsByDebt[debt.id]?.balance ?? debt.currentBalance ?? 0), 0);
+    const totalIncludedDebt = includedDebts.reduce((sum, debt) =>
+      sum + Number(snapshotsByDebt[debt.id]?.balance ?? debt.currentBalance ?? 0), 0);
 
     return {
       ...context,
@@ -106,6 +146,7 @@ export const createTrackToZeroV2AppService = ({
       activeContext,
       expectedCheckpoints,
       latestSnapshotsByDebt: snapshotsByDebt,
+      paymentEventsByDebt,
       projection: projectionWithWarnings.projection,
       warnings: projectionWithWarnings.warnings,
       status,
@@ -115,18 +156,9 @@ export const createTrackToZeroV2AppService = ({
     };
   };
 
-  const updateDebt = (workspaceId, debtId, patch) => {
+  const createNewDebt = async (workspaceId, input) => {
     assertInteractive();
-    const { membership } = getWorkspaceContext(workspaceId);
-    if (!hasPermission(membership, "manageDebts")) throw new Error("Your role can view this debt, but cannot edit debt terms.");
-    const current = repository.listDebts(workspaceId).find((debt) => debt.id === debtId);
-    if (!current) throw new Error("Debt not found");
-    return repository.saveDebt({ ...current, ...patch, updatedAt: asOf, updatedBy: actorId });
-  };
-
-  const createNewDebt = (workspaceId, input) => {
-    assertInteractive();
-    const { membership } = getWorkspaceContext(workspaceId);
+    const { membership } = await getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "manageDebts")) throw new Error("Your role can view debts, but cannot add debt terms.");
     return repository.saveDebt(createDebt({
       id: id("debt"),
@@ -137,11 +169,20 @@ export const createTrackToZeroV2AppService = ({
     }));
   };
 
-  const recordPayment = (workspaceId, debtId, { amount, paidAt = asOf, notes = "" } = {}) => {
+  const updateDebt = async (workspaceId, debtId, patch) => {
     assertInteractive();
-    const { membership } = getWorkspaceContext(workspaceId);
+    const { membership } = await getWorkspaceContext(workspaceId);
+    if (!hasPermission(membership, "manageDebts")) throw new Error("Your role can view this debt, but cannot edit debt terms.");
+    const current = (await repository.listDebts(workspaceId)).find((debt) => debt.id === debtId);
+    if (!current) throw new Error("Debt not found");
+    return repository.saveDebt({ ...current, ...patch, updatedAt: asOf, updatedBy: actorId });
+  };
+
+  const recordPayment = async (workspaceId, debtId, { amount, paidAt = asOf, notes = "" } = {}) => {
+    assertInteractive();
+    const { membership } = await getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "recordObservations")) throw new Error("Your role cannot record payments in this workspace.");
-    const activeContext = getActivePlanContext(workspaceId);
+    const activeContext = await getActivePlanContext(workspaceId);
     return repository.createPaymentEvent({
       id: id("payment"),
       workspaceId,
@@ -157,9 +198,9 @@ export const createTrackToZeroV2AppService = ({
     });
   };
 
-  const recordBalanceSnapshot = (workspaceId, debtId, { balance, observedAt = asOf, notes = "" } = {}) => {
+  const recordBalanceSnapshot = async (workspaceId, debtId, { balance, observedAt = asOf, notes = "" } = {}) => {
     assertInteractive();
-    const { membership } = getWorkspaceContext(workspaceId);
+    const { membership } = await getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "recordObservations")) throw new Error("Your role cannot update balances in this workspace.");
     return repository.createBalanceSnapshot({
       id: id("snapshot"),
@@ -174,14 +215,16 @@ export const createTrackToZeroV2AppService = ({
     });
   };
 
-  const createDraftPlan = (workspaceId, { strategy = "avalanche", extraMonthlyPayment = 0, debtIds = [], goalDate = "" } = {}) => {
+  const createDraftPlan = async (workspaceId, { strategy = "avalanche", extraMonthlyPayment = 0, debtIds = [], goalDate = "" } = {}) => {
     assertInteractive();
-    const { membership } = getWorkspaceContext(workspaceId);
+    const { membership } = await getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "managePlans")) throw new Error("Your role cannot create payoff plans.");
-    const debts = repository.listDebts(workspaceId);
-    const included = debtIds.length ? debts.filter((debt) => debtIds.includes(debt.id)) : debts.filter((debt) => debt.includedInCorePayoffPlan !== false && debt.status === "active");
-    const plan = repository.savePlan({ id: id("plan"), workspaceId, status: "draft", createdAt: asOf, createdBy: actorId });
-    const version = repository.savePlanVersion({
+    const debts = await repository.listDebts(workspaceId);
+    const included = debtIds.length
+      ? debts.filter((debt) => debtIds.includes(debt.id))
+      : debts.filter((debt) => debt.includedInCorePayoffPlan !== false && debt.status === "active");
+    const plan = await repository.savePlan({ id: id("plan"), workspaceId, status: "draft", createdAt: asOf, createdBy: actorId });
+    const version = await repository.savePlanVersion({
       id: id("version"),
       planId: plan.id,
       workspaceId,
@@ -198,21 +241,22 @@ export const createTrackToZeroV2AppService = ({
     return { plan, version };
   };
 
-  const activatePlan = (workspaceId, planId, versionId) => {
+  const activatePlan = async (workspaceId, planId, versionId) => {
     assertInteractive();
-    const { membership } = getWorkspaceContext(workspaceId);
+    const { membership } = await getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "managePlans")) throw new Error("Your role cannot activate payoff plans.");
-    const context = activatePlanTransaction({ repository, workspaceId, planId, versionId, actorId, activatedAt: asOf });
-    const debts = repository.listDebts(workspaceId);
+    if (typeof repository.activatePlan !== "function") throw new Error("Repository cannot activate payoff plans");
+    const context = await repository.activatePlan({ workspaceId, planId, versionId, actorId, activatedAt: asOf });
+    const debts = await repository.listDebts(workspaceId);
     const { month, year } = parseAsOf(asOf);
     for (const checkpoint of buildExpectedCheckpoints({ debts, planVersion: context.version, startMonth: month, startYear: year }).slice(0, 36)) {
-      repository.createExpectedCheckpoint(checkpoint);
+      await repository.createExpectedCheckpoint(checkpoint);
     }
     return context;
   };
 
-  const previewScenario = (workspaceId, { extraMonthlyPayment = 100 } = {}) => {
-    const snapshot = getWorkspaceSnapshot(workspaceId);
+  const previewScenario = async (workspaceId, { extraMonthlyPayment = 100 } = {}) => {
+    const snapshot = await getWorkspaceSnapshot(workspaceId);
     if (!snapshot.activeContext?.version) return null;
     const { month, year } = parseAsOf(asOf);
     const scenarioVersion = {
@@ -223,8 +267,8 @@ export const createTrackToZeroV2AppService = ({
     return calculateWhatIfComparison({ baselineRows: snapshot.projection, scenarioRows: scenarioProjection });
   };
 
-  const previewReforecast = (workspaceId, overrides = {}) => {
-    const snapshot = getWorkspaceSnapshot(workspaceId);
+  const previewReforecast = async (workspaceId, overrides = {}) => {
+    const snapshot = await getWorkspaceSnapshot(workspaceId);
     if (!snapshot.activeContext?.version) return null;
     const { month, year } = parseAsOf(asOf);
     const proposedVersion = {
@@ -245,13 +289,13 @@ export const createTrackToZeroV2AppService = ({
     };
   };
 
-  const applyReforecast = (workspaceId, overrides = {}) => {
+  const applyReforecast = async (workspaceId, overrides = {}) => {
     assertInteractive();
-    const { membership } = getWorkspaceContext(workspaceId);
+    const { membership } = await getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "managePlans")) throw new Error("Your role cannot reforecast payoff plans.");
-    const snapshot = getWorkspaceSnapshot(workspaceId);
+    const snapshot = await getWorkspaceSnapshot(workspaceId);
     if (!snapshot.activeContext?.plan || !snapshot.activeContext?.version) throw new Error("No active plan to reforecast");
-    const nextVersion = repository.savePlanVersion({
+    const nextVersion = {
       ...snapshot.activeContext.version,
       ...overrides,
       id: id("version"),
@@ -260,8 +304,21 @@ export const createTrackToZeroV2AppService = ({
       createdAt: asOf,
       createdBy: actorId,
       createdBecause: "reforecast",
+    };
+    const context = await repository.reforecastActivePlan({
+      workspaceId,
+      planId: snapshot.activeContext.plan.id,
+      priorVersionId: snapshot.activeContext.version.id,
+      nextVersion,
+      actorId,
+      appliedAt: asOf,
     });
-    return activatePlan(workspaceId, snapshot.activeContext.plan.id, nextVersion.id);
+    const debts = await repository.listDebts(workspaceId);
+    const { month, year } = parseAsOf(asOf);
+    for (const checkpoint of buildExpectedCheckpoints({ debts, planVersion: context.version, startMonth: month, startYear: year }).slice(0, 36)) {
+      await repository.createExpectedCheckpoint(checkpoint);
+    }
+    return context;
   };
 
   return {

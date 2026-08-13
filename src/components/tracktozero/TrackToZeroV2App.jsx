@@ -6,6 +6,7 @@ import {
 } from "../../services/tracktozero/repositoryRuntime";
 import { createTrackToZeroV2AsyncAppService, getUserSafeTrackToZeroError } from "../../services/tracktozero/v2AsyncApplicationService";
 import { V2_TEST_ACTOR_ID, V2_TEST_NOW } from "../../services/tracktozero/v2SeedData";
+import { getLaunchFlags } from "../../config/launchFlags";
 
 const money = (value) =>
   Number(value || 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
@@ -324,7 +325,31 @@ function Plan({ snapshot, service, refresh, runAction, writeState }) {
   );
 }
 
+function MigrationPanel() {
+  const states = [
+    "Loading source",
+    "Preview ready",
+    "Needs confirmation",
+    "Ready to migrate",
+    "Migrating",
+    "Validation result",
+    "Rollback available",
+    "Rollback blocked after native writes",
+  ];
+  return (
+    <div style={{ ...styles.card, borderColor: "#f4b860", background: "#fffaf0" }}>
+      <h3>Migration rehearsal tooling</h3>
+      <p>Previewing migration data does not change legacy records or create production v2 data.</p>
+      <ol>
+        {states.map((state) => <li key={state}>{state}</li>)}
+      </ol>
+      <p><strong>Phase 4A safety:</strong> emulator rehearsal only. Saved legacy payoff plans import as drafts and do not become active automatically.</p>
+    </div>
+  );
+}
+
 function Settings({ snapshot }) {
+  const flags = getLaunchFlags();
   return (
     <Section title="Workspace settings" eyebrow="Settings">
       <div style={styles.grid}>
@@ -342,6 +367,7 @@ function Settings({ snapshot }) {
           <p>Phase 3 does not migrate production users, write legacy records, or deploy v2 Firestore rules.</p>
         </div>
       </div>
+      {flags.trackToZeroMigrationEnabled && <MigrationPanel />}
     </Section>
   );
 }

@@ -28,6 +28,10 @@ service cloud.firestore {
     function isOwner(workspaceId) {
       return isMember(workspaceId) && role(workspaceId) == "owner";
     }
+    function isMigrationOperator(workspaceId) {
+      return isAdminPlus(workspaceId)
+        && request.auth.token.trackToZeroMigrationOperator == true;
+    }
     function validRole(value) {
       return value in ["owner", "admin", "contributor", "viewer"];
     }
@@ -74,7 +78,7 @@ service cloud.firestore {
       allow create: if isWorkspaceCreator(workspaceId);
       allow read: if isViewerPlus(workspaceId);
       allow update: if isAdminPlus(workspaceId);
-      allow delete: if isOwner(workspaceId);
+      allow delete: if isOwner(workspaceId) || isMigrationOperator(workspaceId);
 
       match /members/{uid} {
         allow read: if isViewerPlus(workspaceId);
@@ -99,13 +103,16 @@ service cloud.firestore {
           && uid != request.auth.uid
           && !targetIsOwner(workspaceId, uid)
           && roleUnchanged();
-        allow delete: if isOwner(workspaceId) && !targetIsOwner(workspaceId, uid);
+        allow delete: if (isOwner(workspaceId) && !targetIsOwner(workspaceId, uid))
+          || isMigrationOperator(workspaceId);
       }
 
       match /debts/{debtId} {
         allow read: if isViewerPlus(workspaceId);
-        allow create, update, delete: if isAdminPlus(workspaceId)
+        allow create, update: if isAdminPlus(workspaceId)
           && request.resource.data.workspaceId == workspaceId;
+        allow delete: if isAdminPlus(workspaceId)
+          && resource.data.workspaceId == workspaceId;
 
         match /payment_events/{eventId} {
           allow read: if isViewerPlus(workspaceId);
@@ -115,7 +122,9 @@ service cloud.firestore {
             && request.resource.data.createdBy == request.auth.uid
             && request.resource.data.amount > 0;
           allow update: if isAdminPlus(workspaceId) && immutablePaymentCoreUnchanged();
-          allow delete: if false;
+          allow delete: if isMigrationOperator(workspaceId)
+            && resource.data.workspaceId == workspaceId
+            && resource.data.debtId == debtId;
         }
 
         match /balance_snapshots/{snapshotId} {
@@ -126,14 +135,18 @@ service cloud.firestore {
             && request.resource.data.createdBy == request.auth.uid
             && request.resource.data.balance >= 0;
           allow update: if isAdminPlus(workspaceId) && immutableSnapshotCoreUnchanged();
-          allow delete: if false;
+          allow delete: if isMigrationOperator(workspaceId)
+            && resource.data.workspaceId == workspaceId
+            && resource.data.debtId == debtId;
         }
       }
 
       match /plans/{planId} {
         allow read: if isViewerPlus(workspaceId);
-        allow create, update, delete: if isAdminPlus(workspaceId)
+        allow create, update: if isAdminPlus(workspaceId)
           && request.resource.data.workspaceId == workspaceId;
+        allow delete: if isAdminPlus(workspaceId)
+          && resource.data.workspaceId == workspaceId;
 
         match /versions/{versionId} {
           allow read: if isViewerPlus(workspaceId);
@@ -141,7 +154,9 @@ service cloud.firestore {
             && request.resource.data.workspaceId == workspaceId
             && request.resource.data.planId == planId;
           allow update: if isAdminPlus(workspaceId) && versionImmutable();
-          allow delete: if false;
+          allow delete: if isMigrationOperator(workspaceId)
+            && resource.data.workspaceId == workspaceId
+            && resource.data.planId == planId;
 
           match /expected_schedule/{checkpointId} {
             allow read: if isViewerPlus(workspaceId);
@@ -149,9 +164,21 @@ service cloud.firestore {
               && request.resource.data.workspaceId == workspaceId
               && request.resource.data.planId == planId
               && request.resource.data.planVersionId == versionId;
-            allow update, delete: if false;
+            allow update: if false;
+            allow delete: if isMigrationOperator(workspaceId)
+              && resource.data.workspaceId == workspaceId
+              && resource.data.planId == planId
+              && resource.data.planVersionId == versionId;
           }
         }
+      }
+
+      match /migration_runs/{runId} {
+        allow read: if isAdminPlus(workspaceId);
+        allow create, update: if isMigrationOperator(workspaceId)
+          && request.resource.data.workspaceId == workspaceId
+          && request.resource.data.actorId == request.auth.uid;
+        allow delete: if false;
       }
     }
 
@@ -160,4 +187,3 @@ service cloud.firestore {
     }
   }
 }
-

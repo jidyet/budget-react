@@ -5,4 +5,8 @@ describe("launch flags", () => {
   it("keeps TrackToZero 2.0 disabled by default for production safety", () => {
     expect(getLaunchFlags().trackToZeroV2Enabled).toBe(false);
   });
+
+  it("keeps TrackToZero migration tooling disabled by default for production safety", () => {
+    expect(getLaunchFlags().trackToZeroMigrationEnabled).toBe(false);
+  });
 });

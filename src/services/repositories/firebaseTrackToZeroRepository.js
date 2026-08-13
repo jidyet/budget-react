@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -20,6 +21,23 @@ import {
 } from "../../domain/tracktozero/models.js";
 import { v2Paths } from "./tracktozeroRepositories.js";
 import { fromFirestoreDoc, toFirestoreDoc } from "./firestoreTimestamps.js";
+
+const docRefFromPath = (db, path) => doc(db, ...String(path).split("/"));
+
+const entityKindForPath = (path) => {
+  const parts = String(path).split("/");
+  if (parts[0] !== "workspaces") return "";
+  if (parts.length === 2) return "workspace";
+  if (parts[2] === "members") return "member";
+  if (parts[2] === "debts" && parts.length === 4) return "debt";
+  if (parts[2] === "debts" && parts[4] === "payment_events") return "paymentEvent";
+  if (parts[2] === "debts" && parts[4] === "balance_snapshots") return "balanceSnapshot";
+  if (parts[2] === "plans" && parts.length === 4) return "plan";
+  if (parts[2] === "plans" && parts[4] === "versions" && parts.length === 6) return "version";
+  if (parts[2] === "plans" && parts[4] === "versions" && parts[6] === "expected_schedule") return "expectedCheckpoint";
+  if (parts[2] === "migration_runs") return "migrationRun";
+  return "";
+};
 
 // Firebase-backed implementation of the TrackToZero v2 repository contract.
 // Satisfies the same method set as InMemoryTrackToZeroRepository (see
@@ -182,6 +200,30 @@ export class FirebaseTrackToZeroRepository {
   }
   updateExpectedCheckpoint() {
     throw new Error("ExpectedCheckpoint is immutable once created");
+  }
+
+  async saveMigrationRun(input) {
+    const run = { ...input };
+    await setDoc(doc(this.db, v2Paths.migrationRun(run.workspaceId, run.id)), toFirestoreDoc("migrationRun", run));
+    return run;
+  }
+  async getMigrationRun(workspaceId, runId) {
+    const snap = await getDoc(doc(this.db, v2Paths.migrationRun(workspaceId, runId)));
+    return snap.exists() ? fromFirestoreDoc("migrationRun", snap.data()) : null;
+  }
+  async listMigrationRuns(workspaceId) {
+    const snap = await getDocs(collection(this.db, "workspaces", workspaceId, "migration_runs"));
+    return snap.docs.map((d) => fromFirestoreDoc("migrationRun", d.data()));
+  }
+  async getEntityAtPath(path) {
+    const kind = entityKindForPath(path);
+    if (!kind) throw new Error(`Unsupported migration path: ${path}`);
+    const snap = await getDoc(docRefFromPath(this.db, path));
+    return snap.exists() ? fromFirestoreDoc(kind, snap.data()) : null;
+  }
+  async deleteEntityAtPath(path) {
+    await deleteDoc(docRefFromPath(this.db, path));
+    return true;
   }
 
   // ── Active-plan switching ──────────────────────────────────────────────

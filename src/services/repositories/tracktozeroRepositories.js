@@ -13,6 +13,19 @@ export const v2Paths = {
     `workspaces/${workspaceId}/plans/${planId}/versions/${versionId}/expected_schedule/${checkpointId}`,
   paymentEvent: (workspaceId, debtId, eventId) => `workspaces/${workspaceId}/debts/${debtId}/payment_events/${eventId}`,
   balanceSnapshot: (workspaceId, debtId, snapshotId) => `workspaces/${workspaceId}/debts/${debtId}/balance_snapshots/${snapshotId}`,
+  migrationRun: (workspaceId, runId) => `workspaces/${workspaceId}/migration_runs/${runId}`,
+};
+
+const pathFromEntity = (entity) => {
+  if (entity.kind === "workspace") return v2Paths.workspace(entity.workspace.id);
+  if (entity.kind === "membership") return v2Paths.member(entity.membership.workspaceId, entity.membership.uid);
+  if (entity.kind === "debt") return v2Paths.debt(entity.debt.workspaceId, entity.debt.id);
+  if (entity.kind === "balanceSnapshot") return v2Paths.balanceSnapshot(entity.snapshot.workspaceId, entity.snapshot.debtId, entity.snapshot.id);
+  if (entity.kind === "plan") return v2Paths.plan(entity.plan.workspaceId, entity.plan.id);
+  if (entity.kind === "planVersion") return v2Paths.version(entity.version.workspaceId, entity.version.planId, entity.version.id);
+  if (entity.kind === "expectedCheckpoint") return v2Paths.expectedCheckpoint(entity.checkpoint.workspaceId, entity.checkpoint.planId, entity.checkpoint.planVersionId, entity.checkpoint.id);
+  if (entity.kind === "migrationRun") return v2Paths.migrationRun(entity.migrationRun.workspaceId, entity.migrationRun.id);
+  throw new Error(`Unsupported v2 migration entity kind: ${entity.kind}`);
 };
 
 export class InMemoryTrackToZeroRepository {
@@ -25,6 +38,7 @@ export class InMemoryTrackToZeroRepository {
     this.paymentEvents = new Map(Object.entries(seed.paymentEvents || {}).map(([key, value]) => [key, clone(value)]));
     this.balanceSnapshots = new Map(Object.entries(seed.balanceSnapshots || {}).map(([key, value]) => [key, clone(value)]));
     this.expectedCheckpoints = new Map(Object.entries(seed.expectedCheckpoints || {}).map(([key, value]) => [key, clone(value)]));
+    this.migrationRuns = new Map(Object.entries(seed.migrationRuns || {}).map(([key, value]) => [key, clone(value)]));
   }
 
   key(workspaceId, id) { return `${workspaceId}/${id}`; }
@@ -130,6 +144,73 @@ export class InMemoryTrackToZeroRepository {
       .map(clone);
   }
   updateExpectedCheckpoint() { throw new Error("ExpectedCheckpoint is immutable once created"); }
+
+  saveMigrationRun(input) {
+    const run = clone(input);
+    this.migrationRuns.set(this.key(run.workspaceId, run.id), run);
+    return clone(run);
+  }
+  getMigrationRun(workspaceId, runId) {
+    const key = this.key(workspaceId, runId);
+    return this.migrationRuns.has(key) ? clone(this.migrationRuns.get(key)) : null;
+  }
+  listMigrationRuns(workspaceId) {
+    return [...this.migrationRuns.values()]
+      .filter((run) => run.workspaceId === workspaceId)
+      .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+      .map(clone);
+  }
+  getMigrationEntityByPath(path) {
+    const parts = String(path).split("/");
+    if (parts[0] !== "workspaces") return null;
+    const workspaceId = parts[1];
+    if (parts.length === 2) return this.getWorkspace(workspaceId);
+    if (parts[2] === "members") return this.getMembership(workspaceId, parts[3]);
+    if (parts[2] === "debts" && parts.length === 4) {
+      return this.listDebts(workspaceId).find((debt) => debt.id === parts[3]) || null;
+    }
+    if (parts[2] === "debts" && parts[4] === "balance_snapshots") {
+      return this.listBalanceSnapshots(workspaceId, parts[3]).find((snapshot) => snapshot.id === parts[5]) || null;
+    }
+    if (parts[2] === "debts" && parts[4] === "payment_events") {
+      return this.getPaymentEvent(workspaceId, parts[3], parts[5]);
+    }
+    if (parts[2] === "plans" && parts.length === 4) return this.getPlan(workspaceId, parts[3]);
+    if (parts[2] === "plans" && parts[4] === "versions" && parts.length === 6) {
+      return this.getPlanVersion(workspaceId, parts[3], parts[5]);
+    }
+    if (parts[2] === "plans" && parts[4] === "versions" && parts[6] === "expected_schedule") {
+      return this.getExpectedCheckpoint(workspaceId, parts[3], parts[5], parts[7]);
+    }
+    if (parts[2] === "migration_runs") return this.getMigrationRun(workspaceId, parts[3]);
+    return null;
+  }
+  deleteMigrationEntityByPath(path) {
+    const parts = String(path).split("/");
+    if (parts[0] !== "workspaces") throw new Error(`Unsupported migration delete path: ${path}`);
+    const workspaceId = parts[1];
+    if (parts.length === 2) return this.workspaces.delete(workspaceId);
+    if (parts[2] === "members") return this.members.delete(this.key(workspaceId, parts[3]));
+    if (parts[2] === "debts" && parts.length === 4) return this.debts.delete(this.key(workspaceId, parts[3]));
+    if (parts[2] === "debts" && parts[4] === "balance_snapshots") {
+      return this.balanceSnapshots.delete(this.key(`${workspaceId}/${parts[3]}`, parts[5]));
+    }
+    if (parts[2] === "debts" && parts[4] === "payment_events") {
+      return this.paymentEvents.delete(this.key(`${workspaceId}/${parts[3]}`, parts[5]));
+    }
+    if (parts[2] === "plans" && parts.length === 4) return this.plans.delete(this.key(workspaceId, parts[3]));
+    if (parts[2] === "plans" && parts[4] === "versions" && parts.length === 6) {
+      return this.versions.delete(this.versionKey(workspaceId, parts[3], parts[5]));
+    }
+    if (parts[2] === "plans" && parts[4] === "versions" && parts[6] === "expected_schedule") {
+      return this.expectedCheckpoints.delete(this.checkpointKey(workspaceId, parts[3], parts[5], parts[7]));
+    }
+    if (parts[2] === "migration_runs") return this.migrationRuns.delete(this.key(workspaceId, parts[3]));
+    throw new Error(`Unsupported migration delete path: ${path}`);
+  }
+  getEntityAtPath(path) { return this.getMigrationEntityByPath(path); }
+  deleteEntityAtPath(path) { return this.deleteMigrationEntityByPath(path); }
+  pathFromEntity(entity) { return pathFromEntity(entity); }
 
   activatePlan({ workspaceId, planId, versionId, actorId, activatedAt }) {
     return activatePlanTransaction({ repository: this, workspaceId, planId, versionId, actorId, activatedAt });

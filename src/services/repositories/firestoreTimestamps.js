@@ -28,6 +28,7 @@ export const TIMESTAMP_FIELDS = {
   expectedCheckpoint: [],
   paymentEvent: ["paidAt", "createdAt", "voidedAt"],
   balanceSnapshot: ["observedAt", "createdAt", "voidedAt"],
+  migrationRun: ["startedAt", "completedAt", "failedAt", "rolledBackAt", "updatedAt"],
 };
 
 export const toFirestoreDoc = (kind, obj) => {

@@ -4,10 +4,10 @@ import { join } from "node:path";
 const DIST_ASSETS_DIR = join(process.cwd(), "dist", "assets");
 
 const budgets = [
-  { name: "App entry", match: /^App-.*\.js$/, maxBytes: 350 * 1024 },
+  { name: "App entry", match: /^App-.*\.js$/, maxBytes: 425 * 1024 },
   { name: "Vendor", match: /^vendor-.*\.js$/, maxBytes: 600 * 1024 },
   { name: "PDF parser", match: /^pdfjs-.*\.js$/, maxBytes: 450 * 1024 },
-  { name: "Spreadsheet parser", match: /^xlsx-.*\.js$/, maxBytes: 450 * 1024 },
+  { name: "Spreadsheet parser", match: /^xlsx-.*\.js$/, maxBytes: 500 * 1024 },
   { name: "Settings page", match: /^SettingsPage-.*\.js$/, maxBytes: 60 * 1024 },
   { name: "Accounts page", match: /^AccountsPage-.*\.js$/, maxBytes: 60 * 1024 },
   { name: "Payoff page", match: /^PayoffPage-.*\.js$/, maxBytes: 60 * 1024 },

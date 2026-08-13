@@ -29,6 +29,8 @@
 import { useState, useRef } from "react";
 import { fx } from "./utils/budgetUtils";
 
+const MAX_IMPORT_FILE_BYTES = 10 * 1024 * 1024;
+
 // ─── 1. Field synonym groups ───────────────────────────────────────────────────
 const HEADER_ALIASES = {
   name:      ["expense","account","accountname","billname","name","description","debt",
@@ -824,6 +826,10 @@ export default function ExcelImport({ accounts, theme, onImported, onUpload, onC
     const name = file.name.toLowerCase();
     if (!name.endsWith(".xlsx") && !name.endsWith(".xls") && !name.endsWith(".csv")) {
       setErrorMsg("Please upload a .xlsx, .xls, or .csv file.");
+      setStatus("error"); return;
+    }
+    if (file.size > MAX_IMPORT_FILE_BYTES) {
+      setErrorMsg("Please upload a file smaller than 10 MB.");
       setStatus("error"); return;
     }
     setFileName(file.name);

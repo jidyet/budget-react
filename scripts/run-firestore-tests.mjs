@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { delimiter } from "node:path";
 import { spawnSync } from "node:child_process";
 import net from "node:net";
 
@@ -62,13 +63,28 @@ firebaseConfig.emulators.firestore = {
 };
 writeFileSync(tempFirebaseConfigPath, JSON.stringify(firebaseConfig, null, 2), "utf8");
 
-const env = {
-  ...process.env,
+const basePath = process.env.PATH ?? process.env.Path ?? "";
+const runnerPath = [firebaseBinDir, javaBinPath, basePath].filter(Boolean).join(delimiter);
+
+const sanitizedEnv = {
   CI: "1",
   XDG_CONFIG_HOME: configHome,
   FIRESTORE_EMULATOR_HOST: `127.0.0.1:${firestorePort}`,
+  PATH: runnerPath,
+  Path: runnerPath,
+  ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+  ...(process.env.WINDIR ? { WINDIR: process.env.WINDIR } : {}),
+  ...(process.env.TEMP ? { TEMP: process.env.TEMP } : {}),
+  ...(process.env.TMP ? { TMP: process.env.TMP } : {}),
+  ...(process.env.USERPROFILE ? { USERPROFILE: process.env.USERPROFILE } : {}),
+  ...(process.env.COMSPEC ? { COMSPEC: process.env.COMSPEC } : {}),
+  ...(process.env.PATHEXT ? { PATHEXT: process.env.PATHEXT } : {}),
+  ...(process.env.PSModulePath ? { PSModulePath: process.env.PSModulePath } : {}),
   ...(javaHome ? { JAVA_HOME: javaHome } : {}),
-  PATH: `${firebaseBinDir};${javaBinPath ? `${javaBinPath};` : ""}${process.env.PATH ?? ""}`,
+};
+
+const env = {
+  ...sanitizedEnv,
 };
 
 const result =

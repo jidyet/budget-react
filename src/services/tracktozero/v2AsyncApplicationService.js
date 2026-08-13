@@ -86,19 +86,19 @@ export const createTrackToZeroV2AsyncAppService = ({
       .map((workspace) => ({ ...workspace }))
       .sort((a, b) => a.type.localeCompare(b.type) || a.id.localeCompare(b.id));
 
-  const bootstrapOwnerWorkspace = async (workspaceId, { displayName = "", email = "" } = {}) => {
+  const bootstrapOwnerWorkspace = async (workspaceId, { type = "personal", displayName = "", email = "" } = {}) => {
     assertInteractive();
-    const existingMembership = await repository.getMembership(workspaceId, actorId).catch(() => null);
+    const existingMembership = await Promise.resolve(repository.getMembership(workspaceId, actorId)).catch(() => null);
     if (existingMembership?.status === "active") return getWorkspaceContext(workspaceId);
-    await repository.saveWorkspace({
+    const workspace = {
       id: workspaceId,
-      type: "solo",
+      type,
       status: "active",
       activePlanId: "",
       createdAt: asOf,
       createdBy: actorId,
-    });
-    await repository.saveMembership({
+    };
+    const ownerMembership = {
       workspaceId,
       uid: actorId,
       role: "owner",
@@ -107,8 +107,34 @@ export const createTrackToZeroV2AsyncAppService = ({
       email,
       createdAt: asOf,
       createdBy: actorId,
-    });
+    };
+    if (typeof repository.saveOwnerWorkspaceBootstrap === "function") {
+      await repository.saveOwnerWorkspaceBootstrap({ workspace, ownerMembership });
+    } else {
+      await repository.saveWorkspace(workspace);
+      await repository.saveMembership(ownerMembership);
+    }
     return getWorkspaceContext(workspaceId);
+  };
+
+  const createMemberInvite = async (workspaceId, { email = "", role = "viewer" } = {}) => {
+    assertInteractive();
+    const { membership } = await getWorkspaceContext(workspaceId);
+    if (!hasPermission(membership, "manageMembers")) throw new Error("Your role cannot manage household invitations.");
+    if (!["admin", "contributor", "viewer"].includes(role)) throw new Error("Owners cannot be invited or transferred in this beta flow.");
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    if (!normalizedEmail || !normalizedEmail.includes("@")) throw new Error("Enter a valid invite email.");
+    if (typeof repository.saveMemberInvite !== "function") throw new Error("Invitation storage is unavailable.");
+    return repository.saveMemberInvite({
+      id: id("invite"),
+      workspaceId,
+      email: normalizedEmail,
+      role,
+      status: "pending",
+      createdAt: asOf,
+      createdBy: actorId,
+      note: "Pending invite only. This does not grant workspace access until a future secure acceptance flow exists.",
+    });
   };
 
   const getWorkspaceContext = async (workspaceId) => {
@@ -118,6 +144,7 @@ export const createTrackToZeroV2AsyncAppService = ({
       repository.getMembership(workspaceId, actorId),
       repository.listMemberships?.(workspaceId) || [],
     ]);
+    if (!membership || membership.status !== "active") throw new Error("You are not a member of this workspace.");
     return {
       workspace,
       membership,
@@ -351,6 +378,7 @@ export const createTrackToZeroV2AsyncAppService = ({
     actorId,
     getWorkspaces,
     bootstrapOwnerWorkspace,
+    createMemberInvite,
     getWorkspaceContext,
     getWorkspaceSnapshot,
     getActivePlanContext,

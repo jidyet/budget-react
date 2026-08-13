@@ -119,6 +119,38 @@ function AuthScreen({ onSubmit, state, setState, error, busy, firebaseReady }) {
   );
 }
 
+function OnboardingScreen({ busy, error, onChooseWorkspace, onSignOut }) {
+  return (
+    <main style={styles.shell}>
+      <div style={styles.wrap}>
+        <section style={styles.card}>
+          <p style={{ margin: "0 0 6px", letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 900, color: "#2f6289", fontSize: 12 }}>Welcome to TrackToZero</p>
+          <h1 style={{ margin: "0 0 10px", fontSize: 32 }}>First, choose how you want to track debt.</h1>
+          <p style={{ color: "#365a78" }}>You can start alone or create a household workspace. Either way, debts, balances, plans, and progress use the same V2 payoff model.</p>
+          {error && <p role="alert" style={{ color: "#991b1b", fontWeight: 800 }}>{error}</p>}
+          <div style={{ ...styles.grid, marginTop: 18 }}>
+            <article style={{ ...styles.card, boxShadow: "none" }}>
+              <h2>Personal</h2>
+              <p>Use this if you are tracking your own debts and payoff plan.</p>
+              <button type="button" disabled={busy} style={busy ? styles.disabledButton : styles.primaryButton} onClick={() => onChooseWorkspace("personal")}>
+                Create personal workspace
+              </button>
+            </article>
+            <article style={{ ...styles.card, boxShadow: "none" }}>
+              <h2>Household</h2>
+              <p>Create a shared payoff workspace. Inviting members requires a secure follow-up acceptance flow; raw email invites do not grant access.</p>
+              <button type="button" disabled={busy} style={busy ? styles.disabledButton : styles.primaryButton} onClick={() => onChooseWorkspace("household")}>
+                Create household workspace
+              </button>
+            </article>
+          </div>
+          {onSignOut && <button type="button" style={{ ...styles.button, marginTop: 18 }} onClick={onSignOut}>Sign out</button>}
+        </section>
+      </div>
+    </main>
+  );
+}
+
 function StatusBadge({ status }) {
   const palette = {
     ahead: ["#dcfce7", "#166534"],
@@ -191,6 +223,26 @@ function WorkspaceBar({
 
 function Home({ snapshot, scenario, onScenario }) {
   const target = snapshot.targetDebt;
+  if (!snapshot.debts.length) {
+    return (
+      <Section title="Add your first debt" eyebrow="Home">
+        <p>Start by adding a credit card, loan, line of credit, medical debt, or another balance you want to pay to $0.</p>
+        <p>Once your first debt is saved, TrackToZero will guide you toward a payoff plan.</p>
+      </Section>
+    );
+  }
+  if (!snapshot.activeContext?.version) {
+    return (
+      <Section title="Build your payoff plan" eyebrow="Home">
+        <p>You have debts in this workspace. Next, choose Snowball or Avalanche and activate your first payoff plan.</p>
+        <div style={styles.grid}>
+          <p><strong>Total debt entered:</strong> {money(snapshot.debts.reduce((sum, debt) => sum + Number(snapshot.latestSnapshotsByDebt[debt.id]?.balance ?? debt.currentBalance ?? 0), 0))}</p>
+          <p><strong>Included in core payoff:</strong> {snapshot.includedDebts.length}</p>
+          <p><strong>Plan status:</strong> Not started yet</p>
+        </div>
+      </Section>
+    );
+  }
   const nextPayment = Number(target?.minimumRequiredPayment || 0) + Number(snapshot.activeContext?.version?.extraMonthlyPayment || 0);
   return (
     <>
@@ -470,7 +522,12 @@ const getRuntimeRepository = () => {
   });
 };
 
-const workspaceIdForUser = (uid) => `workspace-${String(uid || "").replace(/[\\/]/g, "_")}`;
+const safeUid = (uid) => String(uid || "").replace(/[\\/]/g, "_");
+const workspaceIdForUser = (uid, type = "personal") => `${type}-workspace-${safeUid(uid)}`;
+const productionWorkspaceCandidates = (uid) => [
+  { id: workspaceIdForUser(uid, "personal"), type: "personal" },
+  { id: workspaceIdForUser(uid, "household"), type: "household" },
+];
 
 export default function TrackToZeroV2App() {
   const runtime = useMemo(() => getRuntimeConfig(), []);
@@ -498,7 +555,8 @@ export default function TrackToZeroV2App() {
     return onAuthStateChanged(auth, (user) => {
       setAuthState({ status: "ready", user, error: "" });
       setActorId(user?.uid || "");
-      setWorkspaceId(user ? workspaceIdForUser(user.uid) : "");
+      setWorkspaceId("");
+      setRuntimeState({ status: user ? "idle" : "signed_out", snapshot: null, workspaces: [], error: "" });
       setScenario(null);
       setWriteState({ inProgress: false, action: "", error: "", success: "" });
     }, () => {
@@ -526,11 +584,23 @@ export default function TrackToZeroV2App() {
     setRuntimeState((state) => ({ ...state, status: "loading", error: "", snapshot: null }));
     try {
       if (isProductionRuntime) {
-        if (!authState.user || !actorId || !nextWorkspaceId) return;
-        await service.bootstrapOwnerWorkspace(nextWorkspaceId, {
-          displayName: authState.user.displayName || authState.user.email || "Owner",
-          email: authState.user.email || "",
-        });
+        if (!authState.user || !actorId) return;
+        if (!nextWorkspaceId) {
+          const candidates = productionWorkspaceCandidates(actorId);
+          for (const candidate of candidates) {
+            const membership = await repository.getMembership(candidate.id, actorId).catch(() => null);
+            if (membership?.status === "active") {
+              setWorkspaceId(candidate.id);
+              nextWorkspaceId = candidate.id;
+              break;
+            }
+          }
+          if (!nextWorkspaceId) {
+            if (requestSeq.current !== requestId) return;
+            setRuntimeState({ status: "needs_onboarding", workspaces: [], snapshot: null, error: "" });
+            return;
+          }
+        }
       } else {
         await ensureTrackToZeroV2EmulatorActor({
           actorId,
@@ -542,7 +612,7 @@ export default function TrackToZeroV2App() {
       }
       const snapshot = await service.getWorkspaceSnapshot(nextWorkspaceId);
       const workspaces = isProductionRuntime
-        ? [{ id: nextWorkspaceId, type: "solo" }]
+        ? productionWorkspaceCandidates(actorId).filter((workspace) => workspace.id === nextWorkspaceId)
         : runtime.mode === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseEmulator
         ? runtime.seedWorkspaceIds.map((id) => ({ id, type: id.includes("household") ? "household" : "personal" }))
         : await service.getWorkspaces();
@@ -553,7 +623,7 @@ export default function TrackToZeroV2App() {
       const safe = getUserSafeTrackToZeroError(error);
       setRuntimeState({ status: safe.kind, workspaces: [], snapshot: null, error: safe.message });
     }
-  }, [actorId, authState.user, isProductionRuntime, runtime, service, workspaceId]);
+  }, [actorId, authState.user, isProductionRuntime, repository, runtime, service, workspaceId]);
 
   const runAction = async (action, callback, { write = true } = {}) => {
     setWriteState({ inProgress: write, action, error: "", success: "" });
@@ -564,6 +634,20 @@ export default function TrackToZeroV2App() {
       const safe = getUserSafeTrackToZeroError(error);
       setWriteState({ inProgress: false, action: "", error: `${action}: ${safe.message}`, success: "" });
     }
+  };
+
+  const chooseProductionWorkspace = async (type) => {
+    const nextType = type === "household" ? "household" : "personal";
+    const nextWorkspaceId = workspaceIdForUser(actorId, nextType);
+    await runAction("create workspace", async () => {
+      await service.bootstrapOwnerWorkspace(nextWorkspaceId, {
+        type: nextType,
+        displayName: authState.user?.displayName || authState.user?.email || "Owner",
+        email: authState.user?.email || "",
+      });
+      setWorkspaceId(nextWorkspaceId);
+      await refresh(nextWorkspaceId);
+    });
   };
 
   useEffect(() => {
@@ -592,6 +676,17 @@ export default function TrackToZeroV2App() {
         error={authState.error}
         busy={authBusy}
         firebaseReady={firebaseReady && authState.status !== "unavailable"}
+      />
+    );
+  }
+
+  if (isProductionRuntime && runtimeState.status === "needs_onboarding") {
+    return (
+      <OnboardingScreen
+        busy={writeState.inProgress}
+        error={writeState.error}
+        onChooseWorkspace={chooseProductionWorkspace}
+        onSignOut={logout}
       />
     );
   }

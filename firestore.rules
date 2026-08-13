@@ -675,6 +675,7 @@ service cloud.firestore {
 
     function v2MigrationOperator(workspaceId) {
       return v2AdminPlus(workspaceId)
+        && "trackToZeroMigrationOperator" in request.auth.token
         && request.auth.token.trackToZeroMigrationOperator == true;
     }
 
@@ -716,6 +717,7 @@ service cloud.firestore {
 
     function v2BootstrapMigrationRun(workspaceId) {
       return signedIn()
+        && "trackToZeroMigrationOperator" in request.auth.token
         && request.auth.token.trackToZeroMigrationOperator == true
         && request.resource.data.workspaceId == workspaceId
         && request.resource.data.actorId == request.auth.uid
@@ -755,30 +757,36 @@ service cloud.firestore {
       allow delete: if v2Owner(workspaceId) || v2MigrationOperator(workspaceId);
 
       match /members/{uid} {
-        allow read: if v2ViewerPlus(workspaceId);
+        allow read: if v2ViewerPlus(workspaceId) || (signedIn() && uid == request.auth.uid);
         allow create: if v2InitialOwnerMembership(workspaceId, uid)
-          || (v2Owner(workspaceId)
-            && uid != request.auth.uid
+          || (v2MigrationOperator(workspaceId)
             && request.resource.data.workspaceId == workspaceId
             && request.resource.data.uid == uid
-            && v2ValidRole(request.resource.data.role)
-            && request.resource.data.role != "owner")
-          || (v2Role(workspaceId) == "admin"
-            && uid != request.auth.uid
-            && request.resource.data.workspaceId == workspaceId
-            && request.resource.data.uid == uid
-            && request.resource.data.role in ["admin", "contributor", "viewer"]);
+            && v2ValidRole(request.resource.data.role));
         allow update: if v2Owner(workspaceId)
           && uid != request.auth.uid
           && !v2TargetIsOwner(workspaceId, uid)
           && v2ValidRole(request.resource.data.role)
-          && request.resource.data.role != "owner";
+          && request.resource.data.role == resource.data.role;
         allow update: if v2AdminPlus(workspaceId)
           && uid != request.auth.uid
           && !v2TargetIsOwner(workspaceId, uid)
           && v2RoleUnchanged();
         allow delete: if (v2Owner(workspaceId) && !v2TargetIsOwner(workspaceId, uid))
           || v2MigrationOperator(workspaceId);
+      }
+
+      match /member_invites/{inviteId} {
+        allow read: if v2AdminPlus(workspaceId);
+        allow create: if v2AdminPlus(workspaceId)
+          && request.resource.data.workspaceId == workspaceId
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.status == "pending"
+          && request.resource.data.role in ["admin", "contributor", "viewer"]
+          && request.resource.data.email is string;
+        allow update, delete: if v2AdminPlus(workspaceId)
+          && request.resource.data.workspaceId == workspaceId
+          && request.resource.data.role in ["admin", "contributor", "viewer"];
       }
 
       match /debts/{debtId} {

@@ -6,6 +6,7 @@ const clone = (value) => structuredClone(value);
 export const v2Paths = {
   workspace: (workspaceId) => `workspaces/${workspaceId}`,
   member: (workspaceId, uid) => `workspaces/${workspaceId}/members/${uid}`,
+  memberInvite: (workspaceId, inviteId) => `workspaces/${workspaceId}/member_invites/${inviteId}`,
   debt: (workspaceId, debtId) => `workspaces/${workspaceId}/debts/${debtId}`,
   plan: (workspaceId, planId) => `workspaces/${workspaceId}/plans/${planId}`,
   version: (workspaceId, planId, versionId) => `workspaces/${workspaceId}/plans/${planId}/versions/${versionId}`,
@@ -32,6 +33,7 @@ export class InMemoryTrackToZeroRepository {
   constructor(seed = {}) {
     this.workspaces = new Map(Object.entries(seed.workspaces || {}).map(([id, value]) => [id, clone(value)]));
     this.members = new Map(Object.entries(seed.members || {}).map(([key, value]) => [key, clone(value)]));
+    this.memberInvites = new Map(Object.entries(seed.memberInvites || {}).map(([key, value]) => [key, clone(value)]));
     this.debts = new Map(Object.entries(seed.debts || {}).map(([key, value]) => [key, clone(value)]));
     this.plans = new Map(Object.entries(seed.plans || {}).map(([key, value]) => [key, clone(value)]));
     this.versions = new Map(Object.entries(seed.versions || {}).map(([key, value]) => [key, clone(value)]));
@@ -61,6 +63,14 @@ export class InMemoryTrackToZeroRepository {
   }
   getMembership(workspaceId, uid) { return this.members.has(this.key(workspaceId, uid)) ? clone(this.members.get(this.key(workspaceId, uid))) : null; }
   listMemberships(workspaceId) { return [...this.members.values()].filter((m) => m.workspaceId === workspaceId).map(clone); }
+  saveMemberInvite(input) {
+    const invite = clone(input);
+    this.memberInvites.set(this.key(invite.workspaceId, invite.id), invite);
+    return clone(invite);
+  }
+  listMemberInvites(workspaceId) {
+    return [...this.memberInvites.values()].filter((invite) => invite.workspaceId === workspaceId).map(clone);
+  }
 
   saveDebt(input) {
     const debt = createDebt(input);
@@ -155,6 +165,11 @@ export class InMemoryTrackToZeroRepository {
     const savedMembership = this.saveMembership(ownerMembership);
     const savedManifest = this.saveMigrationRun(manifest);
     return { workspace: savedWorkspace, ownerMembership: savedMembership, manifest: savedManifest };
+  }
+  saveOwnerWorkspaceBootstrap({ workspace, ownerMembership }) {
+    const savedWorkspace = this.saveWorkspace(workspace);
+    const savedMembership = this.saveMembership(ownerMembership);
+    return { workspace: savedWorkspace, ownerMembership: savedMembership };
   }
   getMigrationRun(workspaceId, runId) {
     const key = this.key(workspaceId, runId);

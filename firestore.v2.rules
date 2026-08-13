@@ -30,6 +30,7 @@ service cloud.firestore {
     }
     function isMigrationOperator(workspaceId) {
       return isAdminPlus(workspaceId)
+        && "trackToZeroMigrationOperator" in request.auth.token
         && request.auth.token.trackToZeroMigrationOperator == true;
     }
     function validRole(value) {
@@ -65,6 +66,7 @@ service cloud.firestore {
     }
     function isBootstrapMigrationRun(workspaceId) {
       return signedIn()
+        && "trackToZeroMigrationOperator" in request.auth.token
         && request.auth.token.trackToZeroMigrationOperator == true
         && request.resource.data.workspaceId == workspaceId
         && request.resource.data.actorId == request.auth.uid
@@ -103,30 +105,36 @@ service cloud.firestore {
       allow delete: if isOwner(workspaceId) || isMigrationOperator(workspaceId);
 
       match /members/{uid} {
-        allow read: if isViewerPlus(workspaceId);
+        allow read: if isViewerPlus(workspaceId) || (signedIn() && uid == request.auth.uid);
         allow create: if isInitialOwnerMembership(workspaceId, uid)
-          || (isOwner(workspaceId)
-            && uid != request.auth.uid
+          || (isMigrationOperator(workspaceId)
             && request.resource.data.workspaceId == workspaceId
             && request.resource.data.uid == uid
-            && validRole(request.resource.data.role)
-            && request.resource.data.role != "owner")
-          || (role(workspaceId) == "admin"
-            && uid != request.auth.uid
-            && request.resource.data.workspaceId == workspaceId
-            && request.resource.data.uid == uid
-            && request.resource.data.role in ["admin", "contributor", "viewer"]);
+            && validRole(request.resource.data.role));
         allow update: if isOwner(workspaceId)
           && uid != request.auth.uid
           && !targetIsOwner(workspaceId, uid)
           && validRole(request.resource.data.role)
-          && request.resource.data.role != "owner";
+          && request.resource.data.role == resource.data.role;
         allow update: if isAdminPlus(workspaceId)
           && uid != request.auth.uid
           && !targetIsOwner(workspaceId, uid)
           && roleUnchanged();
         allow delete: if (isOwner(workspaceId) && !targetIsOwner(workspaceId, uid))
           || isMigrationOperator(workspaceId);
+      }
+
+      match /member_invites/{inviteId} {
+        allow read: if isAdminPlus(workspaceId);
+        allow create: if isAdminPlus(workspaceId)
+          && request.resource.data.workspaceId == workspaceId
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.status == "pending"
+          && request.resource.data.role in ["admin", "contributor", "viewer"]
+          && request.resource.data.email is string;
+        allow update, delete: if isAdminPlus(workspaceId)
+          && request.resource.data.workspaceId == workspaceId
+          && request.resource.data.role in ["admin", "contributor", "viewer"];
       }
 
       match /debts/{debtId} {

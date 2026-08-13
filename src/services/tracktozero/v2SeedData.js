@@ -176,11 +176,11 @@ export const createTrackToZeroV2Seed = () => {
       },
     },
     members: Object.fromEntries([
-      ["personal-seed/seed-owner", { workspaceId: "personal-seed", uid: "seed-owner", role: "owner", displayName: "You", createdAt: V2_TEST_NOW }],
-      ["household-seed/seed-owner", { workspaceId: "household-seed", uid: "seed-owner", role: "owner", displayName: "Jidye", createdAt: V2_TEST_NOW }],
-      ["household-seed/seed-admin", { workspaceId: "household-seed", uid: "seed-admin", role: "admin", displayName: "Baba", createdAt: V2_TEST_NOW }],
-      ["household-seed/seed-contributor", { workspaceId: "household-seed", uid: "seed-contributor", role: "contributor", displayName: "Contributor", createdAt: V2_TEST_NOW }],
-      ["household-seed/seed-viewer", { workspaceId: "household-seed", uid: "seed-viewer", role: "viewer", displayName: "Viewer", createdAt: V2_TEST_NOW }],
+      ["personal-seed/seed-owner", { workspaceId: "personal-seed", uid: "seed-owner", role: "owner", status: "active", displayName: "You", createdAt: V2_TEST_NOW }],
+      ["household-seed/seed-owner", { workspaceId: "household-seed", uid: "seed-owner", role: "owner", status: "active", displayName: "Jidye", createdAt: V2_TEST_NOW }],
+      ["household-seed/seed-admin", { workspaceId: "household-seed", uid: "seed-admin", role: "admin", status: "active", displayName: "Baba", createdAt: V2_TEST_NOW }],
+      ["household-seed/seed-contributor", { workspaceId: "household-seed", uid: "seed-contributor", role: "contributor", status: "active", displayName: "Contributor", createdAt: V2_TEST_NOW }],
+      ["household-seed/seed-viewer", { workspaceId: "household-seed", uid: "seed-viewer", role: "viewer", status: "active", displayName: "Viewer", createdAt: V2_TEST_NOW }],
     ]),
     debts: Object.fromEntries([...personalDebts, ...householdDebts].map((debt) => [`${debt.workspaceId}/${debt.id}`, debt])),
     plans: {

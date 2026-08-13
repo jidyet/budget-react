@@ -18,11 +18,23 @@ import { resolveActivePlanContext } from "../../src/services/tracktozero/activeP
 const TS = "2026-01-01T00:00:00.000Z";
 const TS2 = "2026-02-01T00:00:00.000Z";
 
+async function bootstrapOwnerWorkspace(repo, workspaceId = "w1") {
+  const workspace = { id: workspaceId, type: "household", createdAt: TS, createdBy: "owner" };
+  const ownerMembership = { workspaceId, uid: "owner", role: "owner", status: "active", createdAt: TS, createdBy: "owner" };
+  if (typeof repo.saveOwnerWorkspaceBootstrap === "function") {
+    const result = await repo.saveOwnerWorkspaceBootstrap({ workspace, ownerMembership });
+    return result.workspace;
+  }
+  const created = await repo.saveWorkspace(workspace);
+  await repo.saveMembership(ownerMembership);
+  return created;
+}
+
 export function runTrackToZeroRepositoryContractSuite({ describe, it, createRepository, switchActivePlan }) {
   describe("repository contract: workspace", () => {
     it("creates and reads back a workspace", async () => {
       const repo = await createRepository();
-      const created = await repo.saveWorkspace({ id: "w1", type: "household", createdAt: TS, createdBy: "owner" });
+      const created = await bootstrapOwnerWorkspace(repo);
       assert.equal(created.id, "w1");
       assert.equal(created.type, "household");
       const fetched = await repo.getWorkspace("w1");
@@ -40,17 +52,11 @@ export function runTrackToZeroRepositoryContractSuite({ describe, it, createRepo
   });
 
   describe("repository contract: membership", () => {
-    it("creates and reads back a membership", async () => {
+    it("creates and reads back the initial owner membership", async () => {
       const repo = await createRepository();
-      await repo.saveWorkspace({ id: "w1", type: "household", createdAt: TS, createdBy: "owner" });
-      // Uses a uid distinct from the acting owner deliberately: a real
-      // authorization layer (unlike the in-memory repo) correctly forbids an
-      // owner from rewriting their own membership doc (no self-role-editing,
-      // even for owners - see firestore.v2.rules), so this test exercises
-      // "create and read back a membership" without colliding with that rule.
-      await repo.saveMembership({ workspaceId: "w1", uid: "member2", role: "contributor", createdAt: TS, createdBy: "owner" });
-      const fetched = await repo.getMembership("w1", "member2");
-      assert.equal(fetched.role, "contributor");
+      await bootstrapOwnerWorkspace(repo);
+      const fetched = await repo.getMembership("w1", "owner");
+      assert.equal(fetched.role, "owner");
       assert.equal(fetched.status, "active");
     });
   });
@@ -58,7 +64,7 @@ export function runTrackToZeroRepositoryContractSuite({ describe, it, createRepo
   describe("repository contract: debt", () => {
     it("creates, reads, and lists debts", async () => {
       const repo = await createRepository();
-      await repo.saveWorkspace({ id: "w1", type: "household", createdAt: TS, createdBy: "owner" });
+      await bootstrapOwnerWorkspace(repo);
       await repo.saveDebt({ id: "d1", workspaceId: "w1", name: "Card", currentBalance: 100, minimumRequiredPayment: 10, createdAt: TS, createdBy: "owner" });
       await repo.saveDebt({ id: "d2", workspaceId: "w1", name: "Loan", currentBalance: 500, minimumRequiredPayment: 50, createdAt: TS, createdBy: "owner" });
       const listed = await repo.listDebts("w1");
@@ -70,7 +76,7 @@ export function runTrackToZeroRepositoryContractSuite({ describe, it, createRepo
   describe("repository contract: plan", () => {
     it("creates, reads, and lists plans", async () => {
       const repo = await createRepository();
-      await repo.saveWorkspace({ id: "w1", type: "household", createdAt: TS, createdBy: "owner" });
+      await bootstrapOwnerWorkspace(repo);
       await repo.savePlan({ id: "p1", workspaceId: "w1", status: "draft", createdAt: TS, createdBy: "owner" });
       await repo.savePlan({ id: "p2", workspaceId: "w1", status: "draft", createdAt: TS, createdBy: "owner" });
       const fetched = await repo.getPlan("w1", "p1");
@@ -83,7 +89,7 @@ export function runTrackToZeroRepositoryContractSuite({ describe, it, createRepo
   describe("repository contract: plan version", () => {
     it("creates a version, reads it back, and denies update as immutable", async () => {
       const repo = await createRepository();
-      await repo.saveWorkspace({ id: "w1", type: "household", createdAt: TS, createdBy: "owner" });
+      await bootstrapOwnerWorkspace(repo);
       await repo.savePlan({ id: "p1", workspaceId: "w1", status: "draft", createdAt: TS, createdBy: "owner" });
       const version = await repo.savePlanVersion({
         id: "v1", planId: "p1", workspaceId: "w1", versionNumber: 1, strategy: "avalanche",
@@ -113,7 +119,7 @@ export function runTrackToZeroRepositoryContractSuite({ describe, it, createRepo
   describe("repository contract: active-plan switching", () => {
     it("atomically activates one authoritative plan and demotes the previous one", async () => {
       const repo = await createRepository();
-      await repo.saveWorkspace({ id: "w1", type: "household", createdAt: TS, createdBy: "owner" });
+      await bootstrapOwnerWorkspace(repo);
       await repo.savePlan({ id: "p1", workspaceId: "w1", status: "draft", createdAt: TS, createdBy: "owner" });
       await repo.savePlan({ id: "p2", workspaceId: "w1", status: "draft", createdAt: TS, createdBy: "owner" });
       await repo.savePlanVersion({
@@ -141,7 +147,7 @@ export function runTrackToZeroRepositoryContractSuite({ describe, it, createRepo
   describe("repository contract: expected checkpoint", () => {
     it("creates, reads back, and denies update as immutable", async () => {
       const repo = await createRepository();
-      await repo.saveWorkspace({ id: "w1", type: "household", createdAt: TS, createdBy: "owner" });
+      await bootstrapOwnerWorkspace(repo);
       await repo.savePlan({ id: "p1", workspaceId: "w1", status: "draft", createdAt: TS, createdBy: "owner" });
       await repo.savePlanVersion({
         id: "v1", planId: "p1", workspaceId: "w1", versionNumber: 1, strategy: "avalanche",
@@ -160,7 +166,7 @@ export function runTrackToZeroRepositoryContractSuite({ describe, it, createRepo
   describe("repository contract: payment event", () => {
     it("appends a payment event and reads it back", async () => {
       const repo = await createRepository();
-      await repo.saveWorkspace({ id: "w1", type: "household", createdAt: TS, createdBy: "owner" });
+      await bootstrapOwnerWorkspace(repo);
       await repo.saveDebt({ id: "d1", workspaceId: "w1", name: "Card", currentBalance: 100, minimumRequiredPayment: 10, createdAt: TS, createdBy: "owner" });
       const created = await repo.createPaymentEvent({
         id: "e1", workspaceId: "w1", debtId: "d1", amount: 25, paidAt: TS, createdAt: TS, createdBy: "owner",
@@ -175,7 +181,7 @@ export function runTrackToZeroRepositoryContractSuite({ describe, it, createRepo
   describe("repository contract: balance snapshot", () => {
     it("appends snapshots and lists them newest-observedAt-first with a deterministic tiebreak", async () => {
       const repo = await createRepository();
-      await repo.saveWorkspace({ id: "w1", type: "household", createdAt: TS, createdBy: "owner" });
+      await bootstrapOwnerWorkspace(repo);
       await repo.saveDebt({ id: "d1", workspaceId: "w1", name: "Card", currentBalance: 100, minimumRequiredPayment: 10, createdAt: TS, createdBy: "owner" });
       await repo.createBalanceSnapshot({ id: "s1", workspaceId: "w1", debtId: "d1", balance: 100, observedAt: TS, createdAt: TS, createdBy: "owner" });
       await repo.createBalanceSnapshot({ id: "s2", workspaceId: "w1", debtId: "d1", balance: 90, observedAt: TS2, createdAt: TS, createdBy: "owner" });

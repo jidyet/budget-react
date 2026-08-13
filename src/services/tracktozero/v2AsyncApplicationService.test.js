@@ -34,6 +34,34 @@ describe("TrackToZero v2 async application service", () => {
     expect(repository.listPaymentEvents("personal-seed", "personal-sofi")).toHaveLength(0);
   });
 
+  it("bootstraps personal and household owner workspaces idempotently", async () => {
+    const repository = new InMemoryTrackToZeroRepository();
+    const service = createTrackToZeroV2AsyncAppService({ repository, actorId: "owner-a", asOf: V2_TEST_NOW });
+
+    await service.bootstrapOwnerWorkspace("personal-owner-a", { type: "personal", displayName: "Owner A", email: "owner@example.test" });
+    await service.bootstrapOwnerWorkspace("personal-owner-a", { type: "personal", displayName: "Owner A", email: "owner@example.test" });
+    await service.bootstrapOwnerWorkspace("household-owner-a", { type: "household", displayName: "Owner A", email: "owner@example.test" });
+
+    expect(repository.listWorkspaces().map((workspace) => workspace.id).sort()).toEqual(["household-owner-a", "personal-owner-a"]);
+    expect(repository.listMemberships("personal-owner-a")).toHaveLength(1);
+    expect(repository.listMemberships("personal-owner-a")[0]).toMatchObject({ uid: "owner-a", role: "owner" });
+    expect(repository.listMemberships("household-owner-a")[0]).toMatchObject({ uid: "owner-a", role: "owner" });
+  });
+
+  it("creates pending member invites without granting membership access", async () => {
+    const repository = new InMemoryTrackToZeroRepository();
+    const ownerService = createTrackToZeroV2AsyncAppService({ repository, actorId: "owner-a", asOf: V2_TEST_NOW });
+    await ownerService.bootstrapOwnerWorkspace("household-owner-a", { type: "household", displayName: "Owner A", email: "owner@example.test" });
+
+    const invite = await ownerService.createMemberInvite("household-owner-a", { email: "future@example.test", role: "viewer" });
+
+    expect(invite).toMatchObject({ status: "pending", role: "viewer", email: "future@example.test" });
+    expect(repository.listMemberInvites("household-owner-a")).toHaveLength(1);
+    expect(repository.getMembership("household-owner-a", "future-user")).toBeNull();
+    const futureService = createTrackToZeroV2AsyncAppService({ repository, actorId: "future-user", asOf: V2_TEST_NOW });
+    await expect(futureService.getWorkspaceSnapshot("household-owner-a")).rejects.toThrow(/not a member/i);
+  });
+
   it("records payment and balance append-only facts with actor attribution", async () => {
     const { repository, service } = makeService("seed-contributor");
     const payment = await service.recordPayment("household-seed", "household-samsung", { amount: 40, notes: "paid from app" });

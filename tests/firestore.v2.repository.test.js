@@ -76,12 +76,21 @@ test("workspace: creator can bootstrap workspace + owner membership and read bac
   await assertFails(repoAs("outsider").getWorkspace("w-new"));
 });
 
-test("membership: owner can invite non-owner roles and read them back, contributor cannot create memberships", async () => {
+test("membership: raw email invite is pending-only and does not grant workspace access", async () => {
   await seedBaseWorkspace();
-  const created = await repoAs("owner").saveMembership({ workspaceId: "w1", uid: "new-viewer", role: "viewer", createdAt: now(), createdBy: "owner" });
-  assert.equal(created.role, "viewer");
-  const fetched = await repoAs("owner").getMembership("w1", "new-viewer");
-  assert.equal(fetched.role, "viewer");
+  const invite = await repoAs("owner").saveMemberInvite({
+    id: "invite-1",
+    workspaceId: "w1",
+    email: "future@example.test",
+    role: "viewer",
+    status: "pending",
+    createdAt: now().toISOString(),
+    createdBy: "owner",
+  });
+  assert.equal(invite.status, "pending");
+  assert.equal((await repoAs("owner").listMemberInvites("w1")).length, 1);
+  await assertFails(repoAs("owner").saveMembership({ workspaceId: "w1", uid: "new-viewer", role: "viewer", createdAt: now(), createdBy: "owner" }));
+  await assertFails(repoAs("new-viewer").getWorkspace("w1"));
   await assertFails(repoAs("contrib").saveMembership({ workspaceId: "w1", uid: "new-viewer-2", role: "viewer", createdAt: now(), createdBy: "contrib" }));
 });
 
@@ -196,26 +205,13 @@ test("activatePlan denied for an unauthorized role leaves no partial state", asy
 
 describe("shared repository contract (Firebase-backed)", () => {
   // The shared suite's fixtures always use workspace "w1" and the "owner" repo.
-  // Unlike the in-memory repo, real rules require an active membership doc to
-  // read/write anything beyond workspace creation itself, which the domain-level
-  // contract suite has no concept of (the in-memory repo has no rules layer at
-  // all) - so createRepository seeds it fresh on every call (the shared suite
-  // always awaits createRepository(), which is a no-op await for the in-memory
-  // entrypoint's plain synchronous factory).
+  // The contract helper bootstraps the workspace + owner membership atomically
+  // through repository.saveOwnerWorkspaceBootstrap(), mirroring the production
+  // onboarding path without using a rules-disabled shortcut.
   runTrackToZeroRepositoryContractSuite({
     describe,
     it,
-    // Bootstrap through the real rules-gated repository path (mirroring the
-    // proven "workspace creator can bootstrap owner membership" flow in
-    // firestore.v2.rules.test.js) rather than a rules-disabled shortcut, so the
-    // workspace doc genuinely exists before any subsequent read/write in the
-    // suite depends on it.
-    createRepository: async () => {
-      const repo = repoAs("owner");
-      await repo.saveWorkspace({ id: "w1", type: "household", createdAt: now(), createdBy: "owner" });
-      await repo.saveMembership({ workspaceId: "w1", uid: "owner", role: "owner", createdAt: now(), createdBy: "owner" });
-      return repo;
-    },
+    createRepository: async () => repoAs("owner"),
     switchActivePlan: (repo, args) => repo.activatePlan(args),
   });
 });

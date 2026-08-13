@@ -30,6 +30,7 @@ const entityKindForPath = (path) => {
   if (parts[0] !== "workspaces") return "";
   if (parts.length === 2) return "workspace";
   if (parts[2] === "members") return "member";
+  if (parts[2] === "member_invites") return "memberInvite";
   if (parts[2] === "debts" && parts.length === 4) return "debt";
   if (parts[2] === "debts" && parts[4] === "payment_events") return "paymentEvent";
   if (parts[2] === "debts" && parts[4] === "balance_snapshots") return "balanceSnapshot";
@@ -87,6 +88,15 @@ export class FirebaseTrackToZeroRepository {
   async listMemberships(workspaceId) {
     const snap = await getDocs(collection(this.db, "workspaces", workspaceId, "members"));
     return snap.docs.map((d) => fromFirestoreDoc("member", d.data()));
+  }
+  async saveMemberInvite(input) {
+    const invite = { ...input };
+    await setDoc(doc(this.db, v2Paths.memberInvite(invite.workspaceId, invite.id)), invite);
+    return invite;
+  }
+  async listMemberInvites(workspaceId) {
+    const snap = await getDocs(collection(this.db, "workspaces", workspaceId, "member_invites"));
+    return snap.docs.map((d) => ({ ...d.data() }));
   }
 
   // ── Debt ───────────────────────────────────────────────────────────────
@@ -221,6 +231,18 @@ export class FirebaseTrackToZeroRepository {
     );
     await batch.commit();
     return { workspace, ownerMembership, manifest };
+  }
+  async saveOwnerWorkspaceBootstrap({ workspace, ownerMembership }) {
+    const nextWorkspace = createWorkspace(workspace);
+    const nextMembership = createWorkspaceMembership(ownerMembership);
+    const batch = writeBatch(this.db);
+    batch.set(doc(this.db, v2Paths.workspace(nextWorkspace.id)), toFirestoreDoc("workspace", nextWorkspace));
+    batch.set(
+      doc(this.db, v2Paths.member(nextMembership.workspaceId, nextMembership.uid)),
+      toFirestoreDoc("member", nextMembership)
+    );
+    await batch.commit();
+    return { workspace: nextWorkspace, ownerMembership: nextMembership };
   }
   async getMigrationRun(workspaceId, runId) {
     const snap = await getDoc(doc(this.db, v2Paths.migrationRun(workspaceId, runId)));

@@ -1,0 +1,163 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function memberPath(workspaceId, uid) {
+      return /databases/$(database)/documents/workspaces/$(workspaceId)/members/$(uid);
+    }
+    function membership(workspaceId) {
+      return get(memberPath(workspaceId, request.auth.uid));
+    }
+    function isMember(workspaceId) {
+      return signedIn()
+        && exists(memberPath(workspaceId, request.auth.uid))
+        && membership(workspaceId).data.status == "active";
+    }
+    function role(workspaceId) {
+      return membership(workspaceId).data.role;
+    }
+    function isViewerPlus(workspaceId) {
+      return isMember(workspaceId) && role(workspaceId) in ["owner", "admin", "contributor", "viewer"];
+    }
+    function isContributorPlus(workspaceId) {
+      return isMember(workspaceId) && role(workspaceId) in ["owner", "admin", "contributor"];
+    }
+    function isAdminPlus(workspaceId) {
+      return isMember(workspaceId) && role(workspaceId) in ["owner", "admin"];
+    }
+    function isOwner(workspaceId) {
+      return isMember(workspaceId) && role(workspaceId) == "owner";
+    }
+    function validRole(value) {
+      return value in ["owner", "admin", "contributor", "viewer"];
+    }
+    function isWorkspaceCreator(workspaceId) {
+      return signedIn()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.id == workspaceId;
+    }
+    function isInitialOwnerMembership(workspaceId, uid) {
+      return signedIn()
+        && uid == request.auth.uid
+        && request.resource.data.workspaceId == workspaceId
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.role == "owner"
+        && request.resource.data.status == "active"
+        && exists(/databases/$(database)/documents/workspaces/$(workspaceId))
+        && get(/databases/$(database)/documents/workspaces/$(workspaceId)).data.createdBy == request.auth.uid;
+    }
+    function roleUnchanged() {
+      return request.resource.data.role == resource.data.role;
+    }
+    function targetIsOwner(workspaceId, uid) {
+      return exists(memberPath(workspaceId, uid)) && get(memberPath(workspaceId, uid)).data.role == "owner";
+    }
+    function immutablePaymentCoreUnchanged() {
+      return request.resource.data.workspaceId == resource.data.workspaceId
+        && request.resource.data.debtId == resource.data.debtId
+        && request.resource.data.amount == resource.data.amount
+        && request.resource.data.paidAt == resource.data.paidAt
+        && request.resource.data.createdBy == resource.data.createdBy;
+    }
+    function immutableSnapshotCoreUnchanged() {
+      return request.resource.data.workspaceId == resource.data.workspaceId
+        && request.resource.data.debtId == resource.data.debtId
+        && request.resource.data.balance == resource.data.balance
+        && request.resource.data.observedAt == resource.data.observedAt
+        && request.resource.data.createdBy == resource.data.createdBy;
+    }
+    function versionImmutable() {
+      return request.resource.data == resource.data;
+    }
+
+    match /workspaces/{workspaceId} {
+      allow create: if isWorkspaceCreator(workspaceId);
+      allow read: if isViewerPlus(workspaceId);
+      allow update: if isAdminPlus(workspaceId);
+      allow delete: if isOwner(workspaceId);
+
+      match /members/{uid} {
+        allow read: if isViewerPlus(workspaceId);
+        allow create: if isInitialOwnerMembership(workspaceId, uid)
+          || (isOwner(workspaceId)
+            && uid != request.auth.uid
+            && request.resource.data.workspaceId == workspaceId
+            && request.resource.data.uid == uid
+            && validRole(request.resource.data.role)
+            && request.resource.data.role != "owner")
+          || (role(workspaceId) == "admin"
+            && uid != request.auth.uid
+            && request.resource.data.workspaceId == workspaceId
+            && request.resource.data.uid == uid
+            && request.resource.data.role in ["admin", "contributor", "viewer"]);
+        allow update: if isOwner(workspaceId)
+          && uid != request.auth.uid
+          && !targetIsOwner(workspaceId, uid)
+          && validRole(request.resource.data.role)
+          && request.resource.data.role != "owner";
+        allow update: if isAdminPlus(workspaceId)
+          && uid != request.auth.uid
+          && !targetIsOwner(workspaceId, uid)
+          && roleUnchanged();
+        allow delete: if isOwner(workspaceId) && !targetIsOwner(workspaceId, uid);
+      }
+
+      match /debts/{debtId} {
+        allow read: if isViewerPlus(workspaceId);
+        allow create, update, delete: if isAdminPlus(workspaceId)
+          && request.resource.data.workspaceId == workspaceId;
+
+        match /payment_events/{eventId} {
+          allow read: if isViewerPlus(workspaceId);
+          allow create: if isContributorPlus(workspaceId)
+            && request.resource.data.workspaceId == workspaceId
+            && request.resource.data.debtId == debtId
+            && request.resource.data.createdBy == request.auth.uid
+            && request.resource.data.amount > 0;
+          allow update: if isAdminPlus(workspaceId) && immutablePaymentCoreUnchanged();
+          allow delete: if false;
+        }
+
+        match /balance_snapshots/{snapshotId} {
+          allow read: if isViewerPlus(workspaceId);
+          allow create: if isContributorPlus(workspaceId)
+            && request.resource.data.workspaceId == workspaceId
+            && request.resource.data.debtId == debtId
+            && request.resource.data.createdBy == request.auth.uid
+            && request.resource.data.balance >= 0;
+          allow update: if isAdminPlus(workspaceId) && immutableSnapshotCoreUnchanged();
+          allow delete: if false;
+        }
+      }
+
+      match /plans/{planId} {
+        allow read: if isViewerPlus(workspaceId);
+        allow create, update, delete: if isAdminPlus(workspaceId)
+          && request.resource.data.workspaceId == workspaceId;
+
+        match /versions/{versionId} {
+          allow read: if isViewerPlus(workspaceId);
+          allow create: if isAdminPlus(workspaceId)
+            && request.resource.data.workspaceId == workspaceId
+            && request.resource.data.planId == planId;
+          allow update: if isAdminPlus(workspaceId) && versionImmutable();
+          allow delete: if false;
+
+          match /expected_schedule/{checkpointId} {
+            allow read: if isViewerPlus(workspaceId);
+            allow create: if isAdminPlus(workspaceId)
+              && request.resource.data.workspaceId == workspaceId
+              && request.resource.data.planId == planId
+              && request.resource.data.planVersionId == versionId;
+            allow update, delete: if false;
+          }
+        }
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+

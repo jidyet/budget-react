@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createTrackToZeroRepository, TRACKTOZERO_V2_REPOSITORY_MODES } from "../../services/tracktozero/repositoryRuntime";
+import {
+  createTrackToZeroRepository,
+  ensureTrackToZeroV2EmulatorActor,
+  TRACKTOZERO_V2_REPOSITORY_MODES,
+} from "../../services/tracktozero/repositoryRuntime";
 import { createTrackToZeroV2AsyncAppService, getUserSafeTrackToZeroError } from "../../services/tracktozero/v2AsyncApplicationService";
 import { V2_TEST_ACTOR_ID, V2_TEST_NOW } from "../../services/tracktozero/v2SeedData";
 
@@ -92,7 +96,10 @@ function StatusBadge({ status }) {
   );
 }
 
-function WorkspaceBar({ workspaces, workspaceId, setWorkspaceId, members, actorId, setActorId, membership, mode }) {
+function WorkspaceBar({ workspaces, workspaceId, setWorkspaceId, members, actorId, setActorId, membership, mode, allowNonMemberPreview = false }) {
+  const previewMembers = allowNonMemberPreview
+    ? [...members, { uid: "seed-outsider", role: "non-member", displayName: "Non-member" }]
+    : members;
   return (
     <div style={{ ...styles.card, display: "grid", gridTemplateColumns: "1fr auto", gap: 12, alignItems: "center" }}>
       <div>
@@ -110,7 +117,7 @@ function WorkspaceBar({ workspaces, workspaceId, setWorkspaceId, members, actorI
         </Field>
         <Field label="Role preview">
           <select style={styles.input} value={actorId} onChange={(event) => setActorId(event.target.value)}>
-            {members.map((member) => (
+            {previewMembers.map((member) => (
               <option key={member.uid} value={member.uid}>{member.displayName || member.uid} · {member.role}</option>
             ))}
           </select>
@@ -238,6 +245,7 @@ function Debts({ snapshot, service, refresh, runAction, writeState }) {
             <button disabled={!canManage || writeState.inProgress} style={canManage && !writeState.inProgress ? styles.primaryButton : styles.disabledButton}>
               {writeState.action === "add debt" ? "Adding..." : "Add debt"}
             </button>
+            {!canManage && <p>Your role is read-only for debt setup.</p>}
           </form>
         </div>
       </Section>
@@ -288,6 +296,7 @@ function Plan({ snapshot, service, refresh, runAction, writeState }) {
             <button disabled={!canPlan || writeState.inProgress} style={canPlan && !writeState.inProgress ? styles.primaryButton : styles.disabledButton}>
               {writeState.action === "activate plan" ? "Activating..." : "Create + activate plan"}
             </button>
+            {!canPlan && <p>Your role can view plans, but cannot change payoff plan setup.</p>}
           </form>
           <div>
             <button disabled={!canPlan || !active?.version || writeState.inProgress} style={canPlan && !writeState.inProgress ? styles.button : styles.disabledButton} onClick={() => {
@@ -344,16 +353,34 @@ const getRuntimeMode = () => {
     : TRACKTOZERO_V2_REPOSITORY_MODES.inMemory;
 };
 
-const getRuntimeRepository = () => {
+const getRuntimeConfig = () => {
   const env = typeof import.meta !== "undefined" ? import.meta.env || {} : {};
-  return createTrackToZeroRepository({
+  return {
     mode: getRuntimeMode(),
-    firebaseConfig: { projectId: env.VITE_TRACKTOZERO_V2_FIREBASE_PROJECT_ID || "demo-budget-react-v2" },
+    firebaseConfig: {
+      projectId: env.VITE_TRACKTOZERO_V2_FIREBASE_PROJECT_ID || "demo-budget-react-v2",
+      apiKey: env.VITE_TRACKTOZERO_V2_FIREBASE_API_KEY || "demo",
+    },
     emulatorHost: env.VITE_TRACKTOZERO_V2_FIRESTORE_EMULATOR_HOST || "",
+    authEmulatorHost: env.VITE_TRACKTOZERO_V2_AUTH_EMULATOR_HOST || "",
+    seedWorkspaceIds: String(env.VITE_TRACKTOZERO_V2_SEED_WORKSPACE_IDS || "personal-seed,household-seed")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
+  };
+};
+
+const getRuntimeRepository = () => {
+  const runtime = getRuntimeConfig();
+  return createTrackToZeroRepository({
+    mode: runtime.mode,
+    firebaseConfig: runtime.firebaseConfig,
+    emulatorHost: runtime.emulatorHost,
   });
 };
 
 export default function TrackToZeroV2App() {
+  const runtime = useMemo(() => getRuntimeConfig(), []);
   const repository = useMemo(() => getRuntimeRepository(), []);
   const [workspaceId, setWorkspaceId] = useState("personal-seed");
   const [actorId, setActorId] = useState(V2_TEST_ACTOR_ID);
@@ -369,10 +396,17 @@ export default function TrackToZeroV2App() {
     requestSeq.current = requestId;
     setRuntimeState((state) => ({ ...state, status: "loading", error: "", snapshot: null }));
     try {
-      const [workspaces, snapshot] = await Promise.all([
-        service.getWorkspaces(),
-        service.getWorkspaceSnapshot(nextWorkspaceId),
-      ]);
+      await ensureTrackToZeroV2EmulatorActor({
+        actorId,
+        mode: runtime.mode,
+        firebaseConfig: runtime.firebaseConfig,
+        emulatorHost: runtime.emulatorHost,
+        authEmulatorHost: runtime.authEmulatorHost,
+      });
+      const snapshot = await service.getWorkspaceSnapshot(nextWorkspaceId);
+      const workspaces = runtime.mode === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseEmulator
+        ? runtime.seedWorkspaceIds.map((id) => ({ id, type: id.includes("household") ? "household" : "personal" }))
+        : await service.getWorkspaces();
       if (requestSeq.current !== requestId) return;
       setRuntimeState({ status: "loaded", workspaces, snapshot, error: "" });
     } catch (error) {
@@ -380,7 +414,7 @@ export default function TrackToZeroV2App() {
       const safe = getUserSafeTrackToZeroError(error);
       setRuntimeState({ status: safe.kind, workspaces: [], snapshot: null, error: safe.message });
     }
-  }, [service, workspaceId]);
+  }, [actorId, runtime, service, workspaceId]);
 
   const runAction = async (action, callback, { write = true } = {}) => {
     setWriteState({ inProgress: write, action, error: "", success: "" });
@@ -446,6 +480,7 @@ export default function TrackToZeroV2App() {
           setActorId={setActorId}
           membership={snapshot.membership}
           mode={snapshot.mode}
+          allowNonMemberPreview={runtime.mode === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseEmulator}
         />
         <nav aria-label="TrackToZero 2.0 primary navigation" style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
           {["home", "debts", "plan", "settings"].map((item) => (

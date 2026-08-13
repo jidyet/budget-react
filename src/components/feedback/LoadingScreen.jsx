@@ -1,5 +1,7 @@
+import { buildPalette } from "../../config/palette";
+
 export default function LoadingScreen({ label, palette }) {
-  const c = palette;
+  const c = palette || buildPalette("light");
   return (
     <div
       style={{

@@ -46,6 +46,10 @@ export class FirebaseTrackToZeroRepository {
     const snap = await getDoc(doc(this.db, v2Paths.workspace(id)));
     return snap.exists() ? fromFirestoreDoc("workspace", snap.data()) : null;
   }
+  async listWorkspaces() {
+    const snap = await getDocs(collection(this.db, "workspaces"));
+    return snap.docs.map((d) => fromFirestoreDoc("workspace", d.data()));
+  }
   async putWorkspace(workspace) {
     await setDoc(doc(this.db, v2Paths.workspace(workspace.id)), toFirestoreDoc("workspace", workspace));
     return { ...workspace };
@@ -60,6 +64,10 @@ export class FirebaseTrackToZeroRepository {
   async getMembership(workspaceId, uid) {
     const snap = await getDoc(doc(this.db, v2Paths.member(workspaceId, uid)));
     return snap.exists() ? fromFirestoreDoc("member", snap.data()) : null;
+  }
+  async listMemberships(workspaceId) {
+    const snap = await getDocs(collection(this.db, "workspaces", workspaceId, "members"));
+    return snap.docs.map((d) => fromFirestoreDoc("member", d.data()));
   }
 
   // ── Debt ───────────────────────────────────────────────────────────────
@@ -104,6 +112,11 @@ export class FirebaseTrackToZeroRepository {
   async getPlanVersion(workspaceId, planId, versionId) {
     const snap = await getDoc(doc(this.db, v2Paths.version(workspaceId, planId, versionId)));
     return snap.exists() ? fromFirestoreDoc("version", snap.data()) : null;
+  }
+  async listPlanVersions(workspaceId, planId) {
+    const colRef = collection(this.db, "workspaces", workspaceId, "plans", planId, "versions");
+    const snap = await getDocs(query(colRef, orderBy("versionNumber", "asc"), orderBy("id", "asc")));
+    return snap.docs.map((d) => fromFirestoreDoc("version", d.data()));
   }
   updatePlanVersion() {
     throw new Error("PlanVersion is immutable; create a new version instead");
@@ -156,6 +169,11 @@ export class FirebaseTrackToZeroRepository {
   async getExpectedCheckpoint(workspaceId, planId, versionId, checkpointId) {
     const snap = await getDoc(doc(this.db, v2Paths.expectedCheckpoint(workspaceId, planId, versionId, checkpointId)));
     return snap.exists() ? fromFirestoreDoc("expectedCheckpoint", snap.data()) : null;
+  }
+  async listExpectedCheckpoints(workspaceId, planId, versionId) {
+    const colRef = collection(this.db, "workspaces", workspaceId, "plans", planId, "versions", versionId, "expected_schedule");
+    const snap = await getDocs(query(colRef, orderBy("period", "asc"), orderBy("id", "asc")));
+    return snap.docs.map((d) => fromFirestoreDoc("expectedCheckpoint", d.data()));
   }
   updateExpectedCheckpoint() {
     throw new Error("ExpectedCheckpoint is immutable once created");

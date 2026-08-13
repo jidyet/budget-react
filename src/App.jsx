@@ -1,4 +1,5 @@
 ﻿import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { Suspense, lazy } from "react";
 import { Capacitor } from "@capacitor/core";
 import {
   getMonthKey, saveIncome,
@@ -22,6 +23,7 @@ import LoadingState from "./components/ui/LoadingState";
 import { LAUNCH_COPY } from "./config/launchCopy";
 import { APP_VERSION_LABEL } from "./config/appMeta";
 import { BRAND_NAME } from "./config/brand";
+import { getLaunchFlags } from "./config/launchFlags";
 import useAnalytics from "./hooks/useAnalytics";
 import { buildPalette } from "./config/palette";
 import { NAV_ITEMS } from "./config/nav";
@@ -59,6 +61,7 @@ const SAVINGS_GOAL = 2000;
 // MAX_SIMULATION_MONTHS now imported from payoffEngine
 const SIM_DISPLAY_ROWS = 60;
 const EMPTY_STARTER_ACCOUNTS = [];
+const TrackToZeroV2App = lazy(() => import("./components/tracktozero/TrackToZeroV2App"));
 
 function debugDebtCalculation(bills, displayedTotalDebt = 0) {
   const report = {
@@ -199,7 +202,7 @@ function debugDebtCalculation(bills, displayedTotalDebt = 0) {
   return report;
 }
 
-export default function BudgetApp() {
+function BudgetApp() {
   const mobileChromeRef = useRef(null);
   const [page, setPage]           = useState("overview");
   const [pageVisible, setPageVisible] = useState(true);
@@ -2190,4 +2193,15 @@ export default function BudgetApp() {
   </>
   );
 
+}
+
+export default function App() {
+  if (getLaunchFlags().trackToZeroV2Enabled) {
+    return (
+      <Suspense fallback={<LoadingScreen />}>
+        <TrackToZeroV2App />
+      </Suspense>
+    );
+  }
+  return <BudgetApp />;
 }

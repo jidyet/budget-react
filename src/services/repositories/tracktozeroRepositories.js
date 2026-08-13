@@ -36,6 +36,7 @@ export class InMemoryTrackToZeroRepository {
     return workspace;
   }
   getWorkspace(id) { return this.workspaces.has(id) ? clone(this.workspaces.get(id)) : null; }
+  listWorkspaces() { return [...this.workspaces.values()].map(clone); }
   putWorkspace(workspace) { this.workspaces.set(workspace.id, clone(workspace)); return clone(workspace); }
 
   saveMembership(input) {
@@ -44,6 +45,7 @@ export class InMemoryTrackToZeroRepository {
     return membership;
   }
   getMembership(workspaceId, uid) { return this.members.has(this.key(workspaceId, uid)) ? clone(this.members.get(this.key(workspaceId, uid))) : null; }
+  listMemberships(workspaceId) { return [...this.members.values()].filter((m) => m.workspaceId === workspaceId).map(clone); }
 
   saveDebt(input) {
     const debt = createDebt(input);
@@ -69,6 +71,12 @@ export class InMemoryTrackToZeroRepository {
   getPlanVersion(workspaceId, planId, versionId) {
     const key = this.versionKey(workspaceId, planId, versionId);
     return this.versions.has(key) ? clone(this.versions.get(key)) : null;
+  }
+  listPlanVersions(workspaceId, planId) {
+    return [...this.versions.values()]
+      .filter((v) => v.workspaceId === workspaceId && v.planId === planId)
+      .sort((a, b) => Number(a.versionNumber || 0) - Number(b.versionNumber || 0) || String(a.id).localeCompare(String(b.id)))
+      .map(clone);
   }
   updatePlanVersion() { throw new Error("PlanVersion is immutable; create a new version instead"); }
 
@@ -108,6 +116,11 @@ export class InMemoryTrackToZeroRepository {
     const key = this.checkpointKey(workspaceId, planId, versionId, checkpointId);
     return this.expectedCheckpoints.has(key) ? clone(this.expectedCheckpoints.get(key)) : null;
   }
+  listExpectedCheckpoints(workspaceId, planId, versionId) {
+    return [...this.expectedCheckpoints.values()]
+      .filter((c) => c.workspaceId === workspaceId && c.planId === planId && c.planVersionId === versionId)
+      .sort((a, b) => String(a.period).localeCompare(String(b.period)) || String(a.id).localeCompare(String(b.id)))
+      .map(clone);
+  }
   updateExpectedCheckpoint() { throw new Error("ExpectedCheckpoint is immutable once created"); }
 }
-

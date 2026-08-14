@@ -402,3 +402,23 @@ describe("TrackToZero v2 async application service: household ownership foundati
     expect(personalSnapshot.householdOwnershipSummary).toBeNull();
   });
 });
+
+describe("TrackToZero v2 async application service: payoff queue ordering", () => {
+  it("payoffQueue matches previewDraftPlan's order for the same strategy (single shared sort, no drift between sync/async)", async () => {
+    const { service } = makeService();
+    // household-seed's active plan already uses "snowball" - preview with the
+    // SAME strategy so this is a fair apples-to-apples order comparison.
+    const preview = await service.previewDraftPlan("household-seed", { strategy: "snowball" });
+    const snapshot = await service.getWorkspaceSnapshot("household-seed");
+    expect(snapshot.activeContext.version.strategy).toBe("snowball");
+    expect(snapshot.payoffQueue.map((d) => d.id)).toEqual(preview.payoffOrder.map((d) => d.id));
+  });
+
+  it("a Joint-owned debt appears exactly once in the async payoff queue", async () => {
+    const { repository, service } = makeService();
+    await Promise.resolve(repository.putWorkspace({ ...repository.getWorkspace("household-seed"), activePlanId: "" }));
+    const joint = await service.createNewDebt("household-seed", { name: "Joint Queue Debt", currentBalance: 300, minimumRequiredPayment: 20, aprStatus: "unknown", ownerType: "joint" });
+    const snapshot = await service.getWorkspaceSnapshot("household-seed");
+    expect(snapshot.payoffQueue.filter((debt) => debt.id === joint.id)).toHaveLength(1);
+  });
+});

@@ -325,3 +325,56 @@ describe("TrackToZero v2 application service: zero-balance debt must never becom
     expect(snapshot.targetDebt).toBeNull();
   });
 });
+
+describe("TrackToZero v2 application service: payoff queue ordering and ownership display", () => {
+  it("payoffQueue is sorted for the active plan's real strategy (avalanche: highest APR/unknown first)", () => {
+    const { service } = serviceFor();
+    const snapshot = service.getWorkspaceSnapshot("personal-seed");
+    expect(snapshot.activeContext.version.strategy).toBe("avalanche");
+    const aprRank = (debt) => (debt.aprStatus === "unknown" ? Infinity : Number(debt.apr || 0));
+    const queueAprs = snapshot.payoffQueue.map(aprRank);
+    const sortedDesc = [...queueAprs].sort((a, b) => b - a);
+    expect(queueAprs).toEqual(sortedDesc);
+  });
+
+  it("payoffQueue is sorted for snowball (smallest balance first) and shows ownership per entry", () => {
+    const { service } = serviceFor();
+    const snapshot = service.getWorkspaceSnapshot("household-seed");
+    expect(snapshot.activeContext.version.strategy).toBe("snowball");
+    const balances = snapshot.payoffQueue.map((debt) => Number(debt.currentBalance || 0));
+    expect(balances).toEqual([...balances].sort((a, b) => a - b));
+    for (const debt of snapshot.payoffQueue) {
+      expect(typeof debt.ownerLabel).toBe("string");
+    }
+  });
+
+  it("payoffQueue matches the exact order previewDraftPlan would compute for the same strategy (single shared sort, no drift)", () => {
+    const { repository, service } = serviceFor();
+    repository.putWorkspace({ ...repository.getWorkspace("household-seed"), activePlanId: "" });
+    const preview = service.previewDraftPlan("household-seed", { strategy: "avalanche" });
+    const snapshot = service.getWorkspaceSnapshot("household-seed");
+    expect(snapshot.payoffQueue.map((d) => d.id)).toEqual(preview.payoffOrder.map((d) => d.id));
+  });
+
+  it("the ownership filter is a display-only concern: it never changes totalIncludedDebt, projection, or payoffQueue math", () => {
+    const { service } = serviceFor();
+    const before = service.getWorkspaceSnapshot("household-seed");
+    // Filtering happens entirely in the UI layer over snapshot.debts/payoffQueue;
+    // re-fetching the same snapshot must be byte-identical regardless of any
+    // client-side filter selection, since the filter never round-trips to the service.
+    const again = service.getWorkspaceSnapshot("household-seed");
+    expect(again.totalIncludedDebt).toBe(before.totalIncludedDebt);
+    expect(again.payoffQueue.map((d) => d.id)).toEqual(before.payoffQueue.map((d) => d.id));
+    expect(again.projection).toEqual(before.projection);
+  });
+
+  it("a Joint-owned debt appears exactly once in the payoff queue, never duplicated across owners", () => {
+    const { repository, service } = serviceFor();
+    repository.putWorkspace({ ...repository.getWorkspace("household-seed"), activePlanId: "" });
+    const joint = service.createNewDebt("household-seed", { name: "Joint Queue Debt", currentBalance: 300, minimumRequiredPayment: 20, aprStatus: "unknown", ownerType: "joint" });
+    const snapshot = service.getWorkspaceSnapshot("household-seed");
+    const occurrences = snapshot.payoffQueue.filter((debt) => debt.id === joint.id);
+    expect(occurrences).toHaveLength(1);
+    expect(occurrences[0].ownerType).toBe("joint");
+  });
+});

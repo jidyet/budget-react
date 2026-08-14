@@ -359,14 +359,19 @@ function ImportPanel({ snapshot, service, refresh, canManage }) {
     if (!file) return;
     setImportState({ status: "parsing", batch: null, error: "" });
     try {
-      const { readExcelFileToCandidates } = await import("../../services/adapters/excelImportReader.js");
-      const parsed = await readExcelFileToCandidates(file, { importBatchId: "upload", source: "excel" });
+      const isCsv = String(file.name || "").toLowerCase().endsWith(".csv");
+      // Excel and CSV converge on the exact same normalizeSpreadsheetRowsToCandidates
+      // pipeline (see importCandidateAdapter.js) - only the file-to-{headers,rows}
+      // reading step differs between the two readers.
+      const parsed = isCsv
+        ? await (await import("../../services/adapters/csvImportReader.js")).readCsvFileToCandidates(file, { importBatchId: "upload", source: "csv" })
+        : await (await import("../../services/adapters/excelImportReader.js")).readExcelFileToCandidates(file, { importBatchId: "upload", source: "excel" });
       if (!parsed.confident || !parsed.candidates.length) {
         setImportState({ status: "idle", batch: null, error: parsed.batchWarnings.join(" ") || "This file could not be read as a debt list." });
         return;
       }
       const batch = await service.createImportBatch(snapshot.workspace.id, {
-        sourceType: "excel",
+        sourceType: isCsv ? "csv" : "excel",
         sourceFilename: file.name,
         candidates: parsed.candidates,
         warnings: parsed.batchWarnings,
@@ -407,12 +412,12 @@ function ImportPanel({ snapshot, service, refresh, canManage }) {
 
   if (importState.status === "idle" || importState.status === "parsing") {
     return (
-      <Section title="Import a spreadsheet" eyebrow="Excel">
-        <p>Upload an .xlsx or .xls file with your creditor, balance, APR, and minimum-payment columns. Nothing is added until you review and confirm it.</p>
+      <Section title="Import a spreadsheet" eyebrow="Excel or CSV">
+        <p>Upload an .xlsx, .xls, or .csv file with your creditor, balance, APR, and minimum-payment columns. Nothing is added until you review and confirm it.</p>
         <input
           type="file"
-          accept=".xlsx,.xls"
-          aria-label="Upload Excel spreadsheet of debts"
+          accept=".xlsx,.xls,.csv"
+          aria-label="Upload Excel or CSV spreadsheet of debts"
           disabled={!canManage || importState.status === "parsing"}
           onChange={(event) => handleFile(event.target.files?.[0])}
         />

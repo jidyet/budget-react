@@ -118,3 +118,68 @@ describe("statementCandidateAdapter: reuses the existing parseStatement engine",
     expect(first.candidateId).toBe(second.candidateId);
   });
 });
+
+describe("statementCandidateAdapter: minimum-payment / balance field contamination (regression)", () => {
+  const boaStatementText = "Bank of America Statement\nNew Balance: $1,845.20\nMinimum Payment Due: $45.00\nInterest Rate 22.49 % APR\nPayment Due Date: 09/12/2026";
+
+  it("REPRODUCTION: does not let 'New Balance' bleed into 'Minimum Payment Due' when the two labels are on adjacent lines", () => {
+    const parsed = parseStatement(boaStatementText);
+    expect(parsed.balance).toBe(1845.2);
+    expect(parsed.min_due).toBe(45);
+  });
+
+  it("CASE A: New Balance then Minimum Payment Due, inline", () => {
+    const parsed = parseStatement("New Balance: $1,845.20\nMinimum Payment Due: $45.00");
+    expect(parsed.balance).toBe(1845.2);
+    expect(parsed.min_due).toBe(45);
+  });
+
+  it("CASE B: Minimum Payment Due then New Balance, inline (reversed order)", () => {
+    const parsed = parseStatement("Minimum Payment Due: $45.00\nNew Balance: $1,845.20");
+    expect(parsed.balance).toBe(1845.2);
+    expect(parsed.min_due).toBe(45);
+  });
+
+  it("CASE C: New Balance then Minimum Payment Due, label and value on separate lines", () => {
+    const parsed = parseStatement("New Balance\n$1,845.20\nMinimum Payment Due\n$45.00");
+    expect(parsed.balance).toBe(1845.2);
+    expect(parsed.min_due).toBe(45);
+  });
+
+  it("CASE D: Minimum Payment Due then New Balance, label and value on separate lines (reversed order)", () => {
+    const parsed = parseStatement("Minimum Payment Due\n$45.00\nNew Balance\n$1,845.20");
+    expect(parsed.balance).toBe(1845.2);
+    expect(parsed.min_due).toBe(45);
+  });
+
+  it("CASE E: a 'Previous Payment' amount before the real minimum must not be mistaken for it", () => {
+    const parsed = parseStatement("Previous Payment: $300.00\nMinimum Payment Due: $45.00\nNew Balance: $1,845.20");
+    expect(parsed.min_due).toBe(45);
+    expect(parsed.balance).toBe(1845.2);
+  });
+
+  it("CASE F: a Credit Limit amount before the real balance must not be mistaken for it", () => {
+    const parsed = parseStatement("Credit Limit: $10,000.00\nNew Balance: $1,845.20\nMinimum Payment Due: $45.00");
+    expect(parsed.balance).toBe(1845.2);
+    expect(parsed.min_due).toBe(45);
+  });
+
+  it("CASE G: balance present with no minimum-payment label anywhere leaves minimum unresolved, never substituting the balance", () => {
+    const parsed = parseStatement("New Balance: $1,845.20");
+    expect(parsed.balance).toBe(1845.2);
+    expect(parsed.min_due).toBeNull();
+  });
+
+  it("CASE H: minimum payment present with no balance label anywhere leaves balance unresolved", () => {
+    const parsed = parseStatement("Minimum Payment Due: $45.00");
+    expect(parsed.min_due).toBe(45);
+    expect(parsed.balance).toBeNull();
+  });
+
+  it("CASE I: APR extraction is unaffected by the currency-field fix, including with multiple nearby percentages", () => {
+    const parsed = parseStatement("New Balance: $1,845.20\nMinimum Payment Due: $45.00\nInterest Charge Calculation\nPurchases (Promo) 0.00% APR\nBalance Transfers 26.24% APR");
+    expect(parsed.balance).toBe(1845.2);
+    expect(parsed.min_due).toBe(45);
+    expect(parsed.apr_candidates.length).toBeGreaterThan(1);
+  });
+});

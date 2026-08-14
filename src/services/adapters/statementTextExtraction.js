@@ -173,16 +173,36 @@ export function firstCurrencyMatch(text, patterns) {
   return null;
 }
 
+// Forward-only window: once a label matches (possibly mid-line), only text
+// AFTER that match - the rest of its own line, then up to `searchLines`
+// following lines - is searched for the value. This is the fix for a real
+// cross-field contamination bug: the previous implementation joined a whole
+// N-line window and then took "the first value anywhere in the window",
+// which let an earlier line's amount (e.g. "New Balance: $1,845.20") answer
+// a later line's label (e.g. "Minimum Payment Due: $45.00") whenever the two
+// were within `searchLines` of each other. Searching only forward from the
+// label's own match position means a value can only satisfy the label that
+// precedes it, never one that follows - "Label: $X" and "Label\n$X" both
+// still resolve correctly, but a *different* label's value earlier in the
+// window can no longer leak into this one.
+const forwardWindowFromLabelMatch = (lines, lineIndex, match, searchLines) => {
+  const line = lines[lineIndex];
+  const afterLabelOnSameLine = line.slice(match.index + match[0].length);
+  const followingLines = lines.slice(lineIndex + 1, lineIndex + 1 + searchLines);
+  return [afterLabelOnSameLine, ...followingLines].join(" ");
+};
+
 export function extractLabeledCurrency(text, labelPatterns, { allowZero = true, searchLines = 2 } = {}) {
   const lines = getTextLines(text);
   const candidates = [];
 
   lines.forEach((line, index) => {
-    const joined = lines.slice(index, index + searchLines + 1).join(" ");
     labelPatterns.forEach((labelPattern, labelIndex) => {
-      if (!labelPattern.test(joined)) return;
-      const amounts = [...joined.matchAll(MONEY_VALUE_RE)]
-        .map((match) => parseCurrency(match[1]))
+      const match = line.match(labelPattern);
+      if (!match) return;
+      const forwardWindow = forwardWindowFromLabelMatch(lines, index, match, searchLines);
+      const amounts = [...forwardWindow.matchAll(MONEY_VALUE_RE)]
+        .map((m) => parseCurrency(m[1]))
         .filter((value) => value != null);
       if (!amounts.length) return;
       const value = allowZero ? amounts[0] : amounts.find((amount) => amount > 0);
@@ -203,10 +223,11 @@ export function extractLabeledDate(text, labelPatterns, { searchLines = 2 } = {}
   const candidates = [];
 
   lines.forEach((line, index) => {
-    const joined = lines.slice(index, index + searchLines + 1).join(" ");
     labelPatterns.forEach((labelPattern, labelIndex) => {
-      if (!labelPattern.test(joined)) return;
-      const dateMatch = joined.match(dateValueRe);
+      const match = line.match(labelPattern);
+      if (!match) return;
+      const forwardWindow = forwardWindowFromLabelMatch(lines, index, match, searchLines);
+      const dateMatch = forwardWindow.match(dateValueRe);
       if (!dateMatch?.[1]) return;
       let score = 100 - labelIndex * 10 - index;
       if (index < 12) score += 18;

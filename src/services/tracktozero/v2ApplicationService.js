@@ -94,14 +94,19 @@ export const createTrackToZeroV2AppService = ({
       asOf,
     });
     const includedDebts = getIncludedDebts(debts, activeContext?.version);
+    const debtBalance = (debt) => Number(snapshotsByDebt[debt.id]?.balance ?? debt.currentBalance ?? 0);
+    // A debt with a $0 (or lower) balance is already paid off and must never
+    // be presented as "what to pay off next," even as a fallback when no
+    // plan has been activated yet.
+    const payableIncludedDebts = includedDebts.filter((debt) => debtBalance(debt) > 0);
     const projectedTarget = projectionWithWarnings.projection[0]?.payoff_target || "";
     const frozenTargetId = activeContext?.version?.startingDebtSnapshot?.find((item) => item.includedInCorePayoffPlan)?.debtId || "";
-    const targetDebt = debts.find((debt) => debt.id === projectedTarget)
-      || debts.find((debt) => debt.name === projectedTarget)
-      || debts.find((debt) => debt.id === frozenTargetId)
-      || includedDebts[0]
+    const targetDebt = debts.find((debt) => debt.id === projectedTarget && debtBalance(debt) > 0)
+      || debts.find((debt) => debt.name === projectedTarget && debtBalance(debt) > 0)
+      || debts.find((debt) => debt.id === frozenTargetId && debtBalance(debt) > 0)
+      || payableIncludedDebts[0]
       || null;
-    const totalIncludedDebt = includedDebts.reduce((sum, debt) => sum + Number(snapshotsByDebt[debt.id]?.balance ?? debt.currentBalance ?? 0), 0);
+    const totalIncludedDebt = includedDebts.reduce((sum, debt) => sum + debtBalance(debt), 0);
 
     return {
       ...context,

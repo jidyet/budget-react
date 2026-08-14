@@ -93,7 +93,12 @@ export const APR_CONTEXT_PATTERNS = [
 ];
 
 export const APR_TABLE_ROW_RE = /([A-Za-z][A-Za-z /&()-]{3,80}?)\s+(\d{1,2}(?:\.\d{1,3})?)%/g;
-export const MONEY_VALUE_RE = /\$?([\d,]+\.\d{2})/g;
+// The leading $ is optional so this can match "New Balance 1,845.20" as well
+// as "$1,845.20" - but that means a bare percentage figure like "6.74" from
+// "6.74% APR" would otherwise match too. The negative lookahead excludes any
+// number immediately followed by a % sign so an APR can never be mistaken
+// for a currency amount (e.g. minimum payment) elsewhere on the statement.
+export const MONEY_VALUE_RE = /\$?([\d,]+\.\d{2})(?!\s*%)/g;
 
 export const FIELD_CONFIG = [
   { label: "Balance", key: "balance", step: "0.01", placeholder: "Not found" },
@@ -381,7 +386,7 @@ export function extractAprPercent(text) {
 }
 
 export const HOLDER_NAME_BLOCKLIST = /^(?:payable|payment|balance|transfer|minimum|account|statement|interest|previous|current|new|due|date|total|amount|fee|charge|purchase|credit|debit|available|billing|return|transaction|activity|summary|account number|routing)$/i;
-export const HOLDER_NAME_BAD_PHRASE_RE = /\b(?:account notifications|your account|my account|notifications|statement for|account summary|rewards|customer service|payment options|minimum payment|new balance|debt|shared|solo|owner|viewer|member|admin)\b/i;
+export const HOLDER_NAME_BAD_PHRASE_RE = /\b(?:account notifications|your account|my account|notifications|statement for|account summary|rewards|customer service|payment options|minimum payment|new balance|debt|shared|solo|owner|viewer|member|admin|undeliverable|service requested|current resident|current occupant|postal customer|boxholder|or resident|forwarding service)\b/i;
 export const BANK_NAME_RE = /^(?:discover|chase|bank of america|capital one|citi|wells fargo|navy federal|us bank|sofi|navient|mohela|nelnet|sallie mae|aes|affirm|synchrony|american express|firstmark services|firstmark)$/i;
 export const PERSON_SUFFIX_RE = /^(?:jr|sr|ii|iii|iv|v)$/i;
 export const INSTITUTION_HINT_KEYWORDS_RE = /\b(?:bank|federal|credit|financial|services|capital|citi|chase|discover|affirm|synchrony|nelnet|navient|mohela|sallie|aes|american express|firstmark|wells fargo|sofi|navy)\b/i;

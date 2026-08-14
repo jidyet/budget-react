@@ -183,3 +183,48 @@ describe("statementCandidateAdapter: minimum-payment / balance field contaminati
     expect(parsed.apr_candidates.length).toBeGreaterThan(1);
   });
 });
+
+describe("statementCandidateAdapter: APR-as-minimum-payment contamination (regression)", () => {
+  it("REPRODUCTION: a bare APR percentage sharing the minimum-payment label's forward search window must not be mistaken for the payment amount", () => {
+    // Realistic layout for a consolidated multi-loan servicer statement
+    // (Nelnet/Firstmark-style): the label is on its own line, and the very
+    // next line - the only line still inside the minimum-due forward search
+    // window - contains both an APR percentage AND the true dollar amount.
+    // Before the fix, MONEY_VALUE_RE's optional "$" let it match the bare
+    // "6.74" from "6.74%" as if it were a currency amount, and being the
+    // first match in the window, it won over the real "$425.00".
+    const text = "Firstmark Services (Nelnet)\nTotal Balance: $34,233.67\nMinimum Payment Due\n6.74% APR   $425.00\nPayment Due Date\nDay 21";
+    const parsed = parseStatement(text);
+    expect(parsed.min_due).toBe(425);
+  });
+
+  it("a percentage adjacent to a currency amount elsewhere on the statement does not affect balance extraction either", () => {
+    const text = "Total Balance 6.99% $12,000.00\nMinimum Payment Due $150.00";
+    const parsed = parseStatement(text);
+    expect(parsed.min_due).toBe(150);
+  });
+});
+
+describe("statementCandidateAdapter: owner suggestion must never be mail-handling boilerplate (regression)", () => {
+  it("REPRODUCTION: 'For Undeliverable Mail Only' must not be suggested as the account holder/owner", () => {
+    const text = "Chase\nAccount Statement\n\nFor Undeliverable Mail Only\n123 Main St\nAnytown ST 12345\n\nNew Balance: $2,345.67\nMinimum Payment Due: $75.00\nPayment Due Date: 09/15/2026";
+    const parsed = parseStatement(text);
+    expect(parsed.holder_name || "").not.toMatch(/undeliverable/i);
+    const candidate = statementResultToCandidate(parsed, { source: "pdf", importBatchId: "b6", fileName: "chase.pdf" });
+    expect(candidate.ownerSuggestion).not.toMatch(/undeliverable/i);
+  });
+
+  it("similar mail-handling boilerplate ('Return Service Requested', 'Address Service Requested') must also never be suggested as owner", () => {
+    for (const boilerplate of ["Return Service Requested", "Address Service Requested", "Change Service Requested"]) {
+      const text = `Chase\nAccount Statement\n\n${boilerplate}\n123 Main St\n\nNew Balance: $2,345.67\nMinimum Payment Due: $75.00`;
+      const parsed = parseStatement(text);
+      expect(parsed.holder_name || "").not.toMatch(/service requested/i);
+    }
+  });
+
+  it("a genuine human cardholder name is still correctly detected (no regression from the boilerplate fix)", () => {
+    const text = "Chase\nAccount Statement\n\nJohn A Smith\n123 Main St\nAnytown ST 12345\n\nNew Balance: $2,345.67\nMinimum Payment Due: $75.00";
+    const parsed = parseStatement(text);
+    expect(parsed.holder_name).toMatch(/John A?\.? Smith/i);
+  });
+});

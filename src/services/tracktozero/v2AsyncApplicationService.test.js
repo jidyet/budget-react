@@ -262,3 +262,36 @@ describe("TrackToZero v2 async application service", () => {
     expect(getUserSafeTrackToZeroError(new Error("FIRESTORE_EMULATOR_HOST missing")).message).toMatch(/temporarily unavailable/);
   });
 });
+
+describe("TrackToZero v2 async application service: zero-balance debt must never become the current target (regression)", () => {
+  const zeroOutDebt = (repository, debt) => {
+    repository.saveDebt({ ...debt, currentBalance: 0 });
+    repository.createBalanceSnapshot({
+      id: `snap-zero-${debt.id}-${Math.random().toString(36).slice(2, 8)}`,
+      workspaceId: debt.workspaceId,
+      debtId: debt.id,
+      balance: 0,
+      observedAt: V2_TEST_NOW,
+      createdBy: "seed-owner",
+    });
+  };
+
+  it("REPRODUCTION: with no active plan, a $0 balance debt sitting first in the list must not be shown as targetDebt", async () => {
+    const { repository, service } = makeService();
+    repository.putWorkspace({ ...repository.getWorkspace("personal-seed"), activePlanId: "" });
+    zeroOutDebt(repository, repository.listDebts("personal-seed")[0]);
+
+    const snapshot = await service.getWorkspaceSnapshot("personal-seed");
+    expect(snapshot.targetDebt?.name).toBe("SoFi Personal Loan");
+  });
+
+  it("with no active plan and every included debt already paid off, targetDebt is null rather than any zero-balance debt", async () => {
+    const { repository, service } = makeService();
+    repository.putWorkspace({ ...repository.getWorkspace("personal-seed"), activePlanId: "" });
+    for (const debt of repository.listDebts("personal-seed")) {
+      zeroOutDebt(repository, debt);
+    }
+    const snapshot = await service.getWorkspaceSnapshot("personal-seed");
+    expect(snapshot.targetDebt).toBeNull();
+  });
+});

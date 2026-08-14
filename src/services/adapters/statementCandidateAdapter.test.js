@@ -363,3 +363,77 @@ describe("statementCandidateAdapter: abbreviated month names ('Feb 03, 2026') mu
     }
   });
 });
+
+describe("statementCandidateAdapter: impossible due-day values are rejected outright (regression - 'day 79')", () => {
+  it("REPRODUCTION: an out-of-range day (79) extracted from a garbled date-like match is never presented as real", () => {
+    const text = "New Balance $500.00\nMinimum Payment Due $25.00\nPayment Due Date 02/79/2026";
+    const parsed = parseStatement(text);
+    // 02/79/2026 is not a real date - both the day and any derived due_date must be rejected.
+    expect(parsed.due_day).toBeNull();
+    expect(parsed.due_date).toBeNull();
+  });
+
+  it("a genuinely valid day-of-month is still accepted", () => {
+    const text = "New Balance $500.00\nMinimum Payment Due $25.00\nPayment Due Date 02/10/2026";
+    const parsed = parseStatement(text);
+    expect(parsed.due_day).toBe(10);
+    expect(parsed.due_date).toBe("2026-02-10");
+  });
+});
+
+describe("statementCandidateAdapter: multi-column layouts can separate a due-date label from its value by an extra line (regression)", () => {
+  it("REPRODUCTION: a real US Bank-style statement (due date one extra line below the label, simulating column-interleaved PDF text extraction) now resolves the full date instead of failing", () => {
+    const text = [
+      "U.S. Bank Cash+ Visa Signature Card",
+      "KRISTINA K DAVIS",
+      "New Balance $4,507.06",
+      "Minimum Payment Due $172.00",
+      "Payment Due Date",
+      "Revolving Line of Credit $12,100.00",
+      "02/10/2026",
+      "Late Payment Warning: If we do not receive your minimum payment...",
+    ].join("\n");
+    const parsed = parseStatement(text);
+    expect(parsed.due_day).toBe(10);
+    expect(parsed.due_date).toBe("2026-02-10");
+  });
+});
+
+describe("statementCandidateAdapter: due date formats without a comma, and without a year (regression + new feature)", () => {
+  it("'Feb 10 2026' (no comma) resolves correctly", () => {
+    const text = "New Balance $500.00\nMinimum Payment Due $25.00\nPayment Due Date Feb 10 2026";
+    const parsed = parseStatement(text);
+    expect(parsed.due_date).toBe("2026-02-10");
+  });
+
+  it("NEW FEATURE: 'Feb 10' with no year infers the year from the statement's own closing date", () => {
+    const text = [
+      "US Bank",
+      "New Balance $500.00",
+      "Minimum Payment Due $25.00",
+      "Payment Due Date Feb 10",
+      "Statement Closing Date January 14, 2026",
+    ].join("\n");
+    const parsed = parseStatement(text);
+    expect(parsed.due_date).toBe("2026-02-10");
+  });
+
+  it("NEW FEATURE: a year-less due date that falls before the statement's month rolls over to the following year (Dec statement, Jan due date)", () => {
+    const text = [
+      "US Bank",
+      "New Balance $500.00",
+      "Minimum Payment Due $25.00",
+      "Payment Due Date Jan 5",
+      "Statement Closing Date December 14, 2025",
+    ].join("\n");
+    const parsed = parseStatement(text);
+    expect(parsed.due_date).toBe("2026-01-05");
+  });
+
+  it("a year-less due date is left unresolved (never guessed) when the statement's own date cannot be found either", () => {
+    const text = "New Balance $500.00\nMinimum Payment Due $25.00\nPayment Due Date Feb 10";
+    const parsed = parseStatement(text);
+    expect(parsed.due_date).toBeNull();
+    expect(parsed.due_day).toBe(10);
+  });
+});

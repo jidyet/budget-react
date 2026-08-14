@@ -158,12 +158,23 @@ export function getTextLines(text) {
     .filter(Boolean);
 }
 
+// A day-of-month is only ever 1-31 - accepting anything outside that range
+// (e.g. a garbled "79" from misaligned PDF text extraction) would present an
+// impossible value as if it were real. Unknown is safer than wrong.
+const isPlausibleDay = (day) => Number.isInteger(day) && day >= 1 && day <= 31;
+
 export function extractDay(dateStr) {
   if (!dateStr) return null;
   const slashMatch = dateStr.match(/(\d{1,2})\/(\d{1,2})\/\d{4}/);
-  if (slashMatch) return Number(slashMatch[2]);
+  if (slashMatch) {
+    const day = Number(slashMatch[2]);
+    return isPlausibleDay(day) ? day : null;
+  }
   const wordMatch = dateStr.match(/\w+ (\d{1,2})/);
-  if (wordMatch) return Number(wordMatch[1]);
+  if (wordMatch) {
+    const day = Number(wordMatch[1]);
+    return isPlausibleDay(day) ? day : null;
+  }
   return null;
 }
 
@@ -200,12 +211,29 @@ export function dateStringToIso(dateStr) {
   const word = dateStr.match(/^([A-Za-z]+) (\d{1,2}),?\s*(\d{4})$/);
   if (word) {
     const month = MONTH_NAMES[word[1].toLowerCase()];
-    if (!month) return null;
     const day = Number(word[2]);
+    if (!month || !isPlausibleDay(day)) return null;
     const year = Number(word[3]);
     return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   }
   return null;
+}
+
+// A payment due date printed without a year (e.g. "Feb 10") is only ever
+// resolved using the statement's OWN date as the anchor - never "now"/system
+// time, which would be wrong for a statement being imported well after it
+// was issued. If the due month is earlier in the calendar than the
+// statement's month, the due date must roll into the following year (e.g. a
+// December statement's January due date is next year). Returns null (never
+// guesses) when there is no statement date to anchor to.
+export function inferYearForMonthDay(month, day, referenceDateIso) {
+  if (!isPlausibleDay(day) || !(month >= 1 && month <= 12)) return null;
+  const refMatch = String(referenceDateIso || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!refMatch) return null;
+  const refYear = Number(refMatch[1]);
+  const refMonth = Number(refMatch[2]);
+  const year = month < refMonth ? refYear + 1 : refYear;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 export function firstCurrencyMatch(text, patterns) {
@@ -231,11 +259,22 @@ export function firstCurrencyMatch(text, patterns) {
 // precedes it, never one that follows - "Label: $X" and "Label\n$X" both
 // still resolve correctly, but a *different* label's value earlier in the
 // window can no longer leak into this one.
-const forwardWindowFromLabelMatch = (lines, lineIndex, match, searchLines) => {
+// stopPatterns (optional): a widened forward window (searchLines > 1) risks
+// crossing into a DIFFERENT label's own line - e.g. "Payment Due Date"
+// searching 2 lines forward could reach "Statement Closing Date <a full
+// date>" and mistake that unrelated date for its own value. When provided,
+// the window truncates as soon as a forward line matches one of these
+// patterns, rather than reading past it.
+const forwardWindowFromLabelMatch = (lines, lineIndex, match, searchLines, stopPatterns = []) => {
   const line = lines[lineIndex];
   const afterLabelOnSameLine = line.slice(match.index + match[0].length);
-  const followingLines = lines.slice(lineIndex + 1, lineIndex + 1 + searchLines);
-  return [afterLabelOnSameLine, ...followingLines].join(" ");
+  const collected = [afterLabelOnSameLine];
+  for (let i = lineIndex + 1; i <= lineIndex + searchLines && i < lines.length; i += 1) {
+    const forwardLine = lines[i];
+    if (stopPatterns.some((pattern) => pattern.test(forwardLine))) break;
+    collected.push(forwardLine);
+  }
+  return collected.join(" ");
 };
 
 export function extractLabeledCurrency(text, labelPatterns, { allowZero = true, searchLines = 2 } = {}) {
@@ -263,7 +302,21 @@ export function extractLabeledCurrency(text, labelPatterns, { allowZero = true, 
   return candidates[0]?.value ?? null;
 }
 
-export function extractLabeledDate(text, labelPatterns, { searchLines = 2 } = {}) {
+// A garbled/misaligned match (e.g. day 79) must never outrank - or stand in
+// for - a genuinely valid date elsewhere in the search window.
+const isPlausibleDateString = (value) => {
+  const slash = value.match(/^(\d{1,2})\/(\d{1,2})\/\d{4}$/);
+  if (slash) {
+    const month = Number(slash[1]);
+    const day = Number(slash[2]);
+    return month >= 1 && month <= 12 && isPlausibleDay(day);
+  }
+  const word = value.match(/^\w+ (\d{1,2})/);
+  if (word) return isPlausibleDay(Number(word[1]));
+  return true;
+};
+
+export function extractLabeledDate(text, labelPatterns, { searchLines = 2, stopPatterns = [] } = {}) {
   const lines = getTextLines(text);
   const dateValueRe = /(\d{2}\/\d{2}\/\d{4}|\w+ \d{1,2},?\s*\d{4})/i;
   const candidates = [];
@@ -272,12 +325,47 @@ export function extractLabeledDate(text, labelPatterns, { searchLines = 2 } = {}
     labelPatterns.forEach((labelPattern, labelIndex) => {
       const match = line.match(labelPattern);
       if (!match) return;
-      const forwardWindow = forwardWindowFromLabelMatch(lines, index, match, searchLines);
-      const dateMatch = forwardWindow.match(dateValueRe);
-      if (!dateMatch?.[1]) return;
+      const forwardWindow = forwardWindowFromLabelMatch(lines, index, match, searchLines, stopPatterns);
+      // Consider every date-shaped match in the window, not just the first -
+      // a two-column statement layout can interleave unrelated text (and an
+      // implausible date) between the label and its real value.
+      const dateMatches = [...forwardWindow.matchAll(new RegExp(dateValueRe, "gi"))]
+        .map((m) => m[1])
+        .filter(isPlausibleDateString);
+      if (!dateMatches.length) return;
       let score = 100 - labelIndex * 10 - index;
       if (index < 12) score += 18;
-      candidates.push({ value: dateMatch[1], score });
+      candidates.push({ value: dateMatches[0], score });
+    });
+  });
+
+  candidates.sort((left, right) => right.score - left.score);
+  return candidates[0]?.value ?? null;
+}
+
+// "Month Day" with NO year (e.g. "Feb 10") - only ever tried as a fallback
+// when extractLabeledDate found no full (with-year) date anywhere in the
+// window. The month/day here still need a reference date (the statement's
+// own date) to become a real due date - see inferYearForMonthDay.
+const MONTH_DAY_ONLY_RE = /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2})(?!\s*,?\s*\d{4})(?!\s*\/)\b/i;
+
+export function extractMonthDayOnly(text, labelPatterns, { searchLines = 2, stopPatterns = [] } = {}) {
+  const lines = getTextLines(text);
+  const candidates = [];
+
+  lines.forEach((line, index) => {
+    labelPatterns.forEach((labelPattern, labelIndex) => {
+      const match = line.match(labelPattern);
+      if (!match) return;
+      const forwardWindow = forwardWindowFromLabelMatch(lines, index, match, searchLines, stopPatterns);
+      const dateMatch = forwardWindow.match(MONTH_DAY_ONLY_RE);
+      if (!dateMatch) return;
+      const month = MONTH_NAMES[dateMatch[1].toLowerCase()];
+      const day = Number(dateMatch[2]);
+      if (!month || !isPlausibleDay(day)) return;
+      let score = 100 - labelIndex * 10 - index;
+      if (index < 12) score += 18;
+      candidates.push({ value: { month, day }, score });
     });
   });
 
@@ -310,14 +398,27 @@ export function extractAccountLast4FromText(text) {
   return "";
 }
 
+// Tries each pattern in order and only STOPS at the first one that produces
+// a genuinely plausible day (extractDay already rejects an out-of-range
+// day). Real-world multi-column statement layouts can put unrelated text
+// between a label and its value (pdfjs extracts text in on-page position
+// order, which doesn't always match visual reading order for a two-column
+// layout) - the previous version returned on the first REGEX match
+// regardless of whether the captured "day" made sense, so one garbled match
+// could block every later, correct fallback from ever being tried.
 export function extractPaymentDueDay(text) {
   const source = String(text || "");
-  const exactMatch = source.match(/Payment\s+Due\s+Date[:\s]*([0-9]{2}\/[0-9]{2}\/[0-9]{4})/i);
-  if (exactMatch?.[1]) return extractDay(exactMatch[1]);
-  const dueDateFallback = source.match(/Due\s+Date[:\s]*([0-9]{2}\/[0-9]{2}\/[0-9]{4})/i);
-  if (dueDateFallback?.[1]) return extractDay(dueDateFallback[1]);
-  const minimumPaymentWindow = source.match(/Minimum\s+Payment\s+Due[\s\S]{0,120}?([0-9]{2}\/[0-9]{2}\/[0-9]{4})/i);
-  return minimumPaymentWindow?.[1] ? extractDay(minimumPaymentWindow[1]) : null;
+  const patterns = [
+    /Payment\s+Due\s+Date[\s\S]{0,60}?([0-9]{1,2}\/[0-9]{1,2}\/[0-9]{4})/i,
+    /Due\s+Date[\s\S]{0,60}?([0-9]{1,2}\/[0-9]{1,2}\/[0-9]{4})/i,
+    /Minimum\s+Payment\s+Due[\s\S]{0,120}?([0-9]{1,2}\/[0-9]{1,2}\/[0-9]{4})/i,
+  ];
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    const day = match?.[1] ? extractDay(match[1]) : null;
+    if (day != null) return day;
+  }
+  return null;
 }
 
 export function extractPurchasesAmount(text) {
@@ -723,8 +824,28 @@ export function enrichStatement(result, text) {
     ?? firstCurrencyMatch(text, EXTRACTION_RE.interestCharged);
   const fees = extractLabeledCurrency(text, [/\bfees charged\b/i, /\btotal fees\b/i, /\bfees\b/i], { allowZero: true, searchLines: 1 })
     ?? firstCurrencyMatch(text, EXTRACTION_RE.fees);
-  const dueDateFromLabels = extractLabeledDate(text, [/\bpayment due date\b/i, /\bnext due date\b/i, /\bdue date\b/i, /\bdue on\b/i, /\bpayment date\b/i], { searchLines: 1 });
-  const statementDateFromLabels = extractLabeledDate(text, [/\bstatement closing date\b/i, /\bclosing date\b/i, /\bstatement date\b/i, /\bstatement period end(?:ing| date)?\b/i], { searchLines: 1 });
+  // searchLines: 2 (not 1) - real multi-column statement layouts can put an
+  // extra line of unrelated text between a due-date label and its value
+  // (pdfjs extracts text in on-page position order, which for a two-column
+  // layout doesn't always match the visual single-column reading order a
+  // human sees). Still forward-only, so this can't reach backward into an
+  // earlier label's value the way the original cross-contamination bug did.
+  const DUE_DATE_LABELS = [/\bpayment due date\b/i, /\bnext due date\b/i, /\bdue date\b/i, /\bdue on\b/i, /\bpayment date\b/i];
+  const STATEMENT_DATE_LABELS = [/\bstatement closing date\b/i, /\bclosing date\b/i, /\bstatement date\b/i, /\bstatement period end(?:ing| date)?\b/i];
+  // Each date label's forward search stops at the OTHER label's own line -
+  // otherwise a widened window (needed to reach a value a line or two below
+  // its label) risks crossing into a completely different label's value
+  // (e.g. "Payment Due Date" reading forward into "Statement Closing Date
+  // <a full date>" and mistaking that unrelated date for its own).
+  const dueDateFromLabels = extractLabeledDate(text, DUE_DATE_LABELS, { searchLines: 2, stopPatterns: STATEMENT_DATE_LABELS });
+  const statementDateFromLabels = extractLabeledDate(text, STATEMENT_DATE_LABELS, { searchLines: 2, stopPatterns: DUE_DATE_LABELS });
+  const statementDateIso = statementDateFromLabels ? dateStringToIso(statementDateFromLabels) : null;
+  // Only tried when no full (with-year) due date was found anywhere in the
+  // window - a statement that prints its due date as just "Feb 10" still
+  // deserves a real due_date, with the year inferred from the statement's
+  // own date rather than left permanently blank.
+  const dueMonthDayOnly = !dueDateFromLabels ? extractMonthDayOnly(text, DUE_DATE_LABELS, { searchLines: 2, stopPatterns: STATEMENT_DATE_LABELS }) : null;
+  const dueDateFromMonthDay = dueMonthDayOnly ? inferYearForMonthDay(dueMonthDayOnly.month, dueMonthDayOnly.day, statementDateIso) : null;
   const derivedBalance = labeledBalance ?? result.balance ?? principalBalance ?? estimatedPayoff;
   const derivedRemainingBalance = explicitRemainingBalance ?? principalBalance ?? result.balance ?? estimatedPayoff;
   return {
@@ -747,14 +868,15 @@ export function enrichStatement(result, text) {
     apr_selected: aprSelected?.value ?? null,
     holder_name: extractTrustedHolderName(text),
     min_due: minimumDue,
-    due_day: strictDueDay ?? (dueDateFromLabels ? extractDay(dueDateFromLabels) : null) ?? result.due_day ?? null,
-    // Only ever set from a full date found under an explicit due-date-style
-    // label (dueDateFromLabels) - never from strictDueDay's lower-confidence
-    // "a date happened to appear near Minimum Payment Due" fallback, so this
-    // stays null in exactly the cases where inventing a full date would be
-    // guessing rather than reading what the statement actually says.
-    due_date: dueDateFromLabels ? dateStringToIso(dueDateFromLabels) : null,
-    statement_date: statementDateFromLabels ? dateStringToIso(statementDateFromLabels) : null,
+    due_day: strictDueDay ?? (dueDateFromLabels ? extractDay(dueDateFromLabels) : null) ?? dueMonthDayOnly?.day ?? result.due_day ?? null,
+    // Set from a full date found under an explicit due-date-style label
+    // (dueDateFromLabels), or a year-less "Month Day" date whose year could
+    // be safely inferred from the statement's own date (dueDateFromMonthDay)
+    // - never from strictDueDay's lower-confidence "a date happened to
+    // appear near Minimum Payment Due" fallback, and never guessed when
+    // there is no statement date to anchor a year-less date to.
+    due_date: dueDateFromLabels ? dateStringToIso(dueDateFromLabels) : dueDateFromMonthDay,
+    statement_date: statementDateIso,
     bank: sanitizeInstitutionHint(detectedProvider || result.bank || ""),
     account_hint: detectedProvider
       ? `${detectedProvider}${detectedLast4 ? ` . . . ${detectedLast4}` : ""}`
@@ -784,7 +906,7 @@ export function parseStatement(text) {
     }
   }
 
-  let dueDateStr = extractLabeledDate(text, [/\bpayment due date\b/i, /\bnext due date\b/i, /\bdue date\b/i, /\bdue on\b/i, /\bpayment date\b/i], { searchLines: 1 });
+  let dueDateStr = extractLabeledDate(text, [/\bpayment due date\b/i, /\bnext due date\b/i, /\bdue date\b/i, /\bdue on\b/i, /\bpayment date\b/i], { searchLines: 2 });
   if (!dueDateStr) {
     for (const re of STMT_DUE_DATE_RE) {
       const m = text.match(re);

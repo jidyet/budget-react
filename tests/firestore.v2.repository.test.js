@@ -305,6 +305,56 @@ test("import reconciliation update-existing writes one BalanceSnapshot in transa
   assert.equal((await repoAs("viewer").listPaymentEvents("w1", debt.id)).length, 0);
 });
 
+test("REVIEW-1A: retrying an update-existing resolution against the real Firestore transaction is idempotent, never a duplicate BalanceSnapshot", async () => {
+  await seedBaseWorkspace();
+  const { debt } = await createDebtWithOpeningSnapshot(repoAs("admin"), {
+    id: "firstmark-1234", name: "Firstmark Student Loan", accountReferenceSafe: "last4:1234", currentBalance: 12000, minimumRequiredPayment: 180, createdBy: "admin",
+  });
+  const args = {
+    workspaceId: "w1",
+    debtId: debt.id,
+    metadataPatch: {},
+    balanceSnapshot: { id: "import-retry-real", workspaceId: "w1", debtId: debt.id, balance: 11880, observedAt: now(), createdBy: "admin", createdAt: now() },
+    actorId: "admin",
+    updatedAt: now(),
+  };
+  const repo = repoAs("admin");
+  const first = await repo.updateDebtFromImportCandidate(args);
+  assert.equal(first.idempotentReplay, undefined);
+  const second = await repo.updateDebtFromImportCandidate(args);
+  assert.equal(second.idempotentReplay, true);
+  const snapshots = await repoAs("viewer").listBalanceSnapshots("w1", debt.id);
+  assert.equal(snapshots.length, 2); // opening + exactly one import snapshot, never two
+});
+
+test("REVIEW-1A: stale-review protection refuses to overwrite a debt that changed since the fingerprint was captured, through the real transaction", async () => {
+  await seedBaseWorkspace();
+  const { debt } = await createDebtWithOpeningSnapshot(repoAs("admin"), {
+    id: "firstmark-1234", name: "Firstmark Student Loan", accountReferenceSafe: "last4:1234", currentBalance: 34233, minimumRequiredPayment: 180, createdBy: "admin",
+  });
+  const staleFingerprint = { currentBalance: 34233, updatedAt: debt.updatedAt || debt.createdAt || "" };
+  // A legitimate newer observation lands first (e.g. the user manually
+  // confirmed a lower balance before the reviewer got to this import).
+  await repoAs("admin").saveDebt({ ...debt, currentBalance: 33500, updatedAt: later() });
+
+  await assert.rejects(
+    repoAs("admin").updateDebtFromImportCandidate({
+      workspaceId: "w1",
+      debtId: debt.id,
+      metadataPatch: {},
+      balanceSnapshot: { id: "import-stale-real", workspaceId: "w1", debtId: debt.id, balance: 11880, observedAt: now(), createdBy: "admin", createdAt: now() },
+      actorId: "admin",
+      updatedAt: later(),
+      expectedPriorState: staleFingerprint,
+    }),
+    /changed since this review/
+  );
+  const live = await repoAs("viewer").getEntityAtPath(`workspaces/w1/debts/${debt.id}`);
+  assert.equal(live.currentBalance, 33500); // newer truth preserved, not overwritten
+  const snapshots = await repoAs("viewer").listBalanceSnapshots("w1", debt.id);
+  assert.equal(snapshots.length, 1); // only the opening snapshot - no stale import snapshot was written
+});
+
 test("plan + planVersion: admin can write, viewer can read, contributor cannot write", async () => {
   await seedBaseWorkspace();
   const plan = await repoAs("admin").savePlan({ id: "p1", workspaceId: "w1", status: "draft", createdAt: now(), createdBy: "admin" });

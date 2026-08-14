@@ -91,7 +91,7 @@ export class InMemoryTrackToZeroRepository {
     this.balanceSnapshots.set(this.key(`${openingSnapshot.workspaceId}/${openingSnapshot.debtId}`, openingSnapshot.id), clone(openingSnapshot));
     return { debt, openingSnapshot };
   }
-  updateDebtFromImportCandidate({ workspaceId, debtId, metadataPatch = {}, balanceSnapshot: snapshotInput, actorId, updatedAt }) {
+  updateDebtFromImportCandidate({ workspaceId, debtId, metadataPatch = {}, balanceSnapshot: snapshotInput, actorId, updatedAt, expectedPriorState = null }) {
     const current = this.listDebts(workspaceId).find((debt) => debt.id === debtId);
     if (!current) throw new Error("Debt not found");
     const snapshot = createBalanceSnapshot({
@@ -102,6 +102,21 @@ export class InMemoryTrackToZeroRepository {
       createdBy: snapshotInput?.createdBy || actorId,
       createdAt: snapshotInput?.createdAt || updatedAt,
     });
+    // Idempotent retry (Part 27/49): mirrors the Firebase repository - the
+    // same deterministic snapshot id already existing means this exact
+    // resolution already succeeded once.
+    const existingSnapshot = this.balanceSnapshots.get(this.key(`${snapshot.workspaceId}/${snapshot.debtId}`, snapshot.id));
+    if (existingSnapshot) {
+      return { debt: clone(current), balanceSnapshot: clone(existingSnapshot), idempotentReplay: true };
+    }
+    // Stale-review protection (Part 28): fail safely rather than overwrite a
+    // debt that legitimately changed since this resolution's fingerprint.
+    if (expectedPriorState) {
+      const liveFingerprint = { currentBalance: Number(current.currentBalance ?? 0), updatedAt: current.updatedAt || current.createdAt || "" };
+      if (liveFingerprint.currentBalance !== expectedPriorState.currentBalance || liveFingerprint.updatedAt !== expectedPriorState.updatedAt) {
+        throw Object.assign(new Error("This debt changed since this review was created. Take one more look before we update it."), { code: "stale_review" });
+      }
+    }
     const debt = createDebt({
       ...current,
       ...metadataPatch,

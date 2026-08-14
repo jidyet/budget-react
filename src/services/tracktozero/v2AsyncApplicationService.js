@@ -20,6 +20,17 @@ import {
   buildResolutionEvidence,
   enrichImportCandidatesWithDebtMatches,
 } from "./debtReconciliation.js";
+import {
+  REVIEW_RESOLUTION_TYPES,
+  debtStateFingerprint,
+  getBlockingReviewCount,
+  getOpenReviewCount,
+  getOpenReviewItems,
+  getResolvedReviewItems,
+  getReviewCountsByType,
+  sortOpenReviewItems,
+} from "./reviewDomain.js";
+import { OWNER_TYPES } from "../../domain/tracktozero/constants.js";
 
 const id = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const stableIdPart = (value) => String(value || "")
@@ -497,9 +508,20 @@ export const createTrackToZeroV2AsyncAppService = ({
     if (!batch) throw new Error("Import batch not found");
     if (batch.status !== "review_required") throw new Error("This import is no longer open for review.");
     const debts = await repository.listDebts(workspaceId);
-    if (decision === RECONCILIATION_DECISIONS.updateExisting && !debts.some((debt) => debt.id === targetDebtId)) {
+    const targetDebt = debts.find((debt) => debt.id === targetDebtId);
+    if (decision === RECONCILIATION_DECISIONS.updateExisting && !targetDebt) {
       throw new Error("Target debt not found in this workspace.");
     }
+    // Stale-review protection (Part 28) starts here: the target debt's
+    // observed state is fingerprinted at the moment the human makes this
+    // decision, not at commit time. commitImportBatch later compares this
+    // fingerprint against the live debt and refuses to overwrite newer truth.
+    const debtSnapshotAtResolution = decision === RECONCILIATION_DECISIONS.updateExisting ? debtStateFingerprint(targetDebt) : null;
+    const reviewResolutionType = decision === RECONCILIATION_DECISIONS.updateExisting
+      ? REVIEW_RESOLUTION_TYPES.updatedExistingDebt
+      : decision === RECONCILIATION_DECISIONS.newDebt
+        ? REVIEW_RESOLUTION_TYPES.createdNewDebt
+        : REVIEW_RESOLUTION_TYPES.deferred;
     const candidates = batch.candidates.map((candidate) => {
       if (candidate.candidateId !== candidateId) return candidate;
       const resolution = buildResolutionEvidence({ decision, targetDebtId, metadataUpdates, actorId, resolvedAt: asOf });
@@ -511,6 +533,11 @@ export const createTrackToZeroV2AsyncAppService = ({
         targetDebtId: decision === RECONCILIATION_DECISIONS.updateExisting ? targetDebtId : "",
         duplicateOfDebtId: decision === RECONCILIATION_DECISIONS.updateExisting ? targetDebtId : candidate.duplicateOfDebtId,
         duplicateStatus: decision === RECONCILIATION_DECISIONS.updateExisting ? "likely_duplicate" : candidate.duplicateStatus,
+        // The durable, general-purpose REVIEW-1A marker (reviewDomain.js
+        // reads this to derive status) - kept alongside, not instead of,
+        // DATA-1B's own evidence.reconciliation.resolution below, which
+        // existing tests already depend on.
+        reviewResolution: { type: reviewResolutionType, decidedAt: asOf, decidedBy: actorId, debtSnapshotAtResolution },
         evidence: {
           ...(candidate.evidence || {}),
           reconciliation: {
@@ -544,6 +571,8 @@ export const createTrackToZeroV2AsyncAppService = ({
     const createdDebts = [];
     const updatedDebts = [];
     const failures = [];
+    const staleCandidateIds = [];
+    const committedOutcomeByCandidateId = new Map();
     for (const candidate of batch.candidates) {
       if (candidate.decision !== "confirmed") continue;
       const resolution = candidate.evidence?.reconciliation?.resolution || {};
@@ -571,8 +600,13 @@ export const createTrackToZeroV2AsyncAppService = ({
             },
             actorId,
             updatedAt: asOf,
+            // Stale-review protection (Part 28): compare against the debt's
+            // state at the moment this decision was made, captured by
+            // resolveImportCandidateMatch/resolveAsExistingDebt.
+            expectedPriorState: candidate.reviewResolution?.debtSnapshotAtResolution || null,
           });
           updatedDebts.push(result.debt);
+          committedOutcomeByCandidateId.set(candidate.candidateId, { type: REVIEW_RESOLUTION_TYPES.updatedExistingDebt, debtId, at: asOf });
           continue;
         }
         // candidate.ownerSuggestion is the parser's raw, non-authoritative
@@ -625,16 +659,38 @@ export const createTrackToZeroV2AsyncAppService = ({
           },
         });
         createdDebts.push(result.debt);
+        committedOutcomeByCandidateId.set(candidate.candidateId, { type: REVIEW_RESOLUTION_TYPES.createdNewDebt, debtId, at: asOf });
       } catch (error) {
-        failures.push({ candidateId: candidate.candidateId, message: error?.message || String(error) });
+        // A stale-review failure is still a failure for batch-commit control
+        // flow (nothing partial is marked committed, and it can be retried
+        // after the reviewer looks again) - but it is tagged distinctly so
+        // it is never confused with a generic repository error, and the
+        // review stays actionable rather than silently disappearing.
+        if (error?.code === "stale_review") staleCandidateIds.push(candidate.candidateId);
+        failures.push({ candidateId: candidate.candidateId, message: error?.message || String(error), code: error?.code || "" });
       }
     }
+
+    // Stamp committedOutcome onto the candidates that actually succeeded -
+    // this is the durable marker that makes a review RESOLVED (Part 4/5):
+    // the decision alone is not enough, the financial mutation must have
+    // completed, and this must survive reload.
+    const nextCandidates = batch.candidates.map((candidate) => {
+      const outcome = committedOutcomeByCandidateId.get(candidate.candidateId);
+      return outcome ? { ...candidate, committedOutcome: outcome } : candidate;
+    });
 
     const confirmedCount = batch.candidates.filter((c) => c.decision === "confirmed").length;
     const committed = failures.length === 0;
     const updatedBatch = await repository.saveImportBatch({
       ...batch,
-      status: committed ? "committed" : (createdDebts.length ? "review_required" : "failed"),
+      candidates: nextCandidates,
+      // A commit-time failure must always stay retryable (Part 27/48 -
+      // "the batch was not marked committed so it can be retried") even when
+      // zero candidates happened to succeed yet - "failed" is reserved for
+      // createImportBatch's own zero-candidates-parsed case, never reused
+      // here to mean "commit attempt failed."
+      status: committed ? "committed" : "review_required",
       confirmedCount,
       rejectedCount: batch.candidates.filter((c) => c.decision === "excluded").length,
       committedAt: committed ? asOf : null,
@@ -643,8 +699,237 @@ export const createTrackToZeroV2AsyncAppService = ({
       failure: failures.length ? `${failures.length} candidate(s) failed to commit: ${failures.map((f) => f.candidateId).join(", ")}` : "",
       warnings: [...(batch.warnings || []), ...failures.map((f) => `Candidate ${f.candidateId} failed: ${f.message}`)],
     });
-    if (failures.length) throw Object.assign(new Error(`Import commit incomplete: ${failures.length} of ${confirmedCount} confirmed debts failed. ${createdDebts.length + updatedDebts.length} succeeded and were kept; the batch was not marked committed so it can be retried.`), { batch: updatedBatch, createdDebts, updatedDebts, failures });
+    if (failures.length) throw Object.assign(new Error(`Import commit incomplete: ${failures.length} of ${confirmedCount} confirmed debts failed. ${createdDebts.length + updatedDebts.length} succeeded and were kept; the batch was not marked committed so it can be retried.`), { batch: updatedBatch, createdDebts, updatedDebts, failures, staleCandidateIds });
     return { batch: updatedBatch, createdDebts, updatedDebts };
+  };
+
+  // ── REVIEW-1A resolution commands ───────────────────────────────────────
+  // React/UI code never performs multi-document financial mutations
+  // directly (Part 12) - every resolution goes through one of these named
+  // actions, which all share the same underlying safety machinery
+  // (resolveImportCandidateMatch's staleness fingerprinting, and
+  // commitImportBatch's atomic-per-candidate mutation + idempotent retry).
+
+  // Update Existing (Part 13). Thin, named wrapper over the existing,
+  // already-tested resolveImportCandidateMatch primitive - kept so the
+  // resolution surface reads the way the rest of the spec names it.
+  const resolveAsExistingDebt = (workspaceId, batchId, candidateId, { targetDebtId, metadataUpdates = {} } = {}) =>
+    resolveImportCandidateMatch(workspaceId, batchId, candidateId, { decision: RECONCILIATION_DECISIONS.updateExisting, targetDebtId, metadataUpdates });
+
+  // Create New Debt (Part 14).
+  const resolveAsNewDebt = (workspaceId, batchId, candidateId) =>
+    resolveImportCandidateMatch(workspaceId, batchId, candidateId, { decision: RECONCILIATION_DECISIONS.newDebt });
+
+  // "I'm not sure" / Leave for later (Part 15) - the review stays OPEN with
+  // zero financial mutation. Identical safety contract to "unsure" above;
+  // named separately because it is not really a "reconciliation decision",
+  // it is the explicit absence of one.
+  const deferReview = (workspaceId, batchId, candidateId) =>
+    resolveImportCandidateMatch(workspaceId, batchId, candidateId, { decision: RECONCILIATION_DECISIONS.unsure });
+
+  const RESOLVABLE_CANDIDATE_FIELDS = Object.freeze(["currentBalance", "balanceStatus", "apr", "aprStatus", "minimumPayment", "dueDate", "ownerType", "ownerId"]);
+
+  // Missing-information / field-conflict resolution (Part 16-19). Patches
+  // only the specific fields the reviewer explicitly confirmed - never asks
+  // for or overwrites fields the reviewer didn't touch. This narrows the
+  // candidate's own review signals (e.g. clears BALANCE_CONFIRMATION once a
+  // real balance is supplied) but is NOT itself a new_debt/update_existing
+  // decision - it can be called any number of times before one of those.
+  const resolveMissingInformation = async (workspaceId, batchId, candidateId, { fields = {} } = {}) => {
+    assertInteractive();
+    const { membership } = await getWorkspaceContext(workspaceId);
+    if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot review this import.");
+    const patch = Object.fromEntries(Object.entries(fields).filter(([key]) => RESOLVABLE_CANDIDATE_FIELDS.includes(key)));
+    if (!Object.keys(patch).length) throw new Error("No resolvable fields were provided.");
+    if ("currentBalance" in patch) patch.balanceStatus = "confirmed";
+    const batch = await repository.getImportBatch(workspaceId, batchId);
+    if (!batch) throw new Error("Import batch not found");
+    if (batch.status !== "review_required") throw new Error("This import is no longer open for review.");
+    const candidates = batch.candidates.map((candidate) => {
+      if (candidate.candidateId !== candidateId) return candidate;
+      return {
+        ...candidate,
+        ...patch,
+        fieldResolutions: {
+          ...(candidate.fieldResolutions || {}),
+          ...Object.fromEntries(Object.keys(patch).map((field) => [field, { value: patch[field], decidedAt: asOf, decidedBy: actorId }])),
+        },
+      };
+    });
+    if (!candidates.some((candidate) => candidate.candidateId === candidateId)) throw new Error("Candidate not found in this import batch.");
+    return repository.saveImportBatch({ ...batch, candidates, updatedAt: asOf, updatedBy: actorId });
+  };
+
+  const resolveBalance = (workspaceId, batchId, candidateId, { currentBalance } = {}) =>
+    resolveMissingInformation(workspaceId, batchId, candidateId, { fields: { currentBalance } });
+  const resolveApr = (workspaceId, batchId, candidateId, { apr, aprStatus = "known" } = {}) =>
+    resolveMissingInformation(workspaceId, batchId, candidateId, { fields: { apr, aprStatus } });
+  const resolveMinimumPayment = (workspaceId, batchId, candidateId, { minimumPayment } = {}) =>
+    resolveMissingInformation(workspaceId, batchId, candidateId, { fields: { minimumPayment } });
+  const resolveDueDate = (workspaceId, batchId, candidateId, { dueDate } = {}) =>
+    resolveMissingInformation(workspaceId, batchId, candidateId, { fields: { dueDate } });
+
+  // Owner resolution (Part 19) - authoritative ownership is restricted to a
+  // verified workspace member, Joint/Household, or Unassigned. Parser text
+  // (ownerSuggestion) is never accepted here as a value in its own right.
+  const resolveOwner = async (workspaceId, batchId, candidateId, { ownerType, ownerId = "" } = {}) => {
+    if (!OWNER_TYPES.includes(ownerType)) throw new Error("Unsupported owner type.");
+    if (ownerType === "member") {
+      const { members } = await getWorkspaceContext(workspaceId);
+      if (!members.some((member) => member.uid === ownerId && member.status !== "removed")) {
+        throw new Error("Owner must be a verified workspace member.");
+      }
+    }
+    return resolveMissingInformation(workspaceId, batchId, candidateId, { fields: { ownerType, ownerId: ownerType === "member" ? ownerId : "" } });
+  };
+
+  // Business-scope resolution (Part 20). "exclude" is terminal (dismissed,
+  // zero mutation) - a business-like row never silently enters a Household
+  // payoff. "include" only acknowledges the scope question; the reviewer
+  // still separately resolves new_debt/update_existing afterward.
+  const resolveBusinessScope = async (workspaceId, batchId, candidateId, { decision } = {}) => {
+    assertInteractive();
+    const { membership } = await getWorkspaceContext(workspaceId);
+    if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot review this import.");
+    if (!["exclude", "include"].includes(decision)) throw new Error("Unsupported business-scope decision.");
+    const batch = await repository.getImportBatch(workspaceId, batchId);
+    if (!batch) throw new Error("Import batch not found");
+    if (batch.status !== "review_required") throw new Error("This import is no longer open for review.");
+    const resolutionType = decision === "exclude" ? REVIEW_RESOLUTION_TYPES.excludedBusinessScope : REVIEW_RESOLUTION_TYPES.includedBusinessScope;
+    const candidates = batch.candidates.map((candidate) => {
+      if (candidate.candidateId !== candidateId) return candidate;
+      return {
+        ...candidate,
+        decision: decision === "exclude" ? "excluded" : candidate.decision,
+        includedInCorePayoffPlan: decision === "exclude" ? false : candidate.includedInCorePayoffPlan,
+        reviewResolution: { type: resolutionType, decidedAt: asOf, decidedBy: actorId },
+      };
+    });
+    if (!candidates.some((candidate) => candidate.candidateId === candidateId)) throw new Error("Candidate not found in this import batch.");
+    return repository.saveImportBatch({
+      ...batch,
+      candidates,
+      rejectedCount: candidates.filter((c) => c.decision === "excluded").length,
+      updatedAt: asOf,
+      updatedBy: actorId,
+    });
+  };
+
+  // Debt-vs-bill classification (Part 21). "bill" is terminal - no Debt is
+  // ever created from it.
+  const resolveDebtClassification = async (workspaceId, batchId, candidateId, { classification } = {}) => {
+    assertInteractive();
+    const { membership } = await getWorkspaceContext(workspaceId);
+    if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot review this import.");
+    if (!["debt", "bill"].includes(classification)) throw new Error("Unsupported classification.");
+    const batch = await repository.getImportBatch(workspaceId, batchId);
+    if (!batch) throw new Error("Import batch not found");
+    if (batch.status !== "review_required") throw new Error("This import is no longer open for review.");
+    const resolutionType = classification === "bill" ? REVIEW_RESOLUTION_TYPES.classifiedAsBill : REVIEW_RESOLUTION_TYPES.classifiedAsDebt;
+    const candidates = batch.candidates.map((candidate) => {
+      if (candidate.candidateId !== candidateId) return candidate;
+      return {
+        ...candidate,
+        decision: classification === "bill" ? "excluded" : candidate.decision,
+        reviewResolution: { type: resolutionType, decidedAt: asOf, decidedBy: actorId },
+      };
+    });
+    if (!candidates.some((candidate) => candidate.candidateId === candidateId)) throw new Error("Candidate not found in this import batch.");
+    return repository.saveImportBatch({
+      ...batch,
+      candidates,
+      rejectedCount: candidates.filter((c) => c.decision === "excluded").length,
+      updatedAt: asOf,
+      updatedBy: actorId,
+    });
+  };
+
+  // Duplicate resolution (Part 22) - terminal, zero mutation, idempotent
+  // (calling it twice leaves the same dismissed state).
+  const dismissDuplicate = async (workspaceId, batchId, candidateId) => {
+    assertInteractive();
+    const { membership } = await getWorkspaceContext(workspaceId);
+    if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot review this import.");
+    const batch = await repository.getImportBatch(workspaceId, batchId);
+    if (!batch) throw new Error("Import batch not found");
+    if (batch.status !== "review_required") throw new Error("This import is no longer open for review.");
+    const candidates = batch.candidates.map((candidate) => {
+      if (candidate.candidateId !== candidateId) return candidate;
+      return {
+        ...candidate,
+        decision: "excluded",
+        reviewResolution: { type: REVIEW_RESOLUTION_TYPES.dismissedDuplicate, decidedAt: asOf, decidedBy: actorId },
+      };
+    });
+    if (!candidates.some((candidate) => candidate.candidateId === candidateId)) throw new Error("Candidate not found in this import batch.");
+    return repository.saveImportBatch({
+      ...batch,
+      candidates,
+      rejectedCount: candidates.filter((c) => c.decision === "excluded").length,
+      updatedAt: asOf,
+      updatedBy: actorId,
+    });
+  };
+
+  // Historical-statement resolution (Part 23) - uses the plain,
+  // append-only createBalanceSnapshot primitive (never
+  // updateDebtFromImportCandidate), so an older statement can NEVER become
+  // the debt's current balance no matter when it is uploaded.
+  const addHistoricalSnapshot = async (workspaceId, batchId, candidateId, { targetDebtId, statementDate } = {}) => {
+    assertInteractive();
+    const { membership } = await getWorkspaceContext(workspaceId);
+    if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot review this import.");
+    if (!statementDate) throw new Error("A statement date is required for a historical snapshot.");
+    const batch = await repository.getImportBatch(workspaceId, batchId);
+    if (!batch) throw new Error("Import batch not found");
+    const candidate = batch.candidates.find((c) => c.candidateId === candidateId);
+    if (!candidate) throw new Error("Candidate not found in this import batch.");
+    const debts = await repository.listDebts(workspaceId);
+    if (!debts.some((debt) => debt.id === targetDebtId)) throw new Error("Target debt not found in this workspace.");
+    const latestSnapshot = (await repository.listBalanceSnapshots(workspaceId, targetDebtId))[0] || null;
+    if (latestSnapshot && Date.parse(statementDate) >= Date.parse(latestSnapshot.observedAt)) {
+      throw new Error("This statement is not older than the debt's latest known balance - use Update Existing Debt instead.");
+    }
+    const snapshot = await repository.createBalanceSnapshot({
+      id: `historical-${stableIdPart(`${batchId}:${candidateId}`)}`,
+      workspaceId,
+      debtId: targetDebtId,
+      balance: candidate.currentBalance,
+      observedAt: statementDate,
+      source: "import",
+      notes: `Historical balance from ${batch.sourceFilename || batch.sourceType} (batch ${batchId}, candidate ${candidateId}). Confirmed as historical - does not change the debt's current balance.`,
+      createdAt: asOf,
+      createdBy: actorId,
+    });
+    const candidates = batch.candidates.map((c) => {
+      if (c.candidateId !== candidateId) return c;
+      return {
+        ...c,
+        decision: "confirmed",
+        targetDebtId,
+        reviewResolution: { type: REVIEW_RESOLUTION_TYPES.addedHistoricalSnapshot, decidedAt: asOf, decidedBy: actorId },
+        committedOutcome: { type: REVIEW_RESOLUTION_TYPES.addedHistoricalSnapshot, debtId: targetDebtId, at: asOf },
+      };
+    });
+    await repository.saveImportBatch({ ...batch, candidates, updatedAt: asOf, updatedBy: actorId });
+    return { balanceSnapshot: snapshot };
+  };
+
+  // Shared review truth (Part 9, 39, 40) - the one entry point a future
+  // Review Center / Home count / Import screen should call, so open/
+  // blocking/type counts are never recomputed independently per screen.
+  // Workspace-scoped for free: repository.listImportBatches already filters
+  // by workspaceId in both the InMemory and Firebase repositories.
+  const getReviewSnapshot = async (workspaceId) => {
+    await getWorkspaceContext(workspaceId);
+    const batches = await (repository.listImportBatches?.(workspaceId) || []);
+    return {
+      openItems: sortOpenReviewItems(getOpenReviewItems(batches)),
+      resolvedItems: getResolvedReviewItems(batches),
+      openCount: getOpenReviewCount(batches),
+      blockingCount: getBlockingReviewCount(batches),
+      countsByType: getReviewCountsByType(batches),
+    };
   };
 
   const previewScenario = async (workspaceId, { extraMonthlyPayment = 100 } = {}) => {
@@ -730,6 +1015,20 @@ export const createTrackToZeroV2AsyncAppService = ({
     decideImportCandidate,
     resolveImportCandidateMatch,
     commitImportBatch,
+    resolveAsExistingDebt,
+    resolveAsNewDebt,
+    deferReview,
+    resolveMissingInformation,
+    resolveBalance,
+    resolveApr,
+    resolveMinimumPayment,
+    resolveDueDate,
+    resolveOwner,
+    resolveBusinessScope,
+    resolveDebtClassification,
+    dismissDuplicate,
+    addHistoricalSnapshot,
+    getReviewSnapshot,
     previewDraftPlan,
     createDraftPlan,
     activatePlan,

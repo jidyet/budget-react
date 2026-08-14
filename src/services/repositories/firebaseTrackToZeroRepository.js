@@ -124,7 +124,7 @@ export class FirebaseTrackToZeroRepository {
     await batch.commit();
     return { debt, openingSnapshot };
   }
-  async updateDebtFromImportCandidate({ workspaceId, debtId, metadataPatch = {}, balanceSnapshot: snapshotInput, actorId, updatedAt }) {
+  async updateDebtFromImportCandidate({ workspaceId, debtId, metadataPatch = {}, balanceSnapshot: snapshotInput, actorId, updatedAt, expectedPriorState = null }) {
     const snapshot = createBalanceSnapshot({
       ...snapshotInput,
       workspaceId,
@@ -139,8 +139,23 @@ export class FirebaseTrackToZeroRepository {
       const debtSnap = await tx.get(debtRef);
       const existingSnapshot = await tx.get(snapshotRef);
       if (!debtSnap.exists()) throw new Error("Debt not found");
-      if (existingSnapshot.exists()) throw new Error("Imported balance snapshot already exists");
       const current = fromFirestoreDoc("debt", debtSnap.data());
+      // Idempotent retry (Part 27/49): this exact resolution (same
+      // deterministic snapshot id) already succeeded - return the current
+      // state as success instead of erroring, so a double-click or network
+      // retry never surfaces as a false failure.
+      if (existingSnapshot.exists()) {
+        return { debt: current, balanceSnapshot: fromFirestoreDoc("balanceSnapshot", existingSnapshot.data()), idempotentReplay: true };
+      }
+      // Stale-review protection (Part 28): the debt legitimately changed
+      // after this resolution's target-state fingerprint was captured - fail
+      // safely rather than silently overwrite newer truth.
+      if (expectedPriorState) {
+        const liveFingerprint = { currentBalance: Number(current.currentBalance ?? 0), updatedAt: current.updatedAt || current.createdAt || "" };
+        if (liveFingerprint.currentBalance !== expectedPriorState.currentBalance || liveFingerprint.updatedAt !== expectedPriorState.updatedAt) {
+          throw Object.assign(new Error("This debt changed since this review was created. Take one more look before we update it."), { code: "stale_review" });
+        }
+      }
       const debt = createDebt({
         ...current,
         ...metadataPatch,

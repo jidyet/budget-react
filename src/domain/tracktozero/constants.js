@@ -8,6 +8,8 @@ export const PLAN_STRATEGIES = Object.freeze(["snowball", "avalanche"]);
 export const VERSION_REASONS = Object.freeze(["activation", "reforecast", "strategy_change", "debt_added", "balance_correction"]);
 export const EVENT_SOURCES = Object.freeze(["manual", "import", "future_bank_sync"]);
 export const MIGRATION_STATES = Object.freeze(["legacy", "eligible", "migration_preview", "migrated", "rollback_allowed", "v2_native"]);
+export const IMPORT_BATCH_STATUSES = Object.freeze(["uploaded", "parsing", "review_required", "approved", "committing", "committed", "failed", "cancelled"]);
+export const IMPORT_CANDIDATE_DECISIONS = Object.freeze(["pending_review", "confirmed", "excluded", "duplicate", "needs_information"]);
 
 export const ROLE_PERMISSIONS = Object.freeze({
   owner: Object.freeze({
@@ -43,4 +45,3 @@ export const ROLE_PERMISSIONS = Object.freeze({
     destructiveWorkspaceActions: false,
   }),
 });
-

@@ -150,6 +150,16 @@ service cloud.firestore {
           && request.resource.data.role in ["admin", "contributor", "viewer"];
       }
 
+      match /import_batches/{batchId} {
+        allow read: if isViewerPlus(workspaceId);
+        allow create: if isAdminPlus(workspaceId)
+          && request.resource.data.workspaceId == workspaceId
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if isAdminPlus(workspaceId)
+          && request.resource.data.workspaceId == workspaceId;
+        allow delete: if isMigrationOperator(workspaceId);
+      }
+
       match /debts/{debtId} {
         allow read: if isViewerPlus(workspaceId);
         allow create: if isAdminPlus(workspaceId)

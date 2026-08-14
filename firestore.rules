@@ -804,6 +804,16 @@ service cloud.firestore {
           && request.resource.data.role in ["admin", "contributor", "viewer"];
       }
 
+      match /import_batches/{batchId} {
+        allow read: if v2ViewerPlus(workspaceId);
+        allow create: if v2AdminPlus(workspaceId)
+          && request.resource.data.workspaceId == workspaceId
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if v2AdminPlus(workspaceId)
+          && request.resource.data.workspaceId == workspaceId;
+        allow delete: if v2MigrationOperator(workspaceId);
+      }
+
       match /debts/{debtId} {
         allow read: if v2ViewerPlus(workspaceId);
         allow create: if v2AdminPlus(workspaceId)

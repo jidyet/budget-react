@@ -109,7 +109,7 @@ const largeFixture = () => {
 
 test.before(async () => {
   if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error("FIRESTORE_EMULATOR_HOST is required; run via npm run test:firestore:v2");
-  const rules = await readFile(resolve("firestore.v2.rules"), "utf8");
+  const rules = await readFile(resolve(process.env.TRACKTOZERO_V2_RULES_FILE || "firestore.v2.rules"), "utf8");
   testEnv = await initializeTestEnvironment({
     projectId: PROJECT_ID,
     firestore: { host: EMULATOR_HOST, port: Number(EMULATOR_PORT), rules },

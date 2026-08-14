@@ -14,6 +14,7 @@ import {
   createBalanceSnapshot,
   createDebt,
   createExpectedCheckpoint,
+  createImportBatch,
   createPaymentEvent,
   createPayoffPlan,
   createPlanVersion,
@@ -38,6 +39,7 @@ const entityKindForPath = (path) => {
   if (parts[2] === "plans" && parts[4] === "versions" && parts.length === 6) return "version";
   if (parts[2] === "plans" && parts[4] === "versions" && parts[6] === "expected_schedule") return "expectedCheckpoint";
   if (parts[2] === "migration_runs") return "migrationRun";
+  if (parts[2] === "import_batches") return "importBatch";
   return "";
 };
 
@@ -278,6 +280,22 @@ export class FirebaseTrackToZeroRepository {
   async deleteEntityAtPath(path) {
     await deleteDoc(docRefFromPath(this.db, path));
     return true;
+  }
+
+  // ── ImportBatch ────────────────────────────────────────────────────────
+  async saveImportBatch(input) {
+    const batch = createImportBatch(input);
+    await setDoc(doc(this.db, v2Paths.importBatch(batch.workspaceId, batch.id)), toFirestoreDoc("importBatch", batch));
+    return batch;
+  }
+  async getImportBatch(workspaceId, id) {
+    const snap = await getDoc(doc(this.db, v2Paths.importBatch(workspaceId, id)));
+    return snap.exists() ? fromFirestoreDoc("importBatch", snap.data()) : null;
+  }
+  async listImportBatches(workspaceId) {
+    const colRef = collection(this.db, "workspaces", workspaceId, "import_batches");
+    const snap = await getDocs(query(colRef, orderBy("createdAt", "desc")));
+    return snap.docs.map((d) => fromFirestoreDoc("importBatch", d.data()));
   }
 
   // ── Active-plan switching ──────────────────────────────────────────────

@@ -62,6 +62,12 @@ const runSuiteAgainst = async (rulesFile, { label }) => {
     CI: "1",
     XDG_CONFIG_HOME: configHome,
     FIRESTORE_EMULATOR_HOST: `127.0.0.1:${firestorePort}`,
+    // The test files themselves call initializeTestEnvironment({ firestore: { rules } }),
+    // which pushes rules content straight to the emulator's admin API - that push wins
+    // over whatever ruleset the emulator originally booted with via firebase.json above.
+    // So TRACKTOZERO_V2_RULES_FILE (read by each test file) is what actually controls
+    // which ruleset gets tested, not the firebaseConfig.firestore.rules line above.
+    TRACKTOZERO_V2_RULES_FILE: resolve(workspaceRoot, rulesFile),
     PATH: runnerPath,
     Path: runnerPath,
     ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),

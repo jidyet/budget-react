@@ -1,4 +1,4 @@
-import { createBalanceSnapshot, createDebt, createExpectedCheckpoint, createPaymentEvent, createPayoffPlan, createPlanVersion, createWorkspace, createWorkspaceMembership } from "../../domain/tracktozero/models.js";
+import { createBalanceSnapshot, createDebt, createExpectedCheckpoint, createImportBatch, createPaymentEvent, createPayoffPlan, createPlanVersion, createWorkspace, createWorkspaceMembership } from "../../domain/tracktozero/models.js";
 import { activatePlanTransaction } from "../tracktozero/activePlanService.js";
 
 const clone = (value) => structuredClone(value);
@@ -15,6 +15,7 @@ export const v2Paths = {
   paymentEvent: (workspaceId, debtId, eventId) => `workspaces/${workspaceId}/debts/${debtId}/payment_events/${eventId}`,
   balanceSnapshot: (workspaceId, debtId, snapshotId) => `workspaces/${workspaceId}/debts/${debtId}/balance_snapshots/${snapshotId}`,
   migrationRun: (workspaceId, runId) => `workspaces/${workspaceId}/migration_runs/${runId}`,
+  importBatch: (workspaceId, batchId) => `workspaces/${workspaceId}/import_batches/${batchId}`,
 };
 
 const pathFromEntity = (entity) => {
@@ -41,6 +42,7 @@ export class InMemoryTrackToZeroRepository {
     this.balanceSnapshots = new Map(Object.entries(seed.balanceSnapshots || {}).map(([key, value]) => [key, clone(value)]));
     this.expectedCheckpoints = new Map(Object.entries(seed.expectedCheckpoints || {}).map(([key, value]) => [key, clone(value)]));
     this.migrationRuns = new Map(Object.entries(seed.migrationRuns || {}).map(([key, value]) => [key, clone(value)]));
+    this.importBatches = new Map(Object.entries(seed.importBatches || {}).map(([key, value]) => [key, clone(value)]));
   }
 
   key(workspaceId, id) { return `${workspaceId}/${id}`; }
@@ -244,6 +246,19 @@ export class InMemoryTrackToZeroRepository {
   getEntityAtPath(path) { return this.getMigrationEntityByPath(path); }
   deleteEntityAtPath(path) { return this.deleteMigrationEntityByPath(path); }
   pathFromEntity(entity) { return pathFromEntity(entity); }
+
+  saveImportBatch(input) {
+    const batch = createImportBatch(input);
+    this.importBatches.set(this.key(batch.workspaceId, batch.id), clone(batch));
+    return batch;
+  }
+  getImportBatch(workspaceId, id) { return this.importBatches.has(this.key(workspaceId, id)) ? clone(this.importBatches.get(this.key(workspaceId, id))) : null; }
+  listImportBatches(workspaceId) {
+    return [...this.importBatches.values()]
+      .filter((batch) => batch.workspaceId === workspaceId)
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || String(b.id).localeCompare(String(a.id)))
+      .map(clone);
+  }
 
   activatePlan({ workspaceId, planId, versionId, actorId, activatedAt }) {
     return activatePlanTransaction({ repository: this, workspaceId, planId, versionId, actorId, activatedAt });

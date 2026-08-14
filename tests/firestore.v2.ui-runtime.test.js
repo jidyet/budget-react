@@ -94,7 +94,7 @@ test.before(async () => {
     throw new Error("FIRESTORE_EMULATOR_HOST is not set - refusing Phase 3b Firebase UI runtime tests.");
   }
   assertTrackToZeroV2EmulatorConfig({ projectId: PROJECT_ID, emulatorHost: process.env.FIRESTORE_EMULATOR_HOST });
-  const rules = await readFile(resolve("firestore.v2.rules"), "utf8");
+  const rules = await readFile(resolve(process.env.TRACKTOZERO_V2_RULES_FILE || "firestore.v2.rules"), "utf8");
   testEnv = await initializeTestEnvironment({
     projectId: PROJECT_ID,
     firestore: { host: EMULATOR_HOST, port: Number(EMULATOR_PORT), rules },

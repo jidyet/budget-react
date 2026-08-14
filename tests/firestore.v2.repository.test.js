@@ -6,6 +6,7 @@ import process from "node:process";
 import { assertFails, assertSucceeds, initializeTestEnvironment } from "@firebase/rules-unit-testing";
 import { FirebaseTrackToZeroRepository } from "../src/services/repositories/firebaseTrackToZeroRepository.js";
 import { runTrackToZeroRepositoryContractSuite } from "./support/trackToZeroRepositoryContract.js";
+import { createTrackToZeroV2AsyncAppService } from "../src/services/tracktozero/v2AsyncApplicationService.js";
 
 // Proves the *real* FirebaseTrackToZeroRepository write/read path is genuinely
 // gated by firestore.v2.rules (not just client-side checks), using authenticated
@@ -79,7 +80,7 @@ test.before(async () => {
       "Run via `npm run test:firestore:v2`, which starts the emulator and sets this."
     );
   }
-  const rules = await readFile(resolve("firestore.v2.rules"), "utf8");
+  const rules = await readFile(resolve(process.env.TRACKTOZERO_V2_RULES_FILE || "firestore.v2.rules"), "utf8");
   testEnv = await initializeTestEnvironment({
     projectId: PROJECT_ID,
     firestore: { host: EMULATOR_HOST, port: Number(EMULATOR_PORT), rules },
@@ -166,6 +167,94 @@ test("debt + opening snapshot batch fails closed when opening snapshot is invali
   assert.equal(debts.some((debt) => debt.id === "bad-opening"), false);
   const snapshots = await repoAs("viewer").listBalanceSnapshots("w1", "bad-opening");
   assert.equal(snapshots.length, 0);
+});
+
+const sampleCandidate = (overrides = {}) => ({
+  candidateId: "c1",
+  source: "excel",
+  creditorName: "Chase",
+  accountName: "Chase Card",
+  debtType: "credit_card",
+  currentBalance: 500,
+  statementDate: null,
+  apr: null,
+  aprStatus: "unknown",
+  minimumPayment: 25,
+  dueDate: null,
+  ownerSuggestion: "",
+  includedInCorePayoffPlan: true,
+  warnings: [],
+  duplicateStatus: "new",
+  decision: "pending_review",
+  ...overrides,
+});
+
+test("import batch: admin can create, contributor/viewer/non-member cannot, cross-workspace denied", async () => {
+  await seedBaseWorkspace();
+  // A distinct workspace with disjoint membership (not "admin"/"owner"/etc. from
+  // w1) - proves w1's admin has no elevated access here, unlike seedBaseWorkspace("w2")
+  // which would reuse the same uids and make "admin" a legitimate admin of both.
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await db.doc("workspaces/w2").set({ id: "w2", type: "personal", status: "active", activePlanId: "", createdAt: now(), createdBy: "other-owner" });
+    await db.doc("workspaces/w2/members/other-owner").set({ workspaceId: "w2", uid: "other-owner", role: "owner", status: "active", createdAt: now(), createdBy: "other-owner" });
+  });
+  const baseBatch = { id: "batch-x", workspaceId: "w1", createdAt: now(), status: "review_required", candidateCount: 0, confirmedCount: 0, rejectedCount: 0, duplicateCount: 0, warnings: [], metadata: {}, candidates: [] };
+  await assertSucceeds(repoAs("admin").saveImportBatch({ ...baseBatch, createdBy: "admin" }));
+  await assertFails(repoAs("contrib").saveImportBatch({ ...baseBatch, id: "batch-contrib", createdBy: "contrib" }));
+  await assertFails(repoAs("viewer").saveImportBatch({ ...baseBatch, id: "batch-viewer", createdBy: "viewer" }));
+  await assertFails(repoAs("outsider").saveImportBatch({ ...baseBatch, id: "batch-outsider", createdBy: "outsider" }));
+  // admin of w1 has no role in w2 - writing an import batch declared under w2's path must be denied.
+  await assertFails(repoAs("admin").saveImportBatch({ ...baseBatch, id: "batch-cross", workspaceId: "w2", createdBy: "admin" }));
+  const batches = await repoAs("viewer").listImportBatches("w1");
+  assert.equal(batches.length, 1);
+  assert.equal(batches[0].id, "batch-x");
+});
+
+test("import commit: confirmed candidate creates Debt + opening BalanceSnapshot atomically through the real application service", async () => {
+  await seedBaseWorkspace();
+  const service = createTrackToZeroV2AsyncAppService({ repository: repoAs("admin"), actorId: "admin", asOf: now().toISOString() });
+  const batch = await service.createImportBatch("w1", { sourceType: "excel", sourceFilename: "debts.xlsx", candidates: [sampleCandidate()], warnings: [] });
+  assert.equal(batch.status, "review_required");
+  await service.decideImportCandidate("w1", batch.id, "c1", { decision: "confirmed" });
+  const { batch: committed, createdDebts } = await service.commitImportBatch("w1", batch.id);
+  assert.equal(committed.status, "committed");
+  assert.equal(createdDebts.length, 1);
+
+  const debts = await repoAs("viewer").listDebts("w1");
+  assert.equal(debts.length, 1);
+  assert.equal(debts[0].name, "Chase Card");
+  const snapshots = await repoAs("viewer").listBalanceSnapshots("w1", debts[0].id);
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0].source, "import");
+
+  // Idempotent retry: committing the already-committed batch again must not duplicate anything.
+  const second = await service.commitImportBatch("w1", batch.id);
+  assert.equal(second.createdDebts.length, 0);
+  assert.equal((await repoAs("viewer").listDebts("w1")).length, 1);
+  assert.equal((await repoAs("viewer").listBalanceSnapshots("w1", debts[0].id)).length, 1);
+});
+
+test("import commit fails closed per-candidate: a candidate with an invalid balance does not block or corrupt the others, and the batch is not marked committed", async () => {
+  await seedBaseWorkspace();
+  const service = createTrackToZeroV2AsyncAppService({ repository: repoAs("admin"), actorId: "admin", asOf: now().toISOString() });
+  const good = sampleCandidate({ candidateId: "good-1", accountName: "Good Card", currentBalance: 300 });
+  // A negative balance (e.g. from a bad manual edit in review) is rejected by the
+  // domain model's own validation (requireMoney) before any write is attempted -
+  // and separately by balance_snapshots rules (balance >= 0) if it ever got that
+  // far. Either layer failing closed for one candidate must not affect the other.
+  const bad = sampleCandidate({ candidateId: "bad-1", accountName: "Bad Card", currentBalance: -50 });
+  const batch = await service.createImportBatch("w1", { sourceType: "excel", sourceFilename: "debts.xlsx", candidates: [good, bad], warnings: [] });
+  await service.decideImportCandidate("w1", batch.id, "good-1", { decision: "confirmed" });
+  await service.decideImportCandidate("w1", batch.id, "bad-1", { decision: "confirmed" });
+
+  await assert.rejects(service.commitImportBatch("w1", batch.id));
+
+  const debts = await repoAs("viewer").listDebts("w1");
+  assert.equal(debts.length, 1);
+  assert.equal(debts[0].name, "Good Card");
+  const finalBatch = await repoAs("viewer").getImportBatch("w1", batch.id);
+  assert.notEqual(finalBatch.status, "committed");
 });
 
 test("plan + planVersion: admin can write, viewer can read, contributor cannot write", async () => {

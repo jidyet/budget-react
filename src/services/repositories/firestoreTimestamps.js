@@ -29,6 +29,7 @@ export const TIMESTAMP_FIELDS = {
   paymentEvent: ["paidAt", "createdAt", "voidedAt"],
   balanceSnapshot: ["observedAt", "createdAt", "voidedAt"],
   migrationRun: ["startedAt", "completedAt", "failedAt", "rolledBackAt", "updatedAt"],
+  importBatch: ["createdAt", "updatedAt", "committedAt"],
 };
 
 export const toFirestoreDoc = (kind, obj) => {

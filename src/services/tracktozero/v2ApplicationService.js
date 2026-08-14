@@ -200,6 +200,117 @@ export const createTrackToZeroV2AppService = ({
     });
   };
 
+  const createImportBatch = (workspaceId, { sourceType, sourceFilename = "", candidates = [], warnings = [], parserVersion = "1" } = {}) => {
+    assertInteractive();
+    const { membership } = getWorkspaceContext(workspaceId);
+    if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot import debts into this workspace.");
+    const batchId = id("import");
+    return repository.saveImportBatch({
+      id: batchId,
+      workspaceId,
+      createdBy: actorId,
+      createdAt: asOf,
+      sourceType,
+      sourceFilename,
+      status: candidates.length ? "review_required" : "failed",
+      candidateCount: candidates.length,
+      confirmedCount: 0,
+      rejectedCount: 0,
+      duplicateCount: 0,
+      warnings,
+      metadata: { parserVersion },
+      candidates: candidates.map((candidate) => ({ ...candidate, importBatchId: batchId, workspaceId })),
+    });
+  };
+
+  const decideImportCandidate = (workspaceId, batchId, candidateId, { decision, patch = {} } = {}) => {
+    assertInteractive();
+    const { membership } = getWorkspaceContext(workspaceId);
+    if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot review this import.");
+    const batch = repository.getImportBatch(workspaceId, batchId);
+    if (!batch) throw new Error("Import batch not found");
+    if (batch.status !== "review_required") throw new Error("This import is no longer open for review.");
+    const candidates = batch.candidates.map((candidate) =>
+      candidate.candidateId === candidateId ? { ...candidate, ...patch, decision } : candidate);
+    if (!candidates.some((candidate) => candidate.candidateId === candidateId)) throw new Error("Candidate not found in this import batch.");
+    return repository.saveImportBatch({
+      ...batch,
+      candidates,
+      confirmedCount: candidates.filter((c) => c.decision === "confirmed").length,
+      rejectedCount: candidates.filter((c) => c.decision === "excluded").length,
+      updatedAt: asOf,
+      updatedBy: actorId,
+    });
+  };
+
+  const commitImportBatch = (workspaceId, batchId) => {
+    assertInteractive();
+    const { membership } = getWorkspaceContext(workspaceId);
+    if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot commit this import.");
+    const batch = repository.getImportBatch(workspaceId, batchId);
+    if (!batch) throw new Error("Import batch not found");
+    if (batch.status === "committed") return { batch, createdDebts: [] };
+    if (batch.status !== "review_required") throw new Error(`Import batch cannot be committed from status "${batch.status}".`);
+
+    const createdDebts = [];
+    const failures = [];
+    for (const candidate of batch.candidates) {
+      if (candidate.decision !== "confirmed") continue;
+      const debtId = `debt-${stableIdPart(`${batchId}:${candidate.candidateId}`)}`;
+      const openingBalanceSnapshotId = `opening-${debtId}`;
+      try {
+        const result = repository.createDebtWithOpeningSnapshot({
+          debt: {
+            id: debtId,
+            workspaceId,
+            name: candidate.accountName || candidate.creditorName || "Imported debt",
+            debtType: candidate.debtType,
+            currentBalance: candidate.currentBalance,
+            aprStatus: candidate.aprStatus,
+            apr: candidate.aprStatus === "unknown" ? null : candidate.apr,
+            minimumRequiredPayment: candidate.minimumPayment ?? 0,
+            dueDay: null,
+            ownerLabel: candidate.ownerSuggestion || "",
+            includedInCorePayoffPlan: candidate.includedInCorePayoffPlan,
+            createdAt: asOf,
+            createdBy: actorId,
+            openingBalanceSnapshotId,
+          },
+          openingSnapshot: {
+            id: openingBalanceSnapshotId,
+            workspaceId,
+            debtId,
+            balance: candidate.currentBalance,
+            observedAt: candidate.statementDate || asOf,
+            source: "import",
+            notes: `Imported from ${batch.sourceFilename || batch.sourceType} (batch ${batchId}, candidate ${candidate.candidateId}).`,
+            createdAt: asOf,
+            createdBy: actorId,
+          },
+        });
+        createdDebts.push(result.debt);
+      } catch (error) {
+        failures.push({ candidateId: candidate.candidateId, message: error?.message || String(error) });
+      }
+    }
+
+    const confirmedCount = batch.candidates.filter((c) => c.decision === "confirmed").length;
+    const committed = failures.length === 0;
+    const updatedBatch = repository.saveImportBatch({
+      ...batch,
+      status: committed ? "committed" : (createdDebts.length ? "review_required" : "failed"),
+      confirmedCount,
+      rejectedCount: batch.candidates.filter((c) => c.decision === "excluded").length,
+      committedAt: committed ? asOf : null,
+      updatedAt: asOf,
+      updatedBy: actorId,
+      failure: failures.length ? `${failures.length} candidate(s) failed to commit: ${failures.map((f) => f.candidateId).join(", ")}` : "",
+      warnings: [...(batch.warnings || []), ...failures.map((f) => `Candidate ${f.candidateId} failed: ${f.message}`)],
+    });
+    if (failures.length) throw Object.assign(new Error(`Import commit incomplete: ${failures.length} of ${confirmedCount} confirmed debts failed. ${createdDebts.length} succeeded and were kept; the batch was not marked committed so it can be retried.`), { batch: updatedBatch, createdDebts, failures });
+    return { batch: updatedBatch, createdDebts };
+  };
+
   const createDraftPlan = (workspaceId, { strategy = "avalanche", extraMonthlyPayment = 0, debtIds = [], goalDate = "" } = {}) => {
     assertInteractive();
     const { membership } = getWorkspaceContext(workspaceId);
@@ -301,6 +412,9 @@ export const createTrackToZeroV2AppService = ({
     updateDebt,
     recordPayment,
     recordBalanceSnapshot,
+    createImportBatch,
+    decideImportCandidate,
+    commitImportBatch,
     createDraftPlan,
     activatePlan,
     previewScenario,

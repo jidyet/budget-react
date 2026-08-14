@@ -1,6 +1,7 @@
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import process from "node:process";
 import { assertFails, assertSucceeds, initializeTestEnvironment } from "@firebase/rules-unit-testing";
 
 const PROJECT_ID = "demo-budget-react-v2";
@@ -54,7 +55,7 @@ function debtWithOpeningSnapshotBatch(db, workspaceId, debtId, uid) {
 }
 
 test.before(async () => {
-  const rules = await readFile(resolve("firestore.v2.rules"), "utf8");
+  const rules = await readFile(resolve(process.env.TRACKTOZERO_V2_RULES_FILE || "firestore.v2.rules"), "utf8");
   testEnv = await initializeTestEnvironment({ projectId: PROJECT_ID, firestore: { host: "127.0.0.1", port: 8080, rules } });
 });
 test.beforeEach(async () => testEnv.clearFirestore());

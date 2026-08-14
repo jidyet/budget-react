@@ -294,6 +294,188 @@ function Home({ snapshot, scenario, onScenario }) {
   );
 }
 
+const DEBT_TYPE_OPTIONS = [
+  ["credit_card", "Credit card"],
+  ["personal_loan", "Personal loan"],
+  ["auto_loan", "Auto loan"],
+  ["student_loan", "Student loan"],
+  ["medical", "Medical debt"],
+  ["collections", "Collections"],
+  ["tax_debt", "Tax debt"],
+  ["line_of_credit", "Line of credit"],
+  ["bnpl", "Financing / BNPL"],
+  ["personal_debt", "Personal debt"],
+  ["mortgage", "Mortgage"],
+  ["other", "Other"],
+];
+
+function ImportReviewCandidate({ candidate, canManage, busy, onUpdate, onDecide }) {
+  const decisionLabel = { pending_review: "Needs your review", confirmed: "Will be added", excluded: "Excluded", needs_information: "Needs information" }[candidate.decision] || candidate.decision;
+  return (
+    <article style={{ border: "1px solid #c7e3f8", borderRadius: 18, padding: 14, background: candidate.decision === "confirmed" ? "#f0fdf4" : candidate.decision === "excluded" ? "#fef2f2" : "#fff" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <Field label="Creditor / debt name"><input style={styles.input} disabled={!canManage} value={candidate.accountName} onChange={(event) => onUpdate({ accountName: event.target.value })} /></Field>
+        <Field label="Debt type">
+          <select style={styles.input} disabled={!canManage} value={candidate.debtType} onChange={(event) => onUpdate({ debtType: event.target.value, includedInCorePayoffPlan: event.target.value !== "mortgage" })}>
+            {DEBT_TYPE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </Field>
+        <Field label="Balance"><input style={styles.input} type="number" min="0" step="0.01" disabled={!canManage} value={candidate.currentBalance} onChange={(event) => onUpdate({ currentBalance: Number(event.target.value) })} /></Field>
+        <Field label="Statement date"><input style={styles.input} type="date" disabled={!canManage} value={candidate.statementDate || ""} onChange={(event) => onUpdate({ statementDate: event.target.value })} /></Field>
+        <Field label="APR status">
+          <select style={styles.input} disabled={!canManage} value={candidate.aprStatus} onChange={(event) => onUpdate({ aprStatus: event.target.value, apr: event.target.value === "unknown" ? null : event.target.value === "no_interest" ? 0 : candidate.apr })}>
+            <option value="unknown">Unknown</option>
+            <option value="known">Known</option>
+            <option value="no_interest">No interest</option>
+            <option value="promotional">Promotional</option>
+          </select>
+        </Field>
+        {candidate.aprStatus !== "unknown" && candidate.aprStatus !== "no_interest" && (
+          <Field label="APR (%)"><input style={styles.input} type="number" min="0" step="0.01" disabled={!canManage} value={candidate.apr == null ? "" : Number(candidate.apr * 100).toFixed(2)} onChange={(event) => onUpdate({ apr: Number(event.target.value) / 100 })} /></Field>
+        )}
+        <Field label="Minimum payment"><input style={styles.input} type="number" min="0" step="0.01" disabled={!canManage} value={candidate.minimumPayment ?? ""} onChange={(event) => onUpdate({ minimumPayment: event.target.value === "" ? null : Number(event.target.value) })} /></Field>
+        <Field label="Due date"><input style={styles.input} type="date" disabled={!canManage} value={candidate.dueDate || ""} onChange={(event) => onUpdate({ dueDate: event.target.value })} /></Field>
+        <Field label="Owner"><input style={styles.input} disabled={!canManage} value={candidate.ownerSuggestion || ""} onChange={(event) => onUpdate({ ownerSuggestion: event.target.value })} /></Field>
+      </div>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, margin: "10px 0" }}>
+        <input type="checkbox" disabled={!canManage} checked={!!candidate.includedInCorePayoffPlan} onChange={(event) => onUpdate({ includedInCorePayoffPlan: event.target.checked })} />
+        Include in core payoff plan
+      </label>
+      {!!candidate.warnings?.length && <ul style={{ color: "#92400e" }}>{candidate.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <span style={styles.pill}>{decisionLabel}</span>
+        <button type="button" disabled={!canManage || busy} style={candidate.decision === "confirmed" ? styles.primaryButton : styles.button} onClick={() => onDecide("confirmed")}>Confirm</button>
+        <button type="button" disabled={!canManage || busy} style={styles.button} onClick={() => onDecide("excluded")}>Exclude</button>
+        <button type="button" disabled={!canManage || busy} style={styles.button} onClick={() => onDecide("needs_information")}>Needs information</button>
+      </div>
+    </article>
+  );
+}
+
+function ImportPanel({ snapshot, service, refresh, canManage }) {
+  const [importState, setImportState] = useState({ status: "idle", batch: null, error: "" });
+
+  const handleFile = async (file) => {
+    if (!file) return;
+    setImportState({ status: "parsing", batch: null, error: "" });
+    try {
+      const { readExcelFileToCandidates } = await import("../../services/adapters/excelImportReader.js");
+      const parsed = await readExcelFileToCandidates(file, { importBatchId: "upload", source: "excel" });
+      if (!parsed.confident || !parsed.candidates.length) {
+        setImportState({ status: "idle", batch: null, error: parsed.batchWarnings.join(" ") || "This file could not be read as a debt list." });
+        return;
+      }
+      const batch = await service.createImportBatch(snapshot.workspace.id, {
+        sourceType: "excel",
+        sourceFilename: file.name,
+        candidates: parsed.candidates,
+        warnings: parsed.batchWarnings,
+      });
+      setImportState({ status: "review", batch, error: "" });
+    } catch (error) {
+      setImportState({ status: "idle", batch: null, error: error?.message || "This file could not be imported." });
+    }
+  };
+
+  const updateCandidate = async (candidateId, patch) => {
+    const batch = importState.batch;
+    const current = batch.candidates.find((c) => c.candidateId === candidateId);
+    const decision = current.decision === "pending_review" ? current.decision : current.decision;
+    setImportState((state) => ({
+      ...state,
+      batch: { ...state.batch, candidates: state.batch.candidates.map((c) => (c.candidateId === candidateId ? { ...c, ...patch } : c)) },
+    }));
+    await service.decideImportCandidate(snapshot.workspace.id, batch.id, candidateId, { decision, patch });
+  };
+
+  const decideCandidate = async (candidateId, decision) => {
+    setImportState((state) => ({ ...state, status: "saving-decision" }));
+    const updated = await service.decideImportCandidate(snapshot.workspace.id, importState.batch.id, candidateId, { decision, patch: {} });
+    setImportState({ status: "review", batch: updated, error: "" });
+  };
+
+  const commit = async () => {
+    setImportState((state) => ({ ...state, status: "committing" }));
+    try {
+      await service.commitImportBatch(snapshot.workspace.id, importState.batch.id);
+      setImportState({ status: "idle", batch: null, error: "" });
+      await refresh();
+    } catch (error) {
+      setImportState((state) => ({ ...state, status: "review", error: error?.message || "Some debts could not be added. The rest were saved; try again for the remaining ones." }));
+    }
+  };
+
+  if (importState.status === "idle" || importState.status === "parsing") {
+    return (
+      <Section title="Import a spreadsheet" eyebrow="Excel">
+        <p>Upload an .xlsx or .xls file with your creditor, balance, APR, and minimum-payment columns. Nothing is added until you review and confirm it.</p>
+        <input
+          type="file"
+          accept=".xlsx,.xls"
+          aria-label="Upload Excel spreadsheet of debts"
+          disabled={!canManage || importState.status === "parsing"}
+          onChange={(event) => handleFile(event.target.files?.[0])}
+        />
+        {importState.status === "parsing" && <p aria-live="polite">Reading your file...</p>}
+        {importState.error && <p role="alert" style={{ color: "#991b1b", fontWeight: 800 }}>{importState.error}</p>}
+        {!canManage && <p>Your role is read-only for imports.</p>}
+      </Section>
+    );
+  }
+
+  const batch = importState.batch;
+  const candidates = batch.candidates;
+  const confirmed = candidates.filter((c) => c.decision === "confirmed");
+  const excluded = candidates.filter((c) => c.decision === "excluded");
+  const needsReview = candidates.filter((c) => c.decision === "pending_review" || c.decision === "needs_information");
+  const totalConfirmedBalance = confirmed.reduce((sum, c) => sum + Number(c.currentBalance || 0), 0);
+  const unknownAprCount = confirmed.filter((c) => c.aprStatus === "unknown").length;
+  const missingMinimumCount = confirmed.filter((c) => c.minimumPayment == null).length;
+  const mortgageExcludedCount = confirmed.filter((c) => c.debtType === "mortgage" && !c.includedInCorePayoffPlan).length;
+  const busy = importState.status === "committing" || importState.status === "saving-decision";
+
+  return (
+    <Section title={`Review import: ${batch.sourceFilename}`} eyebrow="Excel · review before anything is saved">
+      {!!batch.warnings?.length && <ul style={{ color: "#92400e" }}>{batch.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
+      <div style={styles.grid}>
+        {candidates.map((candidate) => (
+          <ImportReviewCandidate
+            key={candidate.candidateId}
+            candidate={candidate}
+            canManage={canManage}
+            busy={busy}
+            onUpdate={(patch) => updateCandidate(candidate.candidateId, patch)}
+            onDecide={(decision) => decideCandidate(candidate.candidateId, decision)}
+          />
+        ))}
+      </div>
+      <Section title="Review summary" eyebrow="Before you add anything">
+        <div style={styles.grid}>
+          <p><strong>Debts to create:</strong> {confirmed.length}</p>
+          <p><strong>Excluded:</strong> {excluded.length}</p>
+          <p><strong>Needs attention:</strong> {needsReview.length}</p>
+          <p><strong>Total confirmed balance:</strong> {money(totalConfirmedBalance)}</p>
+          <p><strong>Unknown APR:</strong> {unknownAprCount}</p>
+          <p><strong>Missing minimum payment:</strong> {missingMinimumCount}</p>
+          <p><strong>Mortgage excluded from core:</strong> {mortgageExcludedCount}</p>
+        </div>
+        {importState.error && <p role="alert" style={{ color: "#991b1b", fontWeight: 800 }}>{importState.error}</p>}
+        <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+          <button
+            type="button"
+            disabled={!canManage || busy || !confirmed.length}
+            style={canManage && !busy && confirmed.length ? styles.primaryButton : styles.disabledButton}
+            onClick={commit}
+          >
+            {importState.status === "committing" ? "Adding..." : `Add these ${confirmed.length} debt(s) to TrackToZero`}
+          </button>
+          <button type="button" style={styles.button} onClick={() => setImportState({ status: "idle", batch: null, error: "" })}>Cancel import</button>
+        </div>
+      </Section>
+    </Section>
+  );
+}
+
 function Debts({ snapshot, service, refresh, runAction, writeState }) {
   const [payment, setPayment] = useState({ debtId: snapshot.debts[0]?.id || "", amount: "" });
   const [balance, setBalance] = useState({ debtId: snapshot.debts[0]?.id || "", amount: "" });
@@ -422,6 +604,7 @@ function Debts({ snapshot, service, refresh, runAction, writeState }) {
           </form>
         </div>
       </Section>
+      <ImportPanel snapshot={snapshot} service={service} refresh={refresh} canManage={canManage} />
     </>
   );
 }

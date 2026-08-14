@@ -124,6 +124,64 @@ describe("TrackToZero v2 async application service", () => {
     expect(repository.listBalanceSnapshots("personal-seed", first.id).filter((snapshot) => snapshot.id === first.openingBalanceSnapshotId)).toHaveLength(1);
   });
 
+  it("runs a full import review -> approval -> commit cycle and never creates a Debt before explicit confirmation", async () => {
+    const { repository, service } = makeService();
+    const candidate = {
+      candidateId: "cand-1",
+      source: "excel",
+      creditorName: "SoFi",
+      accountName: "SoFi Loan",
+      debtType: "personal_loan",
+      currentBalance: 4000,
+      statementDate: null,
+      apr: null,
+      aprStatus: "unknown",
+      minimumPayment: 100,
+      dueDate: null,
+      ownerSuggestion: "",
+      includedInCorePayoffPlan: true,
+      warnings: [],
+      duplicateStatus: "new",
+      decision: "pending_review",
+    };
+    const debtsBefore = repository.listDebts("personal-seed").length;
+
+    const batch = await service.createImportBatch("personal-seed", { sourceType: "excel", sourceFilename: "import.xlsx", candidates: [candidate], warnings: ["APR column not found"] });
+    expect(batch.status).toBe("review_required");
+    // Parsing/review alone must never create authoritative debts.
+    expect(repository.listDebts("personal-seed")).toHaveLength(debtsBefore);
+
+    const excluded = await service.decideImportCandidate("personal-seed", batch.id, "cand-1", { decision: "excluded" });
+    expect(excluded.rejectedCount).toBe(1);
+    expect(repository.listDebts("personal-seed")).toHaveLength(debtsBefore);
+
+    const confirmed = await service.decideImportCandidate("personal-seed", batch.id, "cand-1", { decision: "confirmed" });
+    expect(confirmed.confirmedCount).toBe(1);
+    expect(repository.listDebts("personal-seed")).toHaveLength(debtsBefore);
+
+    const { batch: committed, createdDebts } = await service.commitImportBatch("personal-seed", batch.id);
+    expect(committed.status).toBe("committed");
+    expect(createdDebts).toHaveLength(1);
+    expect(createdDebts[0].name).toBe("SoFi Loan");
+    expect(createdDebts[0].aprStatus).toBe("unknown");
+    expect(createdDebts[0].apr).toBeNull();
+    const snapshot = repository.listBalanceSnapshots("personal-seed", createdDebts[0].id)[0];
+    expect(snapshot).toMatchObject({ balance: 4000, source: "import" });
+    expect(repository.listPaymentEvents?.("personal-seed", createdDebts[0].id) || []).toHaveLength(0);
+    expect(repository.listDebts("personal-seed")).toHaveLength(debtsBefore + 1);
+
+    // Idempotent retry: committing the same already-committed batch again changes nothing.
+    const retry = await service.commitImportBatch("personal-seed", batch.id);
+    expect(retry.createdDebts).toHaveLength(0);
+    expect(repository.listDebts("personal-seed")).toHaveLength(debtsBefore + 1);
+    expect(repository.listBalanceSnapshots("personal-seed", createdDebts[0].id)).toHaveLength(1);
+  });
+
+  it("denies import creation for a role without manageDebts permission", async () => {
+    const { service } = makeService("seed-contributor");
+    await expect(service.createImportBatch("household-seed", { sourceType: "excel", sourceFilename: "x.xlsx", candidates: [] })).rejects.toThrow(/cannot import/i);
+  });
+
   it("records payment and balance append-only facts with actor attribution", async () => {
     const { repository, service } = makeService("seed-contributor");
     const payment = await service.recordPayment("household-seed", "household-samsung", { amount: 40, notes: "paid from app" });

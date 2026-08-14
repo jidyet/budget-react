@@ -236,7 +236,7 @@ function WorkspaceBar({
   );
 }
 
-function Home({ snapshot, scenario, onScenario }) {
+function Home({ snapshot, scenario, onGoToPlan, onScenario }) {
   const target = snapshot.targetDebt;
   if (!snapshot.debts.length) {
     return (
@@ -255,6 +255,7 @@ function Home({ snapshot, scenario, onScenario }) {
           <p><strong>Included in core payoff:</strong> {snapshot.includedDebts.length}</p>
           <p><strong>Plan status:</strong> Not started yet</p>
         </div>
+        <button type="button" style={styles.primaryButton} onClick={onGoToPlan}>Build my payoff plan</button>
       </Section>
     );
   }
@@ -614,8 +615,58 @@ function Debts({ snapshot, service, refresh, runAction, writeState }) {
   );
 }
 
-function Plan({ snapshot, service, refresh, runAction, writeState }) {
+function FirstPlanBuilder({ snapshot, service, refresh, runAction, writeState, canPlan }) {
   const [draft, setDraft] = useState({ strategy: "avalanche", extraMonthlyPayment: "100" });
+  const [preview, setPreview] = useState(null);
+
+  const previewPlan = () => runAction("preview first plan", async () => {
+    setPreview(await service.previewDraftPlan(snapshot.workspace.id, { strategy: draft.strategy, extraMonthlyPayment: Number(draft.extraMonthlyPayment) || 0 }));
+  }, { write: false });
+
+  const activatePlan = () => runAction("activate plan", async () => {
+    const { plan, version } = await service.createDraftPlan(snapshot.workspace.id, { strategy: draft.strategy, extraMonthlyPayment: Number(draft.extraMonthlyPayment) || 0 });
+    await service.activatePlan(snapshot.workspace.id, plan.id, version.id);
+    setPreview(null);
+    await refresh();
+  });
+
+  return (
+    <Section title="Build my payoff plan" eyebrow="Preview before you activate anything">
+      <div style={styles.grid}>
+        <Field label="Strategy">
+          <select style={styles.input} value={draft.strategy} onChange={(event) => { setDraft({ ...draft, strategy: event.target.value }); setPreview(null); }}>
+            <option value="avalanche">Avalanche - highest APR first</option>
+            <option value="snowball">Snowball - smallest balance first</option>
+          </select>
+        </Field>
+        <Field label="Extra monthly payment (beyond minimums)">
+          <input style={styles.input} type="number" min="0" step="0.01" value={draft.extraMonthlyPayment} onChange={(event) => { setDraft({ ...draft, extraMonthlyPayment: event.target.value }); setPreview(null); }} />
+        </Field>
+        <button type="button" disabled={!canPlan || writeState.inProgress} style={canPlan && !writeState.inProgress ? styles.button : styles.disabledButton} onClick={previewPlan}>
+          {writeState.action === "preview first plan" ? "Calculating..." : "Preview my plan"}
+        </button>
+      </div>
+      {!canPlan && <p>Your role can view plans, but cannot build or activate one.</p>}
+      {preview && (
+        <div style={{ ...styles.card, marginTop: 14, borderColor: "#9bd0f7" }}>
+          <p><strong>Starting total balance:</strong> {money(preview.startingTotalBalance)}</p>
+          <p><strong>Estimated months to $0:</strong> {preview.monthsToZero || "Not reachable at this payment"}</p>
+          <p><strong>Projected payoff date:</strong> {preview.projectedZeroDate || "n/a"}</p>
+          <p><strong>Estimated interest paid:</strong> {money(preview.estimatedInterest)}</p>
+          <p><strong>Payment amount:</strong> minimums on every included debt, plus {money(preview.extraMonthlyPayment)}/mo extra toward the {preview.strategy === "snowball" ? "smallest-balance" : "highest-APR"} target</p>
+          <p><strong>Payoff order:</strong></p>
+          <ol>{preview.payoffOrder.map((debt) => <li key={debt.id}>{debt.name} · {money(debt.currentBalance)} · {debt.aprStatus === "unknown" ? "Unknown APR" : percent(debt.apr)}</li>)}</ol>
+          {!!preview.warnings.length && <ul>{preview.warnings.map((warning) => <li key={`${warning.code}-${warning.debtId}`}>{warning.severity}: {warning.message}</li>)}</ul>}
+          <button type="button" disabled={!canPlan || writeState.inProgress} style={canPlan && !writeState.inProgress ? styles.primaryButton : styles.disabledButton} onClick={activatePlan}>
+            {writeState.action === "activate plan" ? "Activating..." : "Activate this plan"}
+          </button>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function Plan({ snapshot, service, refresh, runAction, writeState }) {
   const [reforecast, setReforecast] = useState(null);
   const canPlan = snapshot.permissions.managePlans && snapshot.mode !== "legacy_preview";
   const active = snapshot.activeContext;
@@ -637,50 +688,34 @@ function Plan({ snapshot, service, refresh, runAction, writeState }) {
           {snapshot.includedDebts.map((debt) => <li key={debt.id}>{debt.name} · {money(debt.currentBalance)} · {debt.aprStatus === "unknown" ? "Unknown APR" : percent(debt.apr)}</li>)}
         </ol>
       </Section>
-      <Section title="Create or reforecast a plan" eyebrow="Preview before apply">
-        <div style={styles.grid}>
-          <form onSubmit={(event) => {
-            event.preventDefault();
-            runAction("activate plan", async () => {
-              const { plan, version } = await service.createDraftPlan(snapshot.workspace.id, { strategy: draft.strategy, extraMonthlyPayment: Number(draft.extraMonthlyPayment) });
-              await service.activatePlan(snapshot.workspace.id, plan.id, version.id);
-              await refresh();
-            });
-          }}>
-            <Field label="Strategy">
-              <select style={styles.input} value={draft.strategy} onChange={(event) => setDraft({ ...draft, strategy: event.target.value })}>
-                <option value="avalanche">Avalanche</option>
-                <option value="snowball">Snowball</option>
-              </select>
-            </Field>
-            <Field label="Extra monthly payment"><input style={styles.input} value={draft.extraMonthlyPayment} onChange={(event) => setDraft({ ...draft, extraMonthlyPayment: event.target.value })} /></Field>
-            <button disabled={!canPlan || writeState.inProgress} style={canPlan && !writeState.inProgress ? styles.primaryButton : styles.disabledButton}>
-              {writeState.action === "activate plan" ? "Activating..." : "Create + activate plan"}
-            </button>
-            {!canPlan && <p>Your role can view plans, but cannot change payoff plan setup.</p>}
-          </form>
-          <div>
-            <button disabled={!canPlan || !active?.version || writeState.inProgress} style={canPlan && !writeState.inProgress ? styles.button : styles.disabledButton} onClick={() => {
-              runAction("preview reforecast", async () => {
-                setReforecast(await service.previewReforecast(snapshot.workspace.id, { extraMonthlyPayment: Number(active.version.extraMonthlyPayment || 0) + 50 }));
-              }, { write: false });
-            }}>Preview reforecast +$50/mo</button>
-            {reforecast && (
-              <div>
-                <p>Old estimate: {reforecast.oldProjectedZeroDate || "n/a"}</p>
-                <p>Proposed estimate: {reforecast.proposedZeroDate || "n/a"}</p>
-                <button style={writeState.inProgress ? styles.disabledButton : styles.primaryButton} disabled={writeState.inProgress} onClick={() => {
-                  runAction("apply reforecast", async () => {
-                    await service.applyReforecast(snapshot.workspace.id, { extraMonthlyPayment: Number(active.version.extraMonthlyPayment || 0) + 50 });
-                    setReforecast(null);
-                    await refresh();
-                  });
-                }}>{writeState.action === "apply reforecast" ? "Applying..." : "Apply reforecast"}</button>
-              </div>
-            )}
+      {!active?.version ? (
+        <FirstPlanBuilder snapshot={snapshot} service={service} refresh={refresh} runAction={runAction} writeState={writeState} canPlan={canPlan} />
+      ) : (
+        <Section title="Reforecast" eyebrow="Preview before apply">
+          <div style={styles.grid}>
+            <div>
+              <button disabled={!canPlan || writeState.inProgress} style={canPlan && !writeState.inProgress ? styles.button : styles.disabledButton} onClick={() => {
+                runAction("preview reforecast", async () => {
+                  setReforecast(await service.previewReforecast(snapshot.workspace.id, { extraMonthlyPayment: Number(active.version.extraMonthlyPayment || 0) + 50 }));
+                }, { write: false });
+              }}>Preview reforecast +$50/mo</button>
+              {reforecast && (
+                <div>
+                  <p>Old estimate: {reforecast.oldProjectedZeroDate || "n/a"}</p>
+                  <p>Proposed estimate: {reforecast.proposedZeroDate || "n/a"}</p>
+                  <button style={writeState.inProgress ? styles.disabledButton : styles.primaryButton} disabled={writeState.inProgress} onClick={() => {
+                    runAction("apply reforecast", async () => {
+                      await service.applyReforecast(snapshot.workspace.id, { extraMonthlyPayment: Number(active.version.extraMonthlyPayment || 0) + 50 });
+                      setReforecast(null);
+                      await refresh();
+                    });
+                  }}>{writeState.action === "apply reforecast" ? "Applying..." : "Apply reforecast"}</button>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      </Section>
+        </Section>
+      )}
     </>
   );
 }
@@ -992,7 +1027,7 @@ export default function TrackToZeroV2App() {
             {writeState.error || writeState.success}
           </div>
         )}
-        {tab === "home" && <Home snapshot={snapshot} scenario={scenario} onScenario={(extra) => runAction("preview scenario", async () => {
+        {tab === "home" && <Home snapshot={snapshot} scenario={scenario} onGoToPlan={() => setTab("plan")} onScenario={(extra) => runAction("preview scenario", async () => {
           setScenario(await service.previewScenario(workspaceId, { extraMonthlyPayment: extra }));
         }, { write: false })} />}
         {tab === "debts" && <Debts snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} />}

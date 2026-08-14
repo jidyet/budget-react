@@ -182,6 +182,53 @@ describe("TrackToZero v2 async application service", () => {
     await expect(service.createImportBatch("household-seed", { sourceType: "excel", sourceFilename: "x.xlsx", candidates: [] })).rejects.toThrow(/cannot import/i);
   });
 
+  it("completes the fresh first-plan flow: preview is zero-write, activation creates PlanVersion 1 + checkpoints + activePlanId, and no PaymentEvents are fabricated", async () => {
+    const repository = new InMemoryTrackToZeroRepository();
+    const service = createTrackToZeroV2AsyncAppService({ repository, actorId: "owner-a", asOf: V2_TEST_NOW });
+    await service.bootstrapOwnerWorkspace("ws-fresh", { type: "personal", displayName: "Owner A" });
+    const debt = await service.createNewDebt("ws-fresh", {
+      clientRequestId: "first-debt",
+      name: "Chase Card",
+      debtType: "credit_card",
+      currentBalance: 1000,
+      minimumRequiredPayment: 30,
+      aprStatus: "known",
+      apr: 22,
+      includedInCorePayoffPlan: true,
+    });
+
+    const preview = await service.previewDraftPlan("ws-fresh", { strategy: "avalanche", extraMonthlyPayment: 50 });
+    expect(preview.startingTotalBalance).toBe(1000);
+    expect(preview.payoffOrder.map((d) => d.id)).toEqual([debt.id]);
+    expect(preview.monthsToZero).toBeGreaterThan(0);
+    // Preview must not create anything - no plans/versions/checkpoints yet.
+    expect(repository.listPlans("ws-fresh")).toHaveLength(0);
+    expect(repository.getWorkspace("ws-fresh").activePlanId).toBe("");
+
+    const { plan, version } = await service.createDraftPlan("ws-fresh", { strategy: "avalanche", extraMonthlyPayment: 50 });
+    await service.activatePlan("ws-fresh", plan.id, version.id);
+
+    const workspace = repository.getWorkspace("ws-fresh");
+    expect(workspace.activePlanId).toBe(plan.id);
+    const versions = repository.listPlanVersions("ws-fresh", plan.id);
+    expect(versions).toHaveLength(1);
+    expect(versions[0].versionNumber).toBe(1);
+    expect(repository.listExpectedCheckpoints("ws-fresh", plan.id, version.id).length).toBeGreaterThan(0);
+    expect(repository.listPaymentEvents("ws-fresh", debt.id)).toHaveLength(0);
+    expect(() => repository.updatePlanVersion()).toThrow(/immutable/i);
+
+    const snapshot = await service.getWorkspaceSnapshot("ws-fresh");
+    expect(snapshot.activeContext.plan.id).toBe(plan.id);
+    expect(snapshot.status.code).toBeTruthy();
+  });
+
+  it("previewDraftPlan performs zero writes even when called repeatedly with different strategies", async () => {
+    const { repository, service } = makeService();
+    await service.previewDraftPlan("personal-seed", { strategy: "snowball", extraMonthlyPayment: 25 });
+    await service.previewDraftPlan("personal-seed", { strategy: "avalanche", extraMonthlyPayment: 200 });
+    expect(repository.listPlans("personal-seed")).toHaveLength(1); // only the pre-seeded plan, nothing added
+  });
+
   it("records payment and balance append-only facts with actor attribution", async () => {
     const { repository, service } = makeService("seed-contributor");
     const payment = await service.recordPayment("household-seed", "household-samsung", { amount: 40, notes: "paid from app" });

@@ -311,6 +311,38 @@ export const createTrackToZeroV2AppService = ({
     return { batch: updatedBatch, createdDebts };
   };
 
+  const previewDraftPlan = (workspaceId, { strategy = "avalanche", extraMonthlyPayment = 0, debtIds = [], goalDate = "" } = {}) => {
+    const debts = repository.listDebts(workspaceId);
+    const included = debtIds.length
+      ? debts.filter((debt) => debtIds.includes(debt.id))
+      : debts.filter((debt) => debt.includedInCorePayoffPlan !== false && debt.status === "active");
+    if (!included.length) return null;
+    const snapshotsByDebt = latestSnapshotsByDebt(repository, workspaceId, included);
+    const { month, year } = parseAsOf(asOf);
+    const previewVersion = {
+      id: "preview-first-plan", workspaceId, planId: "preview", versionNumber: 1, strategy, asOf,
+      startingDebtSnapshot: included.map(createStartingDebtSnapshotItem),
+      extraMonthlyPayment, goalDate, createdAt: asOf, createdBy: actorId, createdBecause: "activation",
+    };
+    const { projection, warnings } = buildProjectionWithWarnings({ debts: included, planVersion: previewVersion, startMonth: month, startYear: year });
+    const startingTotalBalance = included.reduce((sum, debt) => sum + Number(snapshotsByDebt[debt.id]?.balance ?? debt.currentBalance ?? 0), 0);
+    const payoffOrder = [...included].sort((a, b) => strategy === "snowball"
+      ? Number(a.currentBalance || 0) - Number(b.currentBalance || 0)
+      : (b.aprStatus === "unknown" ? -1 : Number(b.apr || 0)) - (a.aprStatus === "unknown" ? -1 : Number(a.apr || 0)));
+    return {
+      strategy,
+      extraMonthlyPayment,
+      includedDebts: included,
+      payoffOrder,
+      startingTotalBalance,
+      monthsToZero: projection.length,
+      projectedZeroDate: projection.at(-1)?.month || "",
+      estimatedInterest: projection.reduce((sum, row) => sum + Number(row.total_interest || 0), 0),
+      warnings,
+      projection,
+    };
+  };
+
   const createDraftPlan = (workspaceId, { strategy = "avalanche", extraMonthlyPayment = 0, debtIds = [], goalDate = "" } = {}) => {
     assertInteractive();
     const { membership } = getWorkspaceContext(workspaceId);
@@ -415,6 +447,7 @@ export const createTrackToZeroV2AppService = ({
     createImportBatch,
     decideImportCandidate,
     commitImportBatch,
+    previewDraftPlan,
     createDraftPlan,
     activatePlan,
     previewScenario,

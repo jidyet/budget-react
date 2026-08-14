@@ -293,6 +293,44 @@ export const createTrackToZeroV2AsyncAppService = ({
     });
   };
 
+  // Zero-write preview for a plan that doesn't exist yet (first-run flow):
+  // mirrors previewReforecast's approach of building a not-yet-persisted
+  // PlanVersion and running it through the existing trusted projection
+  // engine, without creating anything. Nothing here recomputes payoff math -
+  // buildProjectionWithWarnings is the same function createDraftPlan/
+  // activatePlan use for real.
+  const previewDraftPlan = async (workspaceId, { strategy = "avalanche", extraMonthlyPayment = 0, debtIds = [], goalDate = "" } = {}) => {
+    const debts = await repository.listDebts(workspaceId);
+    const included = debtIds.length
+      ? debts.filter((debt) => debtIds.includes(debt.id))
+      : debts.filter((debt) => debt.includedInCorePayoffPlan !== false && debt.status === "active");
+    if (!included.length) return null;
+    const snapshotsByDebt = await latestSnapshotsByDebtAsync(repository, workspaceId, included);
+    const { month, year } = parseAsOf(asOf);
+    const previewVersion = {
+      id: "preview-first-plan", workspaceId, planId: "preview", versionNumber: 1, strategy, asOf,
+      startingDebtSnapshot: included.map(createStartingDebtSnapshotItem),
+      extraMonthlyPayment, goalDate, createdAt: asOf, createdBy: actorId, createdBecause: "activation",
+    };
+    const { projection, warnings } = buildProjectionWithWarnings({ debts: included, planVersion: previewVersion, startMonth: month, startYear: year });
+    const startingTotalBalance = included.reduce((sum, debt) => sum + Number(snapshotsByDebt[debt.id]?.balance ?? debt.currentBalance ?? 0), 0);
+    const payoffOrder = [...included].sort((a, b) => strategy === "snowball"
+      ? Number(a.currentBalance || 0) - Number(b.currentBalance || 0)
+      : (b.aprStatus === "unknown" ? -1 : Number(b.apr || 0)) - (a.aprStatus === "unknown" ? -1 : Number(a.apr || 0)));
+    return {
+      strategy,
+      extraMonthlyPayment,
+      includedDebts: included,
+      payoffOrder,
+      startingTotalBalance,
+      monthsToZero: projection.length,
+      projectedZeroDate: projection.at(-1)?.month || "",
+      estimatedInterest: projection.reduce((sum, row) => sum + Number(row.total_interest || 0), 0),
+      warnings,
+      projection,
+    };
+  };
+
   const createDraftPlan = async (workspaceId, { strategy = "avalanche", extraMonthlyPayment = 0, debtIds = [], goalDate = "" } = {}) => {
     assertInteractive();
     const { membership } = await getWorkspaceContext(workspaceId);
@@ -530,6 +568,7 @@ export const createTrackToZeroV2AsyncAppService = ({
     createImportBatch,
     decideImportCandidate,
     commitImportBatch,
+    previewDraftPlan,
     createDraftPlan,
     activatePlan,
     previewScenario,

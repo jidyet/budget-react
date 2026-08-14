@@ -289,3 +289,29 @@ describe("statementCandidateAdapter: card product/network names must never be su
     expect(parsed.holder_name).toMatch(/John A?\.? Smith/i);
   });
 });
+
+describe("statementCandidateAdapter: balance truth (UX-0) - unresolved balance never looks like a confirmed $0", () => {
+  it("marks balanceStatus unresolved when the parser found no balance at all (currentBalance defaults to 0 for the form only)", () => {
+    const parsed = { balance: null, min_due: 25, due_day: null, apr_percent: null, apr_candidates: [], bank: "Chase", account_hint: "", holder_name: "" };
+    const candidate = statementResultToCandidate(parsed, { source: "pdf", importBatchId: "b9", fileName: "x.pdf" });
+    expect(candidate.currentBalance).toBe(0);
+    expect(candidate.balanceStatus).toBe("unresolved");
+  });
+
+  it("marks balanceStatus confirmed when the parser found a real balance, including a real $0", () => {
+    const parsed = { balance: 0, min_due: 25, due_day: null, apr_percent: null, apr_candidates: [], bank: "Chase", account_hint: "", holder_name: "" };
+    const candidate = statementResultToCandidate(parsed, { source: "pdf", importBatchId: "b10", fileName: "x.pdf" });
+    expect(candidate.currentBalance).toBe(0);
+    expect(candidate.balanceStatus).toBe("confirmed");
+  });
+});
+
+describe("statementCandidateAdapter: preserves actual APR candidate values, not just a count (UX-0)", () => {
+  it("keeps the full list of candidate percentages in evidence for later review", () => {
+    const parsed = parseStatement(promoAprStatementText);
+    const candidate = statementResultToCandidate(parsed, { source: "pdf", importBatchId: "b11", fileName: "discover.pdf" });
+    expect(Array.isArray(candidate.evidence.aprCandidates)).toBe(true);
+    expect(candidate.evidence.aprCandidates.length).toBeGreaterThan(1);
+    expect(candidate.evidence.aprCandidates).toContain(0);
+  });
+});

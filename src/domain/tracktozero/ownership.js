@@ -80,3 +80,55 @@ export const matchMemberByName = (suggestion, members = []) => {
     return false;
   }) || null;
 };
+
+// ── Balance truth (UX-0) ──────────────────────────────────────────────────
+//
+// Debts written before balanceStatus existed (same backward-compatibility
+// situation as effectiveOwnerType above - repository reads never re-run
+// createDebt's defaulting) only have currentBalance. Absent the field
+// entirely, a debt is treated as confirmed: every debt creation path that
+// predates this field required a real observed balance (manual entry, or an
+// opening BalanceSnapshot recorded atomically with the debt), so there is no
+// legacy scenario where an absent balanceStatus should mean "unresolved".
+export const effectiveBalanceStatus = (debt) => debt?.balanceStatus || "confirmed";
+
+export const isBalanceUnresolved = (debt) => effectiveBalanceStatus(debt) === "unresolved";
+
+// True only when a balance of $0 (or less) is a real, confirmed observation -
+// i.e. a genuine claim that the debt is paid off. An unresolved $0 (a failed
+// or missing import) must never be treated as "paid off" - see isDebtNeedsReview.
+export const isConfirmedZero = (debt) => Number(debt?.currentBalance || 0) <= 0 && !isBalanceUnresolved(debt);
+
+// A minimum/required payment that suspiciously equals the debt's own APR
+// percentage (e.g. minimumRequiredPayment: 6.74 when apr is stored as 0.0674,
+// i.e. 6.74%) is very likely the exact "APR became minimum payment" data
+// contamination the parser-level fix (MONEY_VALUE_RE) prevents going
+// forward. This is a pure, non-destructive detector for records that were
+// already written before that fix, or written by any other path - it never
+// mutates the stored value, only flags it so the UI/plan engine can stop
+// trusting it.
+export const isMinimumPaymentContaminated = (debt) => {
+  if (debt?.aprStatus !== "known" || debt?.apr == null || debt?.minimumRequiredPayment == null) return false;
+  const impliedPercent = Number(debt.apr) * 100;
+  return Math.abs(Number(debt.minimumRequiredPayment) - impliedPercent) < 0.01 && impliedPercent > 0;
+};
+
+// Common statement noise that has been observed leaking into a stored
+// ownerLabel (mail-handling boilerplate, card product/network names). This
+// is deliberately a SMALL, display-time safety net for records written
+// before the parser-level fixes (HOLDER_NAME_BAD_PHRASE_RE) existed - it
+// never mutates stored data, it only stops already-written junk from being
+// rendered as if it were a real person.
+const JUNK_OWNER_LABEL_RE = /\b(?:undeliverable|service requested|current resident|current occupant|postal customer|boxholder|visa signature|visa platinum|visa infinite|mastercard|world elite|signature card|platinum card|business card)\b/i;
+export const looksLikeJunkOwnerLabel = (label) => JUNK_OWNER_LABEL_RE.test(String(label || ""));
+
+// A Debt's material financial truth is unresolved if its balance was never
+// confirmed, or its minimum payment is almost certainly contaminated data.
+// Debts in this state must not silently drive an authoritative payoff plan
+// (excluded from the simulation/queue/target - see projectionStatusService's
+// getEligiblePlanDebts) until a human reviews and corrects them. This is
+// deliberately scoped to fields that would corrupt financial MATH if trusted
+// - a junk owner label affects display/attribution, not calculation
+// correctness, so it is surfaced separately (see looksLikeJunkOwnerLabel)
+// rather than folded in here.
+export const isDebtNeedsReview = (debt) => isBalanceUnresolved(debt) || isMinimumPaymentContaminated(debt);

@@ -19,7 +19,11 @@ describe("TrackToZero v2 async application service", () => {
     expect(snapshot.activeContext.version.id).toBe("personal-version-1");
     expect(snapshot.targetDebt).toBeTruthy();
     expect(snapshot.projectedZeroDate).toBeTruthy();
-    expect(snapshot.status.code).not.toBe("insufficient_data");
+    // The seed's only recorded balance for each debt IS its opening
+    // snapshot - no real observation has happened since plan activation, so
+    // insufficient_data is the truthful status (UX-0 Part 11), not a guess
+    // at ahead/on-track/behind from zero observed history.
+    expect(snapshot.status.code).toBe("insufficient_data");
   });
 
   it("keeps legacy preview mode read-only in async runtime", async () => {
@@ -385,21 +389,22 @@ describe("TrackToZero v2 async application service: household ownership foundati
     expect(reloaded.ownerLabel).toBe("Contributor");
   });
 
-  it("household summary totals count every included debt exactly once, and Personal workspaces never compute one", async () => {
+  it("household summary totals count every included debt exactly once, and Personal workspaces get empty ownership breakdowns", async () => {
     const { repository, service } = makeService();
     repository.putWorkspace({ ...repository.getWorkspace("household-seed"), activePlanId: "" });
     await service.createNewDebt("household-seed", { name: "Admin Debt", currentBalance: 1000, minimumRequiredPayment: 25, aprStatus: "unknown", ownerType: "member", ownerId: "seed-admin" });
     await service.createNewDebt("household-seed", { name: "Joint Debt", currentBalance: 500, minimumRequiredPayment: 25, aprStatus: "unknown", ownerType: "joint" });
 
     const snapshot = await service.getWorkspaceSnapshot("household-seed");
-    const summary = snapshot.householdOwnershipSummary;
-    expect(summary.total).toBe(snapshot.totalIncludedDebt);
-    const bucketTotal = summary.perMember.reduce((sum, member) => sum + member.total, 0) + summary.jointTotal + summary.unassignedTotal;
-    expect(bucketTotal).toBeCloseTo(summary.total, 2);
-    expect(summary.jointTotal).toBeGreaterThanOrEqual(500);
+    const summary = snapshot.portfolioSummary;
+    expect(summary.includedDebt).toBe(snapshot.totalIncludedDebt);
+    const bucketTotal = summary.memberDebt.reduce((sum, member) => sum + member.total, 0) + summary.jointDebt + summary.unassignedDebt;
+    expect(bucketTotal).toBeCloseTo(summary.includedDebt, 2);
+    expect(summary.jointDebt).toBeGreaterThanOrEqual(500);
 
     const personalSnapshot = await service.getWorkspaceSnapshot("personal-seed");
-    expect(personalSnapshot.householdOwnershipSummary).toBeNull();
+    expect(personalSnapshot.portfolioSummary.memberDebt).toEqual([]);
+    expect(personalSnapshot.portfolioSummary.jointDebt).toBe(0);
   });
 });
 
@@ -476,5 +481,38 @@ describe("TrackToZero v2 async application service: import owner auto-suggest (c
       }],
     });
     expect(batch.candidates[0].ownerType).not.toBe("member");
+  });
+});
+
+describe("TrackToZero v2 async application service: UX-0 end-to-end - a failed-import balance never becomes a confirmed payoff after commit", () => {
+  it("REPRODUCTION: commitImportBatch propagates the candidate's unresolved balanceStatus onto the created Debt (async)", async () => {
+    const { repository, service } = makeService();
+    repository.putWorkspace({ ...repository.getWorkspace("personal-seed"), activePlanId: "" });
+    const candidate = {
+      candidateId: "cand-unresolved-async-1",
+      source: "pdf",
+      creditorName: "Chase",
+      accountName: "Chase Card",
+      debtType: "credit_card",
+      currentBalance: 0,
+      balanceStatus: "unresolved",
+      apr: null,
+      aprStatus: "unknown",
+      minimumPayment: null,
+      dueDate: null,
+      ownerSuggestion: "",
+      includedInCorePayoffPlan: true,
+      warnings: [],
+      duplicateStatus: "new",
+      decision: "pending_review",
+    };
+    const batch = await service.createImportBatch("personal-seed", { sourceType: "pdf", sourceFilename: "chase.pdf", candidates: [candidate] });
+    await service.decideImportCandidate("personal-seed", batch.id, "cand-unresolved-async-1", { decision: "confirmed" });
+    const { createdDebts } = await service.commitImportBatch("personal-seed", batch.id);
+
+    expect(createdDebts[0].balanceStatus).toBe("unresolved");
+    const snapshot = await service.getWorkspaceSnapshot("personal-seed");
+    expect(snapshot.portfolioSummary.needsReviewDebtIds).toContain(createdDebts[0].id);
+    expect(snapshot.payoffQueue.some((d) => d.id === createdDebts[0].id)).toBe(false);
   });
 });

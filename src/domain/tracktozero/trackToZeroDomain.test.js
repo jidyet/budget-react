@@ -74,6 +74,12 @@ describe("debt domain", () => {
     expect(baseDebt({ ownerType: "unassigned" }).ownerId).toBe("");
   });
 
+  it("defaults balanceStatus to confirmed and rejects an invalid value", () => {
+    expect(baseDebt({}).balanceStatus).toBe("confirmed");
+    expect(baseDebt({ balanceStatus: "unresolved" }).balanceStatus).toBe("unresolved");
+    expect(() => baseDebt({ balanceStatus: "estimated" })).toThrow(/balanceStatus/);
+  });
+
   it("rejects an invalid ownerType", () => {
     expect(() => baseDebt({ ownerType: "spouse" })).toThrow(/ownerType/);
   });

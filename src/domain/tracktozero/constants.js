@@ -14,6 +14,13 @@ export const IMPORT_CANDIDATE_DECISIONS = Object.freeze(["pending_review", "conf
 // "joint": owned by the household as a whole - no single member (Debt.ownerId is empty).
 // "unassigned": ownership not yet decided - never a default that implies false certainty.
 export const OWNER_TYPES = Object.freeze(["member", "joint", "unassigned"]);
+// "confirmed": currentBalance reflects a real observation (manual entry, a
+// recorded BalanceSnapshot, or a successfully-parsed import) - a value of 0
+// here is a genuine claim that the debt is paid off.
+// "unresolved": the balance could not be confidently captured (e.g. a failed
+// or partial import) - a value of 0 here means "unknown", NOT "paid off",
+// and must never be presented or calculated as if it were confirmed.
+export const BALANCE_STATUSES = Object.freeze(["confirmed", "unresolved"]);
 
 export const ROLE_PERMISSIONS = Object.freeze({
   owner: Object.freeze({

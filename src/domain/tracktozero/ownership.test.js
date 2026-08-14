@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { matchMemberByName, resolveDebtOwnership } from "./ownership.js";
+import {
+  effectiveBalanceStatus,
+  isBalanceUnresolved,
+  isConfirmedZero,
+  isDebtNeedsReview,
+  isMinimumPaymentContaminated,
+  looksLikeJunkOwnerLabel,
+  matchMemberByName,
+  resolveDebtOwnership,
+} from "./ownership.js";
 
 const householdMembers = [
   { workspaceId: "h1", uid: "owner-uid", role: "owner", status: "active", displayName: "Jidye" },
@@ -129,5 +138,81 @@ describe("matchMemberByName: single-token member profiles (common for invited/se
   it("does not match a first-name-only member against an unrelated suggestion", () => {
     const match = matchMemberByName("Kristina K Davis", [{ uid: "u1", displayName: "Baba", status: "active" }]);
     expect(match).toBeNull();
+  });
+});
+
+describe("effectiveBalanceStatus / isConfirmedZero / isBalanceUnresolved", () => {
+  it("defaults to confirmed when balanceStatus is absent (backward compatible with pre-existing records)", () => {
+    expect(effectiveBalanceStatus({ currentBalance: 0 })).toBe("confirmed");
+    expect(isConfirmedZero({ currentBalance: 0 })).toBe(true);
+    expect(isBalanceUnresolved({ currentBalance: 0 })).toBe(false);
+  });
+
+  it("a confirmed $0 balance is treated as a genuine paid-off claim", () => {
+    expect(isConfirmedZero({ currentBalance: 0, balanceStatus: "confirmed" })).toBe(true);
+  });
+
+  it("REPRODUCTION-STYLE: an unresolved (failed-import) $0 balance is never treated as paid off", () => {
+    expect(isConfirmedZero({ currentBalance: 0, balanceStatus: "unresolved" })).toBe(false);
+    expect(isBalanceUnresolved({ currentBalance: 0, balanceStatus: "unresolved" })).toBe(true);
+  });
+
+  it("a nonzero confirmed balance is never mistaken for confirmed-zero", () => {
+    expect(isConfirmedZero({ currentBalance: 500, balanceStatus: "confirmed" })).toBe(false);
+  });
+});
+
+describe("isMinimumPaymentContaminated", () => {
+  it("REPRODUCTION: flags the Firstmark case - minimum payment equals the APR percentage", () => {
+    const debt = { aprStatus: "known", apr: 0.0674, minimumRequiredPayment: 6.74 };
+    expect(isMinimumPaymentContaminated(debt)).toBe(true);
+  });
+
+  it("does not flag a legitimate minimum payment that is unrelated to APR", () => {
+    const debt = { aprStatus: "known", apr: 0.0674, minimumRequiredPayment: 85 };
+    expect(isMinimumPaymentContaminated(debt)).toBe(false);
+  });
+
+  it("does not flag when APR is unknown or minimum payment is null", () => {
+    expect(isMinimumPaymentContaminated({ aprStatus: "unknown", apr: null, minimumRequiredPayment: 6.74 })).toBe(false);
+    expect(isMinimumPaymentContaminated({ aprStatus: "known", apr: 0.0674, minimumRequiredPayment: null })).toBe(false);
+  });
+
+  it("does not flag a coincidental $0 minimum payment against a 0% APR", () => {
+    expect(isMinimumPaymentContaminated({ aprStatus: "known", apr: 0, minimumRequiredPayment: 0 })).toBe(false);
+  });
+});
+
+describe("looksLikeJunkOwnerLabel", () => {
+  it("REPRODUCTION: flags mail-handling boilerplate stored as an owner label", () => {
+    expect(looksLikeJunkOwnerLabel("For Undeliverable Mail Only")).toBe(true);
+  });
+
+  it("flags card product/network names stored as an owner label", () => {
+    expect(looksLikeJunkOwnerLabel("Visa Signature")).toBe(true);
+  });
+
+  it("does not flag a genuine human name", () => {
+    expect(looksLikeJunkOwnerLabel("Kristina Davis")).toBe(false);
+    expect(looksLikeJunkOwnerLabel("Baba")).toBe(false);
+    expect(looksLikeJunkOwnerLabel("")).toBe(false);
+  });
+});
+
+describe("isDebtNeedsReview", () => {
+  it("flags an unresolved balance", () => {
+    expect(isDebtNeedsReview({ currentBalance: 0, balanceStatus: "unresolved" })).toBe(true);
+  });
+
+  it("flags a contaminated minimum payment", () => {
+    expect(isDebtNeedsReview({ currentBalance: 500, aprStatus: "known", apr: 0.0674, minimumRequiredPayment: 6.74 })).toBe(true);
+  });
+
+  it("does not flag a clean, fully-confirmed debt", () => {
+    expect(isDebtNeedsReview({ currentBalance: 500, balanceStatus: "confirmed", aprStatus: "known", apr: 0.2, minimumRequiredPayment: 25 })).toBe(false);
+  });
+
+  it("does not flag a genuinely confirmed $0 (paid off) debt", () => {
+    expect(isDebtNeedsReview({ currentBalance: 0, balanceStatus: "confirmed" })).toBe(false);
   });
 });

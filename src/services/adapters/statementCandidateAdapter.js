@@ -54,6 +54,11 @@ export const statementResultToCandidate = (parsed, { source = "pdf", importBatch
     accountReferenceSafe: parsed.account_last4 ? `••••${parsed.account_last4}` : "",
     debtType,
     currentBalance: currentBalance ?? 0,
+    // The parser never found a balance for this statement - 0 here is a
+    // placeholder for the form, not a claim of "$0 owed". Carried through to
+    // the created Debt at commit time (see commitImportBatch) so it can
+    // never be mistaken for a confirmed payoff.
+    balanceStatus: currentBalance == null ? "unresolved" : "confirmed",
     statementDate: parsed.statement_date ?? null,
     apr,
     aprStatus,
@@ -71,6 +76,11 @@ export const statementResultToCandidate = (parsed, { source = "pdf", importBatch
       fees: parsed.fees ?? null,
       loanType: parsed.loan_type || null,
       aprCandidateCount,
+      // The actual candidate percentages (not just a count), preserved so a
+      // later Import Review UI can show "APR candidates: 6.74%, 24.99%, ..."
+      // and let the human confirm, rather than silently discarding the
+      // ambiguity once the highest-confidence one is auto-selected above.
+      aprCandidates: Array.isArray(parsed.apr_candidates) ? parsed.apr_candidates : [],
     },
   };
 };

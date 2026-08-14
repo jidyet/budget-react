@@ -1,13 +1,14 @@
 import { ROLE_PERMISSIONS } from "../../domain/tracktozero/constants.js";
 import { createStartingDebtSnapshotItem } from "../../domain/tracktozero/models.js";
-import { matchMemberByName, resolveDebtOwnership } from "../../domain/tracktozero/ownership.js";
+import { isDebtNeedsReview, matchMemberByName, resolveDebtOwnership } from "../../domain/tracktozero/ownership.js";
 import { buildExpectedCheckpoints } from "../adapters/tracktozeroCalcAdapter.js";
-import { summarizeHouseholdOwnership } from "./ownershipSummary.js";
+import { deriveDebtPortfolioSummary } from "./portfolioSummary.js";
 import { calculateWhatIfComparison } from "../calc/scenarioComparison.js";
 import { activatePlanTransaction, resolveActivePlanContext } from "./activePlanService.js";
 import {
   buildProjectionWithWarnings,
-  classifyPlanStatus,
+  derivePlanHealth,
+  getEligiblePlanDebts,
   getIncludedDebts,
   monthKeyFromDate,
   sortDebtsForStrategy,
@@ -89,37 +90,58 @@ export const createTrackToZeroV2AppService = ({
     const projectionWithWarnings = activeContext?.version
       ? buildProjectionWithWarnings({ debts, planVersion: activeContext.version, startMonth: month, startYear: year })
       : { projection: [], warnings: [] };
-    const status = classifyPlanStatus({
+    // THE single Home/Plan plan-health derivation (UX-0 Part 9-10): folds the
+    // balance-vs-checkpoint status together with the plan's own critical
+    // warnings, so a critical warning (e.g. "balance grows instead of
+    // shrinking") can never coexist with a positive/green status - they are
+    // now structurally the same computation, not two independently-derived
+    // values that happen to usually agree.
+    const status = derivePlanHealth({
       debts,
       planVersion: activeContext?.version,
       expectedCheckpoints,
       latestSnapshotsByDebt: snapshotsByDebt,
+      projectionWarnings: projectionWithWarnings.warnings,
       asOf,
     });
     const includedDebts = getIncludedDebts(debts, activeContext?.version);
+    // Needs-review debts (unresolved balance, contaminated minimum payment)
+    // are excluded from the simulation (see getEligiblePlanDebts) and must
+    // not become the "current target" or appear in the active payoff queue
+    // either - both are still-authoritative plan outputs.
+    const eligibleDebts = getEligiblePlanDebts(debts, activeContext?.version);
     const debtBalance = (debt) => Number(snapshotsByDebt[debt.id]?.balance ?? debt.currentBalance ?? 0);
     // A debt with a $0 (or lower) balance is already paid off and must never
     // be presented as "what to pay off next," even as a fallback when no
     // plan has been activated yet.
-    const payableIncludedDebts = includedDebts.filter((debt) => debtBalance(debt) > 0);
+    const payableEligibleDebts = eligibleDebts.filter((debt) => debtBalance(debt) > 0);
     const projectedTarget = projectionWithWarnings.projection[0]?.payoff_target || "";
     const frozenTargetId = activeContext?.version?.startingDebtSnapshot?.find((item) => item.includedInCorePayoffPlan)?.debtId || "";
-    const targetDebt = debts.find((debt) => debt.id === projectedTarget && debtBalance(debt) > 0)
-      || debts.find((debt) => debt.name === projectedTarget && debtBalance(debt) > 0)
-      || debts.find((debt) => debt.id === frozenTargetId && debtBalance(debt) > 0)
-      || payableIncludedDebts[0]
+    const targetDebt = debts.find((debt) => debt.id === projectedTarget && debtBalance(debt) > 0 && !isDebtNeedsReview(debt))
+      || debts.find((debt) => debt.name === projectedTarget && debtBalance(debt) > 0 && !isDebtNeedsReview(debt))
+      || debts.find((debt) => debt.id === frozenTargetId && debtBalance(debt) > 0 && !isDebtNeedsReview(debt))
+      || payableEligibleDebts[0]
       || null;
-    const totalIncludedDebt = includedDebts.reduce((sum, debt) => sum + debtBalance(debt), 0);
-    const householdOwnershipSummary = summarizeHouseholdOwnership({
+    // THE single shared debt-portfolio derivation (UX-0 Part 3) - computed
+    // from the LIVE debt list, never the plan's frozen snapshot, so this can
+    // never disagree with what the Debts page cards show (see
+    // deriveDebtPortfolioSummary for why).
+    const portfolioSummary = deriveDebtPortfolioSummary({
       workspace: context.workspace,
       members: context.members,
-      includedDebts,
+      debts,
       debtBalance,
     });
     // The same ordering payoffSimulate itself uses - the numbered queue
     // shown in the UI can never silently drift from what's actually being
-    // paid off first.
-    const payoffQueue = sortDebtsForStrategy(includedDebts, activeContext?.version?.strategy || "avalanche");
+    // paid off first. Excludes needs-review debts (see eligibleDebts above)
+    // and any debt with a $0-or-less balance (already paid off, or an
+    // unresolved balance with nothing safe to rank) - a confirmed-zero debt
+    // must never appear as an active queue item (UX-0 Part 5).
+    const payoffQueue = sortDebtsForStrategy(
+      eligibleDebts.filter((debt) => debtBalance(debt) > 0),
+      activeContext?.version?.strategy || "avalanche"
+    );
 
     return {
       ...context,
@@ -133,9 +155,9 @@ export const createTrackToZeroV2AppService = ({
       projection: projectionWithWarnings.projection,
       warnings: projectionWithWarnings.warnings,
       status,
-      totalIncludedDebt,
+      totalIncludedDebt: portfolioSummary.includedDebt,
       targetDebt,
-      householdOwnershipSummary,
+      portfolioSummary,
       payoffQueue,
       projectedZeroDate: projectionWithWarnings.projection.at(-1)?.month || activeContext?.version?.projectedZeroDate || "",
     };
@@ -314,6 +336,12 @@ export const createTrackToZeroV2AppService = ({
             name: candidate.accountName || candidate.creditorName || "Imported debt",
             debtType: candidate.debtType,
             currentBalance: candidate.currentBalance,
+            // Carries the parser/spreadsheet's confidence in this balance
+            // through to the created Debt (see statementCandidateAdapter.js/
+            // importCandidateAdapter.js) - a candidate whose balance was
+            // never confidently found must never become a Debt that looks
+            // like a confirmed $0 payoff (UX-0 Part 4/6).
+            balanceStatus: candidate.balanceStatus || "confirmed",
             aprStatus: candidate.aprStatus,
             apr: candidate.aprStatus === "unknown" ? null : candidate.apr,
             minimumRequiredPayment: candidate.minimumPayment ?? 0,
@@ -373,8 +401,16 @@ export const createTrackToZeroV2AppService = ({
       extraMonthlyPayment, goalDate, createdAt: asOf, createdBy: actorId, createdBecause: "activation",
     };
     const { projection, warnings } = buildProjectionWithWarnings({ debts: included, planVersion: previewVersion, startMonth: month, startYear: year });
-    const startingTotalBalance = included.reduce((sum, debt) => sum + Number(snapshotsByDebt[debt.id]?.balance ?? debt.currentBalance ?? 0), 0);
-    const payoffOrder = sortDebtsForStrategy(included, strategy);
+    // The displayed payoff order/starting total must reflect exactly what
+    // was simulated above (buildProjectionWithWarnings already excludes
+    // needs-review debts internally via getEligiblePlanDebts) - otherwise a
+    // preview could show a needs-review or already-paid-off debt in the
+    // order while the actual projection math silently excluded it (UX-0
+    // Part 8/9: preview and reality must never disagree with each other).
+    const debtBalance = (debt) => Number(snapshotsByDebt[debt.id]?.balance ?? debt.currentBalance ?? 0);
+    const eligibleForDisplay = getEligiblePlanDebts(included, previewVersion).filter((debt) => debtBalance(debt) > 0);
+    const startingTotalBalance = eligibleForDisplay.reduce((sum, debt) => sum + debtBalance(debt), 0);
+    const payoffOrder = sortDebtsForStrategy(eligibleForDisplay, strategy);
     return {
       strategy,
       extraMonthlyPayment,

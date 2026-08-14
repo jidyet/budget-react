@@ -1,16 +1,17 @@
 import { ROLE_PERMISSIONS } from "../../domain/tracktozero/constants.js";
 import { createStartingDebtSnapshotItem } from "../../domain/tracktozero/models.js";
-import { matchMemberByName, resolveDebtOwnership } from "../../domain/tracktozero/ownership.js";
+import { isDebtNeedsReview, matchMemberByName, resolveDebtOwnership } from "../../domain/tracktozero/ownership.js";
 import { buildExpectedCheckpoints } from "../adapters/tracktozeroCalcAdapter.js";
 import { calculateWhatIfComparison } from "../calc/scenarioComparison.js";
 import {
   buildProjectionWithWarnings,
-  classifyPlanStatus,
+  derivePlanHealth,
+  getEligiblePlanDebts,
   getIncludedDebts,
   monthKeyFromDate,
   sortDebtsForStrategy,
 } from "./projectionStatusService.js";
-import { summarizeHouseholdOwnership } from "./ownershipSummary.js";
+import { deriveDebtPortfolioSummary } from "./portfolioSummary.js";
 import { V2_DATA_MODES, hasPermission } from "./v2ApplicationService.js";
 import { V2_TEST_NOW } from "./v2SeedData.js";
 
@@ -180,34 +181,42 @@ export const createTrackToZeroV2AsyncAppService = ({
     const projectionWithWarnings = activeContext?.version
       ? buildProjectionWithWarnings({ debts, planVersion: activeContext.version, startMonth: month, startYear: year })
       : { projection: [], warnings: [] };
-    const status = classifyPlanStatus({
+    // THE single Home/Plan plan-health derivation (UX-0 Part 9-10) - see the
+    // matching comment in v2ApplicationService.js's getWorkspaceSnapshot.
+    const status = derivePlanHealth({
       debts,
       planVersion: activeContext?.version,
       expectedCheckpoints,
       latestSnapshotsByDebt: snapshotsByDebt,
+      projectionWarnings: projectionWithWarnings.warnings,
       asOf,
     });
     const includedDebts = getIncludedDebts(debts, activeContext?.version);
+    const eligibleDebts = getEligiblePlanDebts(debts, activeContext?.version);
     const debtBalance = (debt) => Number(snapshotsByDebt[debt.id]?.balance ?? debt.currentBalance ?? 0);
     // A debt with a $0 (or lower) balance is already paid off and must never
     // be presented as "what to pay off next," even as a fallback when no
     // plan has been activated yet.
-    const payableIncludedDebts = includedDebts.filter((debt) => debtBalance(debt) > 0);
+    const payableEligibleDebts = eligibleDebts.filter((debt) => debtBalance(debt) > 0);
     const projectedTarget = projectionWithWarnings.projection[0]?.payoff_target || "";
     const frozenTargetId = activeContext?.version?.startingDebtSnapshot?.find((item) => item.includedInCorePayoffPlan)?.debtId || "";
-    const targetDebt = debts.find((debt) => debt.id === projectedTarget && debtBalance(debt) > 0)
-      || debts.find((debt) => debt.name === projectedTarget && debtBalance(debt) > 0)
-      || debts.find((debt) => debt.id === frozenTargetId && debtBalance(debt) > 0)
-      || payableIncludedDebts[0]
+    const targetDebt = debts.find((debt) => debt.id === projectedTarget && debtBalance(debt) > 0 && !isDebtNeedsReview(debt))
+      || debts.find((debt) => debt.name === projectedTarget && debtBalance(debt) > 0 && !isDebtNeedsReview(debt))
+      || debts.find((debt) => debt.id === frozenTargetId && debtBalance(debt) > 0 && !isDebtNeedsReview(debt))
+      || payableEligibleDebts[0]
       || null;
-    const totalIncludedDebt = includedDebts.reduce((sum, debt) => sum + debtBalance(debt), 0);
-    const householdOwnershipSummary = summarizeHouseholdOwnership({
+    // THE single shared debt-portfolio derivation (UX-0 Part 3) - see the
+    // matching comment in v2ApplicationService.js's getWorkspaceSnapshot.
+    const portfolioSummary = deriveDebtPortfolioSummary({
       workspace: context.workspace,
       members: context.members,
-      includedDebts,
+      debts,
       debtBalance,
     });
-    const payoffQueue = sortDebtsForStrategy(includedDebts, activeContext?.version?.strategy || "avalanche");
+    const payoffQueue = sortDebtsForStrategy(
+      eligibleDebts.filter((debt) => debtBalance(debt) > 0),
+      activeContext?.version?.strategy || "avalanche"
+    );
 
     return {
       ...context,
@@ -222,9 +231,9 @@ export const createTrackToZeroV2AsyncAppService = ({
       projection: projectionWithWarnings.projection,
       warnings: projectionWithWarnings.warnings,
       status,
-      totalIncludedDebt,
+      totalIncludedDebt: portfolioSummary.includedDebt,
       targetDebt,
-      householdOwnershipSummary,
+      portfolioSummary,
       payoffQueue,
       projectedZeroDate: projectionWithWarnings.projection.at(-1)?.month || activeContext?.version?.projectedZeroDate || "",
     };
@@ -336,8 +345,12 @@ export const createTrackToZeroV2AsyncAppService = ({
       extraMonthlyPayment, goalDate, createdAt: asOf, createdBy: actorId, createdBecause: "activation",
     };
     const { projection, warnings } = buildProjectionWithWarnings({ debts: included, planVersion: previewVersion, startMonth: month, startYear: year });
-    const startingTotalBalance = included.reduce((sum, debt) => sum + Number(snapshotsByDebt[debt.id]?.balance ?? debt.currentBalance ?? 0), 0);
-    const payoffOrder = sortDebtsForStrategy(included, strategy);
+    // See the matching comment in v2ApplicationService.js's previewDraftPlan
+    // - the displayed order/total must reflect exactly what was simulated.
+    const debtBalance = (debt) => Number(snapshotsByDebt[debt.id]?.balance ?? debt.currentBalance ?? 0);
+    const eligibleForDisplay = getEligiblePlanDebts(included, previewVersion).filter((debt) => debtBalance(debt) > 0);
+    const startingTotalBalance = eligibleForDisplay.reduce((sum, debt) => sum + debtBalance(debt), 0);
+    const payoffOrder = sortDebtsForStrategy(eligibleForDisplay, strategy);
     return {
       strategy,
       extraMonthlyPayment,
@@ -483,6 +496,12 @@ export const createTrackToZeroV2AsyncAppService = ({
             name: candidate.accountName || candidate.creditorName || "Imported debt",
             debtType: candidate.debtType,
             currentBalance: candidate.currentBalance,
+            // Carries the parser/spreadsheet's confidence in this balance
+            // through to the created Debt (see statementCandidateAdapter.js/
+            // importCandidateAdapter.js) - a candidate whose balance was
+            // never confidently found must never become a Debt that looks
+            // like a confirmed $0 payoff (UX-0 Part 4/6).
+            balanceStatus: candidate.balanceStatus || "confirmed",
             aprStatus: candidate.aprStatus,
             apr: candidate.aprStatus === "unknown" ? null : candidate.apr,
             minimumRequiredPayment: candidate.minimumPayment ?? 0,

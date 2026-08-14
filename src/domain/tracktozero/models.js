@@ -1,5 +1,6 @@
 import {
   APR_STATUSES,
+  BALANCE_STATUSES,
   DEBT_STATUSES,
   EVENT_SOURCES,
   IMPORT_BATCH_STATUSES,
@@ -84,6 +85,13 @@ export const createDebt = (input = {}) => {
     ownerType,
     ownerId,
     ownerLabel: optionalString(input.ownerLabel),
+    // "confirmed" (default) means currentBalance reflects a real observation
+    // (manual entry, a recorded snapshot, or a successfully-parsed import).
+    // "unresolved" means the balance could not be confidently captured (e.g.
+    // committing an import candidate whose parser never found a balance) -
+    // a 0 here must never be treated as "paid off" (see effectiveBalanceStatus
+    // / isConfirmedZero in ownership.js).
+    balanceStatus: requireEnum(input.balanceStatus || "confirmed", BALANCE_STATUSES, "debt.balanceStatus"),
     includedInCorePayoffPlan: input.includedInCorePayoffPlan ?? !isMortgage,
     openingBalanceSnapshotId: optionalString(input.openingBalanceSnapshotId),
     createdAt: nowOr(input.createdAt),
@@ -209,6 +217,12 @@ export const createImportCandidate = (input = {}) => deepFreezeClone({
   accountReferenceSafe: optionalString(input.accountReferenceSafe),
   debtType: optionalString(input.debtType) || "other",
   currentBalance: requireMoney(input.currentBalance, "importCandidate.currentBalance"),
+  // "unresolved" means the source (parser/spreadsheet row) never produced a
+  // confident balance and currentBalance was defaulted to 0 for form display
+  // only - this must survive through to the created Debt (see
+  // commitImportBatch) so a failed import is never indistinguishable from a
+  // genuinely confirmed $0 payoff.
+  balanceStatus: requireEnum(input.balanceStatus || "confirmed", BALANCE_STATUSES, "importCandidate.balanceStatus"),
   statementDate: optionalString(input.statementDate),
   apr: input.aprStatus && input.aprStatus !== "unknown" && input.apr != null ? normalizeAprDecimal(input.apr, "importCandidate.apr") : null,
   aprStatus: requireEnum(input.aprStatus || "unknown", APR_STATUSES, "importCandidate.aprStatus"),

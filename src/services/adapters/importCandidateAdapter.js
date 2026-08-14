@@ -146,6 +146,10 @@ export const normalizeSpreadsheetRowsToCandidates = ({ headers = [], rows = [], 
       accountName: accountName || creditorName,
       debtType,
       currentBalance: currentBalance ?? 0,
+      // See statementCandidateAdapter.js - this row never produced a
+      // confident balance, so 0 is a form placeholder, not a claim of "$0
+      // owed". Carried through to the created Debt at commit time.
+      balanceStatus: currentBalance == null ? "unresolved" : "confirmed",
       statementDate,
       apr,
       aprStatus,

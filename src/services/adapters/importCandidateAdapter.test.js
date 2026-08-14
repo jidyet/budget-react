@@ -116,6 +116,18 @@ describe("importCandidateAdapter: row-to-candidate pipeline", () => {
     expect(result.batchWarnings.join(" ")).toMatch(/balance column/i);
   });
 
+  it("marks balanceStatus unresolved when a row's balance cell could not be read, and confirmed for a real value including a real $0 (UX-0)", () => {
+    const rows = [
+      { Creditor: "Chase", "Account Name": "Chase Card", "Debt Type": "Credit Card", Balance: "not a number", APR: "", "Min Payment": "", "Due Date": "" },
+      { Creditor: "Discover", "Account Name": "Discover Card", "Debt Type": "Credit Card", Balance: "0", APR: "", "Min Payment": "", "Due Date": "" },
+    ];
+    const { candidates } = normalizeSpreadsheetRowsToCandidates({ headers, rows, source: "excel", importBatchId: "batch-6" });
+    expect(candidates[0].currentBalance).toBe(0);
+    expect(candidates[0].balanceStatus).toBe("unresolved");
+    expect(candidates[1].currentBalance).toBe(0);
+    expect(candidates[1].balanceStatus).toBe("confirmed");
+  });
+
   it("produces the same candidateId for the same importBatchId + row content (deterministic, needed for idempotent commit)", () => {
     const rows = [{ Creditor: "Chase", "Account Name": "Chase Card", "Debt Type": "Credit Card", Balance: 100, APR: "", "Min Payment": "", "Due Date": "" }];
     const first = normalizeSpreadsheetRowsToCandidates({ headers, rows, source: "excel", importBatchId: "batch-5" });

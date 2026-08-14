@@ -1,5 +1,6 @@
 import { MAX_SIMULATION_MONTHS, payoffSimulate } from "../calc/payoffEngine.js";
 import { debtToEngineAccount } from "../adapters/tracktozeroCalcAdapter.js";
+import { isConfirmedZero, isDebtNeedsReview } from "../../domain/tracktozero/ownership.js";
 
 export const TRACKTOZERO_STATUS_THRESHOLDS = Object.freeze({
   staleBalanceDays: 45,
@@ -40,6 +41,19 @@ export const getIncludedDebts = (debts = [], planVersion = null) => {
   return debts.filter((debt) => debt.status === "active" && includedIds.has(debt.id));
 };
 
+// The set of included debts that can safely drive REAL plan math: the
+// simulation, the payoff queue order, and target selection. A debt whose
+// material financial truth is unresolved (unconfirmed balance) or almost
+// certainly contaminated (minimum payment matching its own APR percentage -
+// the exact "APR became minimum payment" bug) must not silently corrupt the
+// projected $0 date, interest total, or trigger a false negative-
+// amortization warning caused by bad data rather than a real payment
+// shortfall. It is NOT removed from the workspace or hidden from the user -
+// see evaluateProjectionWarnings, which still surfaces it as a distinct,
+// explicit warning for every included debt, reviewed or not.
+export const getEligiblePlanDebts = (debts, planVersion) =>
+  getIncludedDebts(debts, planVersion).filter((debt) => !isDebtNeedsReview(debt));
+
 // The single shared definition of "payoff order" for a strategy - used
 // anywhere a numbered queue is shown (plan preview, active plan) so the
 // displayed order can never drift from what payoffSimulate actually pays
@@ -61,7 +75,22 @@ export const evaluateProjectionWarnings = ({
   const warnings = [];
 
   for (const debt of includedDebts) {
-    if (debt.aprStatus === "unknown") {
+    if (isDebtNeedsReview(debt)) {
+      // Excluded from the simulation entirely (see getEligiblePlanDebts) -
+      // this is the explicit, visible reason why, rather than the debt
+      // silently vanishing from the plan's math.
+      warnings.push({
+        code: "needs_review_excluded",
+        debtId: debt.id,
+        severity: WARNING_SEVERITY.critical,
+        message: `${debt.name} has unresolved or contaminated financial data and is excluded from this plan's calculations until reviewed.`,
+      });
+      continue;
+    }
+    // A confirmed-paid-off ($0) debt has no future interest to estimate -
+    // warning about its APR confidence would be noise about a debt that's
+    // already done, not a real planning concern.
+    if (debt.aprStatus === "unknown" && !isConfirmedZero(debt)) {
       warnings.push({
         code: "unknown_apr",
         debtId: debt.id,
@@ -79,7 +108,12 @@ export const evaluateProjectionWarnings = ({
     }
   }
 
-  const startingTotal = includedDebts.reduce((sum, debt) => sum + Number(debt.currentBalance || 0), 0);
+  // Matches exactly the debt set actually fed into the simulation (see
+  // buildProjectionWithWarnings) - comparing this warning's math against a
+  // different set of debts than what was simulated would just create a new
+  // form of the same "numbers don't agree with each other" bug.
+  const eligibleDebts = includedDebts.filter((debt) => !isDebtNeedsReview(debt));
+  const startingTotal = eligibleDebts.reduce((sum, debt) => sum + Number(debt.currentBalance || 0), 0);
   const lastTotal = Number(projectionRows.at(-1)?.remaining_debt || 0);
   if (projectionRows.length >= 2 && lastTotal > startingTotal + TRACKTOZERO_STATUS_THRESHOLDS.onTrackDollarTolerance) {
     warnings.push({
@@ -121,8 +155,8 @@ export const buildProjectionWithWarnings = ({
   startYear,
   maxMonths = MAX_SIMULATION_MONTHS,
 } = {}) => {
-  const includedDebts = getIncludedDebts(debts, planVersion);
-  const accounts = includedDebts.map(debtToEngineAccount);
+  const eligibleDebts = getEligiblePlanDebts(debts, planVersion);
+  const accounts = eligibleDebts.map(debtToEngineAccount);
   const projection = planVersion
     ? payoffSimulate(
         accounts,
@@ -174,6 +208,24 @@ export const classifyPlanStatus = ({
       code: "needs_balance_update",
       label: "Update your balance",
       message: "Confirm each included debt balance to refresh your plan status.",
+      delta: 0,
+    };
+  }
+  // A debt's "latest snapshot" being its own opening snapshot means no real
+  // observation has been recorded since the debt (or the plan) was created -
+  // there is no observed history yet to judge ahead/on-track/behind from.
+  // Only flags this when both ids are genuinely present and equal, so
+  // synthetic/test snapshots that omit an id (and therefore can't be
+  // positively identified as the opening one) are unaffected.
+  const allOpeningSnapshotsOnly = includedDebts.every((debt) => {
+    const snap = latestSnapshotsByDebt[debt.id];
+    return !!debt.openingBalanceSnapshotId && !!snap?.id && snap.id === debt.openingBalanceSnapshotId;
+  });
+  if (allOpeningSnapshotsOnly) {
+    return {
+      code: "insufficient_data",
+      label: "Not enough history yet",
+      message: "Confirm at least one real balance update before TrackToZero can show plan progress.",
       delta: 0,
     };
   }
@@ -241,4 +293,45 @@ export const classifyPlanStatus = ({
     actualTotalBalance,
     expectedTotalBalance,
   };
+};
+
+// THE single shared plan-health derivation - Home, Plan, and any future
+// status component must all consume this (never classifyPlanStatus alone),
+// so they can never disagree with each other. This is a hard UX/truth
+// invariant: classifyPlanStatus alone only compares the latest confirmed
+// balance against an expected checkpoint - it has no idea whether the
+// active PlanVersion's own projection is currently failing (e.g. the
+// projected balance grows instead of shrinking, from evaluateProjectionWarnings).
+// A plan can look "ahead" by that balance-delta measure while its projection
+// is simultaneously infeasible; without this composition step, Home and Plan
+// would each report their own half of the truth and visibly contradict each
+// other. A critical warning always overrides a positive/neutral directional
+// label - it never overrides an already-informational state like
+// insufficient_data or needs_balance_update, since there is nothing
+// "positive" in those states to contradict.
+export const derivePlanHealth = ({
+  debts = [],
+  planVersion = null,
+  expectedCheckpoints = [],
+  latestSnapshotsByDebt = {},
+  projectionWarnings = [],
+  asOf = new Date().toISOString(),
+  thresholds = TRACKTOZERO_STATUS_THRESHOLDS,
+} = {}) => {
+  const base = classifyPlanStatus({ debts, planVersion, expectedCheckpoints, latestSnapshotsByDebt, asOf, thresholds });
+  const INFORMATIONAL_CODES = new Set(["insufficient_data", "needs_balance_update"]);
+  if (INFORMATIONAL_CODES.has(base.code)) return base;
+
+  const hasCritical = projectionWarnings.some((warning) => warning.severity === WARNING_SEVERITY.critical);
+  if (hasCritical) {
+    return {
+      code: "critical",
+      label: "Plan needs attention",
+      message: "The active plan has a critical warning (for example, the projected balance is not shrinking). Review it before trusting this plan's status.",
+      delta: base.delta,
+      actualTotalBalance: base.actualTotalBalance,
+      expectedTotalBalance: base.expectedTotalBalance,
+    };
+  }
+  return base;
 };

@@ -10,12 +10,18 @@ import {
 import { createTrackToZeroV2AsyncAppService, getUserSafeTrackToZeroError } from "../../services/tracktozero/v2AsyncApplicationService";
 import { V2_TEST_ACTOR_ID, V2_TEST_NOW } from "../../services/tracktozero/v2SeedData";
 import { getLaunchFlags } from "../../config/launchFlags";
-import { effectiveOwnerType } from "../../domain/tracktozero/ownership.js";
+import { effectiveOwnerType, isConfirmedZero, isDebtNeedsReview, looksLikeJunkOwnerLabel } from "../../domain/tracktozero/ownership.js";
 
 const money = (value) =>
   Number(value || 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
 
 const percent = (value) => value == null ? "Unknown APR" : `${(Number(value || 0) * 100).toFixed(2)}% APR`;
+// A display-time safety net (UX-0 Part 7): a stored ownerLabel that looks
+// like statement noise (mail-handling boilerplate, a card product name) is
+// shown as "Unassigned" instead of as if it were a real person - for
+// records written before the parser-level fix existed, without ever
+// mutating the stored value or running a backfill.
+const presentedOwnerLabel = (debt) => (looksLikeJunkOwnerLabel(debt?.ownerLabel) ? "Unassigned" : (debt?.ownerLabel || "Unassigned"));
 const todayInputValue = () => new Date().toISOString().slice(0, 10);
 const dateInputToIso = (value) => value ? `${value}T00:00:00.000Z` : "";
 const newDebtDraft = () => ({
@@ -223,15 +229,27 @@ function StatusBadge({ status }) {
 }
 
 // Small, honest badges summarizing a debt's state at a glance - every badge
-// reflects a real field, never an inferred/guessed one.
+// reflects a real field, never an inferred/guessed one. Uses the same
+// isDebtNeedsReview/isConfirmedZero/looksLikeJunkOwnerLabel truth functions
+// the plan-eligibility and portfolio-total logic use (UX-0), so a debt can
+// never look fine here while being silently excluded from the plan/totals
+// for a reason this card doesn't mention.
 function DebtBadges({ debt, isTarget, isHousehold }) {
-  const needsReview = debt.aprStatus === "unknown"
+  const paidOff = isConfirmedZero(debt);
+  const junkOwner = isHousehold && looksLikeJunkOwnerLabel(debt.ownerLabel);
+  const needsReview = !paidOff && (
+    isDebtNeedsReview(debt)
+    || debt.aprStatus === "unknown"
     || Number(debt.minimumRequiredPayment || 0) <= 0
-    || (isHousehold && effectiveOwnerType(debt) === "unassigned");
+    || (isHousehold && effectiveOwnerType(debt) === "unassigned")
+    || junkOwner
+  );
+  const ownerLabel = presentedOwnerLabel(debt);
   return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "6px 0" }}>
       {isTarget && <span style={styles.badgeTarget}>Current target</span>}
-      {isHousehold && <span style={styles.badgeOwner}>{debt.ownerLabel || "Unassigned"}</span>}
+      {paidOff && <span style={styles.badgeOwner}>Paid off</span>}
+      {isHousehold && <span style={styles.badgeOwner}>{ownerLabel}</span>}
       {debt.aprStatus === "unknown" && <span style={styles.badgeWarning}>APR unknown</span>}
       {needsReview && <span style={styles.badgeWarning}>Needs review</span>}
       {!debt.includedInCorePayoffPlan && <span style={styles.badgeMuted}>Excluded from core date</span>}
@@ -240,6 +258,7 @@ function DebtBadges({ debt, isTarget, isHousehold }) {
 }
 
 function WorkspaceBar({
+  workspace,
   workspaces,
   workspaceId,
   setWorkspaceId,
@@ -278,7 +297,14 @@ function WorkspaceBar({
               ))}
             </select>
           </Field>
-        ) : <span style={styles.pill}>Workspace: Personal beta</span>}
+        ) : (
+          // Same authoritative snapshot.workspace every other screen (Home,
+          // Debts, Plan, Settings) reads its type from - never a hardcoded
+          // label, which previously could say "Personal" here while Settings
+          // correctly said "household" for the exact same workspace (UX-0
+          // Part 2: Header/Home/Debts/Plan/Settings must never disagree).
+          <span style={styles.pill}>Workspace: {workspace?.type === "household" ? "Household" : "Personal"} beta</span>
+        )}
         {canSwitchRole ? (
           <Field label="Role preview">
             <select style={styles.input} value={actorId} onChange={(event) => setActorId(event.target.value)}>
@@ -310,9 +336,12 @@ function Home({ snapshot, scenario, onGoToPlan, onScenario }) {
       <Section title="Build your payoff plan" eyebrow="Home">
         <p>You have debts in this workspace. Next, choose Snowball or Avalanche and activate your first payoff plan.</p>
         <div style={styles.grid}>
-          <p><strong>Total debt entered:</strong> {money(snapshot.debts.reduce((sum, debt) => sum + Number(snapshot.latestSnapshotsByDebt[debt.id]?.balance ?? debt.currentBalance ?? 0), 0))}</p>
+          <p><strong>Total debt entered:</strong> {money(snapshot.portfolioSummary.totalWorkspaceDebt)}</p>
           <p><strong>Included in core payoff:</strong> {snapshot.includedDebts.length}</p>
           <p><strong>Plan status:</strong> Not started yet</p>
+          {snapshot.portfolioSummary.needsReviewCount > 0 && (
+            <p><strong>Needs review:</strong> {snapshot.portfolioSummary.needsReviewCount} debt(s) have unresolved or unverified data - a confirmed balance still counts above, but these debts are excluded from plan calculations until reviewed.</p>
+          )}
         </div>
         <button type="button" style={styles.primaryButton} onClick={onGoToPlan}>Build my payoff plan</button>
       </Section>
@@ -327,12 +356,15 @@ function Home({ snapshot, scenario, onGoToPlan, onScenario }) {
             <StatusBadge status={snapshot.status} />
             <p>{snapshot.status.message}</p>
             {target && <p><strong>Why this debt:</strong> {snapshot.activeContext?.version?.strategy === "snowball" ? "Snowball target — smallest included balance." : "Avalanche target — highest APR included debt."}</p>}
-            {target && snapshot.workspace.type === "household" && <p><strong>Owner:</strong> {target.ownerLabel || "Unassigned"}</p>}
+            {target && snapshot.workspace.type === "household" && <p><strong>Owner:</strong> {presentedOwnerLabel(target)}</p>}
           </div>
           <div>
-            <p><strong>Total included debt:</strong> {money(snapshot.totalIncludedDebt)}</p>
+            <p><strong>Total included debt:</strong> {money(snapshot.portfolioSummary.includedDebt)}</p>
             <p><strong>Estimated debt-free date:</strong> {snapshot.projectedZeroDate || "Needs plan"}</p>
             <p><strong>Workspace:</strong> {snapshot.workspace.type === "household" ? "Household shared payoff" : "Personal payoff"}</p>
+            {snapshot.portfolioSummary.needsReviewCount > 0 && (
+              <p><strong>Needs review:</strong> {snapshot.portfolioSummary.needsReviewCount} debt(s) have unresolved or unverified data - a confirmed balance still counts above, but these debts are excluded from plan calculations until reviewed.</p>
+            )}
           </div>
           <div>
             <p><strong>One improvement prompt:</strong></p>
@@ -639,14 +671,17 @@ function Debts({ snapshot, service, refresh, runAction, writeState }) {
             </Field>
           </div>
         )}
-        {isHousehold && snapshot.householdOwnershipSummary && (
+        {isHousehold && (
           <div style={{ ...styles.grid, marginBottom: 14 }}>
-            <p><strong>Total household debt:</strong> {money(snapshot.householdOwnershipSummary.total)} <span style={{ color: "#5b7c98" }}>(counted once)</span></p>
-            {snapshot.householdOwnershipSummary.perMember.map((member) => (
+            <p><strong>Total household debt:</strong> {money(snapshot.portfolioSummary.includedDebt)} <span style={{ color: "#5b7c98" }}>(counted once)</span></p>
+            {snapshot.portfolioSummary.memberDebt.map((member) => (
               <p key={member.uid}><strong>{member.displayName}:</strong> {money(member.total)}</p>
             ))}
-            <p><strong>Joint / Household:</strong> {money(snapshot.householdOwnershipSummary.jointTotal)}</p>
-            <p><strong>Unassigned:</strong> {money(snapshot.householdOwnershipSummary.unassignedTotal)}</p>
+            <p><strong>Joint / Household:</strong> {money(snapshot.portfolioSummary.jointDebt)}</p>
+            <p><strong>Unassigned:</strong> {money(snapshot.portfolioSummary.unassignedDebt)}</p>
+            {snapshot.portfolioSummary.needsReviewCount > 0 && (
+              <p><strong>Needs review:</strong> {snapshot.portfolioSummary.needsReviewCount} debt(s) have unresolved or unverified data - a confirmed balance still counts above, but these debts are excluded from plan calculations until reviewed.</p>
+            )}
           </div>
         )}
         <div style={styles.grid}>
@@ -822,7 +857,7 @@ function FirstPlanBuilder({ snapshot, service, refresh, runAction, writeState, c
             {preview.payoffOrder.map((debt) => (
               <li key={debt.id}>
                 {debt.name} · {money(debt.currentBalance)} · {debt.aprStatus === "unknown" ? "Unknown APR" : percent(debt.apr)}
-                {snapshot.workspace.type === "household" && <> · {debt.ownerLabel || "Unassigned"}</>}
+                {snapshot.workspace.type === "household" && <> · {presentedOwnerLabel(debt)}</>}
               </li>
             ))}
           </ol>
@@ -1226,6 +1261,7 @@ export default function TrackToZeroV2App() {
     <main style={styles.shell}>
       <div style={styles.wrap}>
         <WorkspaceBar
+          workspace={snapshot.workspace}
           workspaces={workspaces}
           workspaceId={workspaceId}
           setWorkspaceId={(idValue) => { setWorkspaceId(idValue); setScenario(null); }}

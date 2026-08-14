@@ -23,7 +23,10 @@ export const HEADER_ALIASES = {
 
 const DEBT_TYPE_ALIASES = [
   { type: "credit_card", match: /credit\s*card|visa|mastercard|amex|discover card/i },
-  { type: "student_loan", match: /student\s*loan/i },
+  // Known student-loan servicer names count as a student-loan signal even when
+  // the literal phrase "student loan" isn't present (common on real statements -
+  // same servicer list StatementUpload.jsx's provider detection already uses).
+  { type: "student_loan", match: /student\s*loan|\bmohela\b|\bnelnet\b|\bnavient\b|sallie\s*mae|firstmark|\baes\b|subsidized|\bfafsa\b/i },
   { type: "auto_loan", match: /auto\s*loan|car\s*loan|vehicle\s*loan/i },
   { type: "mortgage", match: /mortgage/i },
   { type: "line_of_credit", match: /line\s*of\s*credit|heloc/i },

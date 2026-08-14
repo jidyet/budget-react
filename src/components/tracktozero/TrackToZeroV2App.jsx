@@ -360,7 +360,33 @@ function ImportPanel({ snapshot, service, refresh, canManage }) {
     if (!file) return;
     setImportState({ status: "parsing", batch: null, error: "" });
     try {
-      const isCsv = String(file.name || "").toLowerCase().endsWith(".csv");
+      const name = String(file.name || "").toLowerCase();
+      const isCsv = name.endsWith(".csv");
+      const isPdf = name.endsWith(".pdf");
+      const isImage = /\.(png|jpe?g|webp)$/.test(name);
+
+      if (isPdf || isImage) {
+        // PDF/image statements produce exactly one candidate per file, via the
+        // existing pdfjs/OCR extraction engine (see pdfImportReader.js /
+        // imageImportReader.js) - same downstream ImportBatch/review/commit
+        // contract as Excel/CSV, just a different source-to-candidate step.
+        const result = isPdf
+          ? await (await import("../../services/adapters/pdfImportReader.js")).readPdfFileToCandidate(file, { importBatchId: "upload", source: "pdf" })
+          : await (await import("../../services/adapters/imageImportReader.js")).readImageFileToCandidate(file, { importBatchId: "upload", source: "image" });
+        if (result.status !== "parsed" || !result.candidate) {
+          setImportState({ status: "idle", batch: null, error: result.message || "This file could not be read." });
+          return;
+        }
+        const batch = await service.createImportBatch(snapshot.workspace.id, {
+          sourceType: isPdf ? "pdf" : "image",
+          sourceFilename: file.name,
+          candidates: [result.candidate],
+          warnings: [],
+        });
+        setImportState({ status: "review", batch, error: "" });
+        return;
+      }
+
       // Excel and CSV converge on the exact same normalizeSpreadsheetRowsToCandidates
       // pipeline (see importCandidateAdapter.js) - only the file-to-{headers,rows}
       // reading step differs between the two readers.
@@ -413,12 +439,12 @@ function ImportPanel({ snapshot, service, refresh, canManage }) {
 
   if (importState.status === "idle" || importState.status === "parsing") {
     return (
-      <Section title="Import a spreadsheet" eyebrow="Excel or CSV">
-        <p>Upload an .xlsx, .xls, or .csv file with your creditor, balance, APR, and minimum-payment columns. Nothing is added until you review and confirm it.</p>
+      <Section title="Import statements" eyebrow="Excel, CSV, PDF, or a photo">
+        <p>Upload a spreadsheet (.xlsx, .xls, .csv), a statement PDF, or a photo/screenshot of a statement (PNG, JPG, WEBP). Nothing is added until you review and confirm it.</p>
         <input
           type="file"
-          accept=".xlsx,.xls,.csv"
-          aria-label="Upload Excel or CSV spreadsheet of debts"
+          accept=".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp"
+          aria-label="Upload a spreadsheet, PDF, or photo of your debts"
           disabled={!canManage || importState.status === "parsing"}
           onChange={(event) => handleFile(event.target.files?.[0])}
         />

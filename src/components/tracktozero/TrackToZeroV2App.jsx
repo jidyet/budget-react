@@ -16,7 +16,7 @@ import PageContainer from "./layout/PageContainer.jsx";
 import QaHarnessControls from "./layout/QaHarnessControls.jsx";
 import StatusBadge from "./ui/StatusBadge.jsx";
 import ReviewCenter from "./review/ReviewCenter.jsx";
-import HomeQuickCheck from "./review/HomeQuickCheck.jsx";
+import HomeCommandCenter from "./home/HomeCommandCenter.jsx";
 import { formatMoney as money, formatPercent as percent } from "./formatting.js";
 // A display-time safety net (UX-0 Part 7): a stored ownerLabel that looks
 // like statement noise (mail-handling boilerplate, a card product name) is
@@ -321,83 +321,23 @@ function WorkspaceBar({
   );
 }
 
-function Home({ snapshot, scenario, onGoToPlan, onGoToReview, reviewSnapshot, onScenario }) {
-  const target = snapshot.targetDebt;
-  const quickCheck = (
-    <HomeQuickCheck
-      openCount={reviewSnapshot?.openCount || 0}
-      blockingCount={reviewSnapshot?.blockingCount || 0}
-      onGoToReview={onGoToReview}
-    />
-  );
-  if (!snapshot.debts.length) {
-    return (
-      <>
-        {quickCheck}
-        <Section title="Add your first debt" eyebrow="Home">
-          <p>Start by adding a credit card, loan, line of credit, medical debt, or another balance you want to pay to $0.</p>
-          <p>Once your first debt is saved, TrackToZero will guide you toward a payoff plan.</p>
-        </Section>
-      </>
-    );
-  }
-  if (!snapshot.activeContext?.version) {
-    return (
-      <>
-        {quickCheck}
-        <Section title="Build your payoff plan" eyebrow="Home">
-          <p>You have debts in this workspace. Next, choose Snowball or Avalanche and activate your first payoff plan.</p>
-          <div style={styles.grid}>
-            <p><strong>Total debt entered:</strong> {money(snapshot.portfolioSummary.totalWorkspaceDebt)}</p>
-            <p><strong>Included in core payoff:</strong> {snapshot.includedDebts.length}</p>
-            <p><strong>Plan status:</strong> Not started yet</p>
-            {snapshot.portfolioSummary.needsReviewCount > 0 && (
-              <p><strong>Needs review:</strong> {snapshot.portfolioSummary.needsReviewCount} debt(s) have unresolved or unverified data - a confirmed balance still counts above, but these debts are excluded from plan calculations until reviewed.</p>
-            )}
-          </div>
-          <button type="button" style={styles.primaryButton} onClick={onGoToPlan}>Build my payoff plan</button>
-        </Section>
-      </>
-    );
-  }
-  const nextPayment = Number(target?.minimumRequiredPayment || 0) + Number(snapshot.activeContext?.version?.extraMonthlyPayment || 0);
+// UX-2: HOME COMMAND CENTER + MOMENTUM EXPERIENCE
+// The heart of TrackToZero - users understand their debt situation and next move
+// within 5 seconds. Handled by dedicated HomeCommandCenter component.
+function Home({ snapshot, scenario, onGoToPlan, onGoToReview, reviewSnapshot }) {
   return (
-    <>
-      {quickCheck}
-      <Section title={target ? `Next move: pay ${money(nextPayment)} to ${target.name}` : "Next move: create a payoff plan"} eyebrow="Home">
-        <div style={styles.grid}>
-          <div>
-            <StatusBadge status={snapshot.status} />
-            <p>{snapshot.status.message}</p>
-            {target && <p><strong>Why this debt:</strong> {snapshot.activeContext?.version?.strategy === "snowball" ? "Snowball target — smallest included balance." : "Avalanche target — highest APR included debt."}</p>}
-            {target && snapshot.workspace.type === "household" && <p><strong>Owner:</strong> {presentedOwnerLabel(target)}</p>}
-          </div>
-          <div>
-            <p><strong>Total included debt:</strong> {money(snapshot.portfolioSummary.includedDebt)}</p>
-            <p><strong>Estimated debt-free date:</strong> {snapshot.projectedZeroDate || "Needs plan"}</p>
-            <p><strong>Workspace:</strong> {snapshot.workspace.type === "household" ? "Household shared payoff" : "Personal payoff"}</p>
-            {snapshot.portfolioSummary.needsReviewCount > 0 && (
-              <p><strong>Needs review:</strong> {snapshot.portfolioSummary.needsReviewCount} debt(s) have unresolved or unverified data - a confirmed balance still counts above, but these debts are excluded from plan calculations until reviewed.</p>
-            )}
-          </div>
-          <div>
-            <p><strong>One improvement prompt:</strong></p>
-            <p>{snapshot.warnings[0]?.message || "Try previewing +$100/month before applying anything."}</p>
-            <button style={styles.primaryButton} onClick={() => onScenario(100)}>Preview +$100/mo</button>
-          </div>
-        </div>
-      </Section>
-      {scenario && (
-        <Section title="What-if preview: current plan vs scenario" eyebrow="Scenario · side-effect-free">
-          <p>Adds temporary extra payment only in the preview. It does not mutate the active plan.</p>
-          <div style={styles.grid}>
-            <p><strong>Months saved:</strong> {scenario.monthsSaved}</p>
-            <p><strong>Estimated interest saved:</strong> {money(scenario.interestSaved)}</p>
-            <p><strong>Scenario length:</strong> {scenario.scenarioMonths} months</p>
-          </div>
-        </Section>
-      )}
-    </>
+    <HomeCommandCenter
+      snapshot={snapshot}
+      reviewSnapshot={reviewSnapshot}
+      scenario={scenario}
+      onGoToPlan={onGoToPlan}
+      onGoToReview={onGoToReview}
+      onUploadBudget={onGoToPlan}  // TODO: wire to actual upload flow
+      onAddDebt={onGoToPlan}       // TODO: wire to actual add debt flow
+      onRecordPayment={() => {}}   // TODO: wire to payment recording
+      onViewDetails={onGoToPlan}   // TODO: wire to debt details
+      onSeeOptions={onGoToPlan}    // TODO: wire to plan options
+    />
   );
 }
 

@@ -1,3 +1,4 @@
+import React from "react";
 import { BRAND_NAME, BRAND_TAGLINE, BRAND_WORDMARK, BRAND_COLORS } from "../../config/brand";
 
 export default function BrandLockup({

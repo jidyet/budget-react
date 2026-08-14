@@ -11,11 +11,11 @@ import { createTrackToZeroV2AsyncAppService, getUserSafeTrackToZeroError } from 
 import { V2_TEST_ACTOR_ID, V2_TEST_NOW } from "../../services/tracktozero/v2SeedData";
 import { getLaunchFlags } from "../../config/launchFlags";
 import { effectiveOwnerType, isConfirmedZero, isDebtNeedsReview, looksLikeJunkOwnerLabel } from "../../domain/tracktozero/ownership.js";
-
-const money = (value) =>
-  Number(value || 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
-
-const percent = (value) => value == null ? "Unknown APR" : `${(Number(value || 0) * 100).toFixed(2)}% APR`;
+import AppShell from "./layout/AppShell.jsx";
+import PageContainer from "./layout/PageContainer.jsx";
+import QaHarnessControls from "./layout/QaHarnessControls.jsx";
+import StatusBadge from "./ui/StatusBadge.jsx";
+import { formatMoney as money, formatPercent as percent } from "./formatting.js";
 // A display-time safety net (UX-0 Part 7): a stored ownerLabel that looks
 // like statement noise (mail-handling boilerplate, a card product name) is
 // shown as "Unassigned" instead of as if it were a real person - for
@@ -212,22 +212,6 @@ function OnboardingScreen({ busy, error, onChooseWorkspace, onSignOut }) {
   );
 }
 
-function StatusBadge({ status }) {
-  const palette = {
-    ahead: ["#dcfce7", "#166534"],
-    on_track: ["#dcfce7", "#166534"],
-    slightly_behind: ["#fef3c7", "#92400e"],
-    needs_review: ["#fee2e2", "#991b1b"],
-    needs_balance_update: ["#e0f2fe", "#075985"],
-    insufficient_data: ["#f1f5f9", "#475569"],
-  }[status?.code] || ["#f1f5f9", "#475569"];
-  return (
-    <span aria-label={`Plan status: ${status?.label || "Unknown"}`} style={{ ...styles.pill, background: palette[0], color: palette[1], borderColor: palette[1] }}>
-      {status?.label || "Unknown"}
-    </span>
-  );
-}
-
 // Small, honest badges summarizing a debt's state at a glance - every badge
 // reflects a real field, never an inferred/guessed one. Uses the same
 // isDebtNeedsReview/isConfirmedZero/looksLikeJunkOwnerLabel truth functions
@@ -276,6 +260,20 @@ function WorkspaceBar({
   const previewMembers = allowNonMemberPreview
     ? [...members, { uid: "seed-outsider", role: "non-member", displayName: "Non-member" }]
     : members;
+  if (canSwitchWorkspace || canSwitchRole) {
+    return (
+      <QaHarnessControls
+        workspaces={workspaces}
+        workspaceId={workspaceId}
+        setWorkspaceId={setWorkspaceId}
+        members={members}
+        actorId={actorId}
+        setActorId={setActorId}
+        allowNonMemberPreview={allowNonMemberPreview}
+      />
+    );
+  }
+  if (!onSignOut) return null;
   const modeLabel = repositoryMode === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction
     ? "Clean beta workspace"
     : repositoryMode === TRACKTOZERO_V2_REPOSITORY_MODES.localBeta
@@ -1257,30 +1255,41 @@ export default function TrackToZeroV2App() {
     );
   }
 
+  const qaControlsVisible = !usesRealAuthUi;
+  const topBarProps = {
+    workspace: snapshot.workspace,
+    repositoryMode: runtime.mode,
+    snapshotMode: snapshot.mode,
+    activeTab: tab,
+    onSelectTab: setTab,
+    userName: snapshot.membership?.displayName || authState.user?.displayName || "",
+    userEmail: authState.user?.email || "",
+    userRole: snapshot.membership?.role || "viewer",
+    onGoToSettings: () => setTab("settings"),
+    onSignOut: usesRealAuthUi ? activeLogout : null,
+  };
+
   return (
-    <main style={styles.shell}>
-      <div style={styles.wrap}>
-        <WorkspaceBar
-          workspace={snapshot.workspace}
-          workspaces={workspaces}
-          workspaceId={workspaceId}
-          setWorkspaceId={(idValue) => { setWorkspaceId(idValue); setScenario(null); }}
-          members={snapshot.members}
-          actorId={actorId}
-          setActorId={setActorId}
-          membership={snapshot.membership}
-          mode={snapshot.mode}
-          repositoryMode={runtime.mode}
-          allowNonMemberPreview={runtime.mode === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseEmulator}
-          canSwitchWorkspace={!usesRealAuthUi}
-          canSwitchRole={!usesRealAuthUi}
-          onSignOut={usesRealAuthUi ? activeLogout : null}
-        />
-        <nav aria-label="TrackToZero 2.0 primary navigation" style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
-          {["home", "debts", "plan", "settings"].map((item) => (
-            <button key={item} style={tab === item ? styles.primaryButton : styles.button} onClick={() => setTab(item)}>{item[0].toUpperCase() + item.slice(1)}</button>
-          ))}
-        </nav>
+    <AppShell topBarProps={topBarProps}>
+      <PageContainer>
+        {qaControlsVisible ? (
+          <WorkspaceBar
+            workspace={snapshot.workspace}
+            workspaces={workspaces}
+            workspaceId={workspaceId}
+            setWorkspaceId={(idValue) => { setWorkspaceId(idValue); setScenario(null); }}
+            members={snapshot.members}
+            actorId={actorId}
+            setActorId={setActorId}
+            membership={snapshot.membership}
+            mode={snapshot.mode}
+            repositoryMode={runtime.mode}
+            allowNonMemberPreview={runtime.mode === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseEmulator}
+            canSwitchWorkspace={qaControlsVisible}
+            canSwitchRole={qaControlsVisible}
+            onSignOut={null}
+          />
+        ) : null}
         {(writeState.error || writeState.success) && (
           <div role="status" aria-live="polite" style={{ ...styles.card, marginTop: 16, borderColor: writeState.error ? "#fecaca" : "#86efac" }}>
             {writeState.error || writeState.success}
@@ -1292,7 +1301,7 @@ export default function TrackToZeroV2App() {
         {tab === "debts" && <Debts snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} />}
         {tab === "plan" && <Plan snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} />}
         {tab === "settings" && <Settings snapshot={snapshot} repositoryMode={runtime.mode} />}
-      </div>
-    </main>
+      </PageContainer>
+    </AppShell>
   );
 }

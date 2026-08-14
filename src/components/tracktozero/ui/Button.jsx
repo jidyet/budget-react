@@ -1,0 +1,76 @@
+import React, { forwardRef } from "react";
+import { ttzPalette } from "../theme.js";
+
+// ONE button system for the whole product - consistent height/radius/focus/
+// disabled/loading behavior instead of every screen styling its own <button>
+// (the exact anti-pattern UX-1 Part 9 calls out). Visual only: callers still
+// own onClick/type/disabled/etc.
+const VARIANT_STYLES = (palette) => ({
+  primary: {
+    background: palette.go,
+    color: "#ffffff",
+    border: `1px solid ${palette.go}`,
+  },
+  secondary: {
+    background: palette.surf,
+    color: palette.tx,
+    border: `1px solid ${palette.border2}`,
+  },
+  ghost: {
+    background: "transparent",
+    color: palette.tx2,
+    border: "1px solid transparent",
+  },
+  danger: {
+    background: palette.da,
+    color: "#ffffff",
+    border: `1px solid ${palette.da}`,
+  },
+});
+
+const SIZE_STYLES = {
+  md: { height: 40, padding: "0 16px", fontSize: 14 },
+  sm: { height: 32, padding: "0 12px", fontSize: 13 },
+};
+
+const Button = forwardRef(function Button(
+  { variant = "secondary", size = "md", loading = false, disabled = false, iconOnly = false, style, children, ...rest },
+  ref
+) {
+  const palette = ttzPalette;
+  const variantStyle = VARIANT_STYLES(palette)[variant] || VARIANT_STYLES(palette).secondary;
+  const sizeStyle = SIZE_STYLES[size] || SIZE_STYLES.md;
+  const isDisabled = disabled || loading;
+
+  return (
+    <button
+      ref={ref}
+      type="button"
+      disabled={isDisabled}
+      aria-busy={loading || undefined}
+      style={{
+        ...variantStyle,
+        ...sizeStyle,
+        width: iconOnly ? sizeStyle.height : undefined,
+        padding: iconOnly ? 0 : sizeStyle.padding,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
+        borderRadius: "var(--ttz-radius-md, 12px)",
+        fontFamily: "var(--ttz-font-body, 'Instrument Sans', sans-serif)",
+        fontWeight: 700,
+        cursor: isDisabled ? "not-allowed" : "pointer",
+        opacity: isDisabled ? 0.55 : 1,
+        transition: "background-color 120ms ease, border-color 120ms ease, opacity 120ms ease",
+        outlineOffset: 2,
+        ...style,
+      }}
+      {...rest}
+    >
+      {loading ? "..." : children}
+    </button>
+  );
+});
+
+export default Button;

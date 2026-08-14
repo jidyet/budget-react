@@ -15,6 +15,8 @@ import AppShell from "./layout/AppShell.jsx";
 import PageContainer from "./layout/PageContainer.jsx";
 import QaHarnessControls from "./layout/QaHarnessControls.jsx";
 import StatusBadge from "./ui/StatusBadge.jsx";
+import ReviewCenter from "./review/ReviewCenter.jsx";
+import HomeQuickCheck from "./review/HomeQuickCheck.jsx";
 import { formatMoney as money, formatPercent as percent } from "./formatting.js";
 // A display-time safety net (UX-0 Part 7): a stored ownerLabel that looks
 // like statement noise (mail-handling boilerplate, a card product name) is
@@ -319,35 +321,49 @@ function WorkspaceBar({
   );
 }
 
-function Home({ snapshot, scenario, onGoToPlan, onScenario }) {
+function Home({ snapshot, scenario, onGoToPlan, onGoToReview, reviewSnapshot, onScenario }) {
   const target = snapshot.targetDebt;
+  const quickCheck = (
+    <HomeQuickCheck
+      openCount={reviewSnapshot?.openCount || 0}
+      blockingCount={reviewSnapshot?.blockingCount || 0}
+      onGoToReview={onGoToReview}
+    />
+  );
   if (!snapshot.debts.length) {
     return (
-      <Section title="Add your first debt" eyebrow="Home">
-        <p>Start by adding a credit card, loan, line of credit, medical debt, or another balance you want to pay to $0.</p>
-        <p>Once your first debt is saved, TrackToZero will guide you toward a payoff plan.</p>
-      </Section>
+      <>
+        {quickCheck}
+        <Section title="Add your first debt" eyebrow="Home">
+          <p>Start by adding a credit card, loan, line of credit, medical debt, or another balance you want to pay to $0.</p>
+          <p>Once your first debt is saved, TrackToZero will guide you toward a payoff plan.</p>
+        </Section>
+      </>
     );
   }
   if (!snapshot.activeContext?.version) {
     return (
-      <Section title="Build your payoff plan" eyebrow="Home">
-        <p>You have debts in this workspace. Next, choose Snowball or Avalanche and activate your first payoff plan.</p>
-        <div style={styles.grid}>
-          <p><strong>Total debt entered:</strong> {money(snapshot.portfolioSummary.totalWorkspaceDebt)}</p>
-          <p><strong>Included in core payoff:</strong> {snapshot.includedDebts.length}</p>
-          <p><strong>Plan status:</strong> Not started yet</p>
-          {snapshot.portfolioSummary.needsReviewCount > 0 && (
-            <p><strong>Needs review:</strong> {snapshot.portfolioSummary.needsReviewCount} debt(s) have unresolved or unverified data - a confirmed balance still counts above, but these debts are excluded from plan calculations until reviewed.</p>
-          )}
-        </div>
-        <button type="button" style={styles.primaryButton} onClick={onGoToPlan}>Build my payoff plan</button>
-      </Section>
+      <>
+        {quickCheck}
+        <Section title="Build your payoff plan" eyebrow="Home">
+          <p>You have debts in this workspace. Next, choose Snowball or Avalanche and activate your first payoff plan.</p>
+          <div style={styles.grid}>
+            <p><strong>Total debt entered:</strong> {money(snapshot.portfolioSummary.totalWorkspaceDebt)}</p>
+            <p><strong>Included in core payoff:</strong> {snapshot.includedDebts.length}</p>
+            <p><strong>Plan status:</strong> Not started yet</p>
+            {snapshot.portfolioSummary.needsReviewCount > 0 && (
+              <p><strong>Needs review:</strong> {snapshot.portfolioSummary.needsReviewCount} debt(s) have unresolved or unverified data - a confirmed balance still counts above, but these debts are excluded from plan calculations until reviewed.</p>
+            )}
+          </div>
+          <button type="button" style={styles.primaryButton} onClick={onGoToPlan}>Build my payoff plan</button>
+        </Section>
+      </>
     );
   }
   const nextPayment = Number(target?.minimumRequiredPayment || 0) + Number(snapshot.activeContext?.version?.extraMonthlyPayment || 0);
   return (
     <>
+      {quickCheck}
       <Section title={target ? `Next move: pay ${money(nextPayment)} to ${target.name}` : "Next move: create a payoff plan"} eyebrow="Home">
         <div style={styles.grid}>
           <div>
@@ -455,7 +471,7 @@ function ImportReviewCandidate({ candidate, canManage, busy, onUpdate, onDecide,
   );
 }
 
-function ImportPanel({ snapshot, service, refresh, canManage }) {
+function ImportPanel({ snapshot, service, refresh, refreshReview, canManage }) {
   const [importState, setImportState] = useState({ status: "idle", batch: null, error: "" });
 
   const handleFile = async (file) => {
@@ -486,6 +502,7 @@ function ImportPanel({ snapshot, service, refresh, canManage }) {
           warnings: [],
         });
         setImportState({ status: "review", batch, error: "" });
+        await refreshReview?.();
         return;
       }
 
@@ -506,6 +523,7 @@ function ImportPanel({ snapshot, service, refresh, canManage }) {
         warnings: parsed.batchWarnings,
       });
       setImportState({ status: "review", batch, error: "" });
+      await refreshReview?.();
     } catch (error) {
       // Never show a raw Firestore/Firebase error as the primary message -
       // getUserSafeTrackToZeroError translates it into friendly TrackToZero
@@ -537,6 +555,7 @@ function ImportPanel({ snapshot, service, refresh, canManage }) {
       await service.commitImportBatch(snapshot.workspace.id, importState.batch.id);
       setImportState({ status: "idle", batch: null, error: "" });
       await refresh();
+      await refreshReview?.();
     } catch (error) {
       setImportState((state) => ({ ...state, status: "review", error: error?.message || "Some debts could not be added. The rest were saved; try again for the remaining ones." }));
     }
@@ -546,6 +565,7 @@ function ImportPanel({ snapshot, service, refresh, canManage }) {
     return (
       <Section title="Import statements" eyebrow="Excel, CSV, PDF, or a photo">
         <p>Upload a spreadsheet (.xlsx, .xls, .csv), a statement PDF, or a photo/screenshot of a statement (PNG, JPG, WEBP). Nothing is added until you review and confirm it.</p>
+        <p style={{ color: "#5b7c98", fontSize: 13 }}>Anything we're not sure about shows up in Needs Review too - you can always come back to it later.</p>
         <input
           type="file"
           accept=".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp"
@@ -638,7 +658,7 @@ function ImportPanel({ snapshot, service, refresh, canManage }) {
   );
 }
 
-function Debts({ snapshot, service, refresh, runAction, writeState }) {
+function Debts({ snapshot, service, refresh, refreshReview, runAction, writeState }) {
   const [payment, setPayment] = useState({ debtId: snapshot.debts[0]?.id || "", amount: "" });
   const [balance, setBalance] = useState({ debtId: snapshot.debts[0]?.id || "", amount: "" });
   const [newDebt, setNewDebt] = useState(newDebtDraft);
@@ -809,7 +829,7 @@ function Debts({ snapshot, service, refresh, runAction, writeState }) {
           </form>
         </div>
       </Section>
-      <ImportPanel snapshot={snapshot} service={service} refresh={refresh} canManage={canManage} />
+      <ImportPanel snapshot={snapshot} service={service} refresh={refresh} refreshReview={refreshReview} canManage={canManage} />
     </>
   );
 }
@@ -1072,7 +1092,9 @@ export default function TrackToZeroV2App() {
   const [scenario, setScenario] = useState(null);
   const [runtimeState, setRuntimeState] = useState({ status: "idle", snapshot: null, workspaces: [], error: "" });
   const [writeState, setWriteState] = useState({ inProgress: false, action: "", error: "", success: "" });
+  const [reviewState, setReviewState] = useState({ status: "idle", snapshot: null });
   const requestSeq = useRef(0);
+  const reviewRequestSeq = useRef(0);
   const asOf = useMemo(() => usesRealAuthUi ? new Date().toISOString() : V2_TEST_NOW, [usesRealAuthUi]);
   const service = useMemo(() => createTrackToZeroV2AsyncAppService({ repository, actorId, asOf }), [repository, actorId, asOf]);
 
@@ -1161,6 +1183,26 @@ export default function TrackToZeroV2App() {
     }
   }, [actorId, authState.user, usesRealAuthUi, repository, runtime, service, workspaceId]);
 
+  // Review counts/lists come from exactly one place - service.getReviewSnapshot,
+  // which itself only calls REVIEW-1A's shared selectors over
+  // repository.listImportBatches. Nothing here recomputes an open/blocking
+  // count independently (REVIEW-1B Part 4/60), and it's fetched once per
+  // workspace load / resolution rather than on every render.
+  const refreshReview = useCallback(async (nextWorkspaceId = workspaceId) => {
+    if (!nextWorkspaceId) return;
+    const requestId = reviewRequestSeq.current + 1;
+    reviewRequestSeq.current = requestId;
+    setReviewState((state) => ({ ...state, status: "loading" }));
+    try {
+      const reviewSnapshot = await service.getReviewSnapshot(nextWorkspaceId);
+      if (reviewRequestSeq.current !== requestId) return;
+      setReviewState({ status: "loaded", snapshot: reviewSnapshot });
+    } catch {
+      if (reviewRequestSeq.current !== requestId) return;
+      setReviewState({ status: "error", snapshot: null });
+    }
+  }, [service, workspaceId]);
+
   const runAction = async (action, callback, { write = true } = {}) => {
     setWriteState({ inProgress: write, action, error: "", success: "" });
     try {
@@ -1191,13 +1233,14 @@ export default function TrackToZeroV2App() {
     Promise.resolve().then(() => {
       if (cancelled) return;
       refresh(workspaceId);
+      refreshReview(workspaceId);
       setScenario(null);
       setWriteState({ inProgress: false, action: "", error: "", success: "" });
     });
     return () => {
       cancelled = true;
     };
-  }, [refresh, workspaceId]);
+  }, [refresh, refreshReview, workspaceId]);
 
   const snapshot = runtimeState.snapshot;
   const workspaces = runtimeState.workspaces;
@@ -1270,6 +1313,7 @@ export default function TrackToZeroV2App() {
     userRole: snapshot.membership?.role || "viewer",
     onGoToSettings: () => setTab("settings"),
     onSignOut: usesRealAuthUi ? activeLogout : null,
+    navBadges: { review: reviewState.snapshot?.openCount || 0 },
   };
 
   return (
@@ -1298,10 +1342,20 @@ export default function TrackToZeroV2App() {
             {writeState.error || writeState.success}
           </div>
         )}
-        {tab === "home" && <Home snapshot={snapshot} scenario={scenario} onGoToPlan={() => setTab("plan")} onScenario={(extra) => runAction("preview scenario", async () => {
+        {tab === "home" && <Home snapshot={snapshot} scenario={scenario} reviewSnapshot={reviewState.snapshot} onGoToPlan={() => setTab("plan")} onGoToReview={() => setTab("review")} onScenario={(extra) => runAction("preview scenario", async () => {
           setScenario(await service.previewScenario(workspaceId, { extraMonthlyPayment: extra }));
         }, { write: false })} />}
-        {tab === "debts" && <Debts snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} />}
+        {tab === "review" && (
+          <ReviewCenter
+            snapshot={snapshot}
+            service={service}
+            workspaceId={workspaceId}
+            reviewSnapshot={reviewState.snapshot}
+            loadingReview={reviewState.status === "loading" && !reviewState.snapshot}
+            onRefreshReview={() => refreshReview(workspaceId)}
+          />
+        )}
+        {tab === "debts" && <Debts snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} refreshReview={() => refreshReview(workspaceId)} runAction={runAction} writeState={writeState} />}
         {tab === "plan" && <Plan snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} />}
         {tab === "settings" && <Settings snapshot={snapshot} repositoryMode={runtime.mode} />}
       </PageContainer>

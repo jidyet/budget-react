@@ -11,6 +11,7 @@ import PageContainer from "./PageContainer.jsx";
 import PageHeader from "./PageHeader.jsx";
 import SectionHeader from "./SectionHeader.jsx";
 import { TRACKTOZERO_V2_REPOSITORY_MODES } from "../../../services/tracktozero/repositoryRuntime.js";
+import { toneColors } from "../theme.js";
 
 const render = (element) => renderToStaticMarkup(element);
 
@@ -28,6 +29,15 @@ describe("UX-1 shell and brand components", () => {
     expect(html).toContain('aria-label="Primary"');
     expect(html).toContain('aria-current="page"');
     expect(html).toContain("Debts");
+  });
+
+  it("REVIEW-1B: PrimaryNav shows Review with an open-count badge, and it is never a danger/red tone", () => {
+    const withCount = render(h(PrimaryNav, { activeTab: "review", onSelect: () => {}, badges: { review: 3 } }));
+    expect(withCount).toContain("Review");
+    expect(withCount).toContain("3");
+    expect(withCount).not.toContain(toneColors().danger.fg);
+    const withoutCount = render(h(PrimaryNav, { activeTab: "home", onSelect: () => {}, badges: { review: 0 } }));
+    expect(withoutCount).toContain("Review");
   });
 
   it("WorkspaceIdentity labels personal and household workspaces without guessing names", () => {

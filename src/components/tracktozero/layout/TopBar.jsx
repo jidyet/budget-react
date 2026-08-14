@@ -5,7 +5,7 @@ import PrimaryNav from "./PrimaryNav.jsx";
 import EnvironmentBadge from "./EnvironmentBadge.jsx";
 import UserMenu from "./UserMenu.jsx";
 import { ttzPalette } from "../theme.js";
-import { useIsMobile } from "../useViewport.js";
+import { useIsTablet } from "../useViewport.js";
 
 // The new app shell header (UX-1 Part 22-23) - replaces the old WorkspaceBar,
 // which put "TrackToZero 2.0 - Local beta workspace (emulator)", a raw
@@ -14,9 +14,13 @@ import { useIsMobile } from "../useViewport.js";
 // value below (workspace type, role, environment) still comes from the
 // same authoritative snapshot/runtime state the caller already derived -
 // nothing here re-detects or recomputes it.
-export default function TopBar({ workspace, repositoryMode, snapshotMode, activeTab, onSelectTab, userName, userEmail, userRole, onGoToSettings, onSignOut }) {
+export default function TopBar({ workspace, repositoryMode, snapshotMode, activeTab, onSelectTab, navBadges, userName, userEmail, userRole, onGoToSettings, onSignOut }) {
   const palette = ttzPalette;
-  const isMobile = useIsMobile();
+  // Five nav items (Home/Review/Debts/Plan/Settings) no longer fit a single
+  // desktop-style row at tablet widths - switching this to the tablet
+  // breakpoint (not just mobile) keeps the brand wordmark from being
+  // squeezed into wrapping across multiple lines (REVIEW-1B QA finding).
+  const isCompact = useIsTablet();
 
   return (
     <header
@@ -32,19 +36,19 @@ export default function TopBar({ workspace, repositoryMode, snapshotMode, active
         style={{
           maxWidth: "var(--ttz-container-max, 1180px)",
           margin: "0 auto",
-          padding: isMobile ? "10px 14px" : "10px 20px",
+          padding: isCompact ? "10px 14px" : "10px 20px",
           display: "flex",
-          flexDirection: isMobile ? "column" : "row",
-          alignItems: isMobile ? "stretch" : "center",
-          gap: isMobile ? 10 : 20,
+          flexDirection: isCompact ? "column" : "row",
+          alignItems: isCompact ? "stretch" : "center",
+          gap: isCompact ? 10 : 20,
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 16, justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <BrandMark size={isMobile ? "sm" : "md"} />
-            {!isMobile ? <WorkspaceIdentity workspace={workspace} /> : null}
+            <BrandMark size={isCompact ? "sm" : "md"} />
+            {!isCompact ? <WorkspaceIdentity workspace={workspace} /> : null}
           </div>
-          {isMobile ? (
+          {isCompact ? (
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <EnvironmentBadge repositoryMode={repositoryMode} snapshotMode={snapshotMode} />
               <UserMenu name={userName} email={userEmail} role={userRole} onGoToSettings={onGoToSettings} onSignOut={onSignOut} />
@@ -52,11 +56,11 @@ export default function TopBar({ workspace, repositoryMode, snapshotMode, active
           ) : null}
         </div>
 
-        <div style={{ flex: 1, display: "flex", justifyContent: isMobile ? "flex-start" : "center", overflowX: isMobile ? "auto" : "visible" }}>
-          <PrimaryNav activeTab={activeTab} onSelect={onSelectTab} />
+        <div style={{ flex: 1, display: "flex", justifyContent: isCompact ? "flex-start" : "center", overflowX: isCompact ? "auto" : "visible" }}>
+          <PrimaryNav activeTab={activeTab} onSelect={onSelectTab} badges={navBadges} />
         </div>
 
-        {!isMobile ? (
+        {!isCompact ? (
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <EnvironmentBadge repositoryMode={repositoryMode} snapshotMode={snapshotMode} />
             <UserMenu name={userName} email={userEmail} role={userRole} onGoToSettings={onGoToSettings} onSignOut={onSignOut} />

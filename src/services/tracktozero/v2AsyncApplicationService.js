@@ -737,7 +737,7 @@ export const createTrackToZeroV2AsyncAppService = ({
   const deferReview = (workspaceId, batchId, candidateId) =>
     resolveImportCandidateMatch(workspaceId, batchId, candidateId, { decision: RECONCILIATION_DECISIONS.unsure });
 
-  const RESOLVABLE_CANDIDATE_FIELDS = Object.freeze(["currentBalance", "balanceStatus", "apr", "aprStatus", "minimumPayment", "dueDate", "ownerType", "ownerId"]);
+  const RESOLVABLE_CANDIDATE_FIELDS = Object.freeze(["currentBalance", "balanceStatus", "apr", "aprStatus", "minimumPayment", "dueDate", "dueDay", "ownerType", "ownerId"]);
 
   // Missing-information / field-conflict resolution (Part 16-19). Patches
   // only the specific fields the reviewer explicitly confirmed - never asks
@@ -776,8 +776,13 @@ export const createTrackToZeroV2AsyncAppService = ({
     resolveMissingInformation(workspaceId, batchId, candidateId, { fields: { apr, aprStatus } });
   const resolveMinimumPayment = (workspaceId, batchId, candidateId, { minimumPayment } = {}) =>
     resolveMissingInformation(workspaceId, batchId, candidateId, { fields: { minimumPayment } });
-  const resolveDueDate = (workspaceId, batchId, candidateId, { dueDate } = {}) =>
-    resolveMissingInformation(workspaceId, batchId, candidateId, { fields: { dueDate } });
+  // Day-of-month only (Part 19 of REVIEW-1B) - a source that only supports
+  // "due day 21" must never be displayed/stored as a fabricated full date
+  // like "Aug 21". dueDay is the same authoritative field Debt.dueDay
+  // already uses; commitImportBatch's dueDayFromCandidate already prefers
+  // candidate.dueDay over candidate.dueDate when both are present.
+  const resolveDueDate = (workspaceId, batchId, candidateId, { dueDay } = {}) =>
+    resolveMissingInformation(workspaceId, batchId, candidateId, { fields: { dueDay: Number(dueDay) } });
 
   // Owner resolution (Part 19) - authoritative ownership is restricted to a
   // verified workspace member, Joint/Household, or Unassigned. Parser text

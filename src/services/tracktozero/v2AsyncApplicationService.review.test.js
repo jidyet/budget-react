@@ -414,3 +414,21 @@ describe("REVIEW-1A Part 19: owner resolution stays restricted to verified membe
     ).rejects.toThrow(/verified/i);
   });
 });
+
+describe("REVIEW-1B Part 19: due-day resolution never fabricates a full date", () => {
+  it("resolveDueDate stores a plain day-of-month, and it survives onto a newly created Debt without a fabricated month/year", async () => {
+    const { repository, service } = makeService();
+    const batch = await service.createImportBatch("personal-seed", {
+      sourceType: "pdf", sourceFilename: "x.pdf",
+      candidates: [firstmarkCandidate({ candidateId: "due-day-1", accountReferenceSafe: "last4:4444", dueDate: "" })],
+    });
+    await service.resolveDueDate("personal-seed", batch.id, "due-day-1", { dueDay: 21 });
+    const reloaded = repository.getImportBatch("personal-seed", batch.id);
+    expect(reloaded.candidates[0].dueDay).toBe(21);
+    expect(reloaded.candidates[0].dueDate).toBe(""); // never backfilled with a fabricated date
+
+    await service.resolveAsNewDebt("personal-seed", batch.id, "due-day-1");
+    const { createdDebts } = await service.commitImportBatch("personal-seed", batch.id);
+    expect(createdDebts[0].dueDay).toBe(21);
+  });
+});

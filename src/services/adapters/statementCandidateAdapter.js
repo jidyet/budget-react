@@ -34,7 +34,7 @@ export const statementResultToCandidate = (parsed, { source = "pdf", importBatch
 
   if (parsed.min_due == null) warnings.push("Minimum payment was not found on this statement.");
 
-  if (parsed.due_day != null) {
+  if (parsed.due_day != null && parsed.due_date == null) {
     warnings.push(`Payment due day detected: ${parsed.due_day}. Set the exact due date - only the day-of-month could be read.`);
   }
 
@@ -54,11 +54,11 @@ export const statementResultToCandidate = (parsed, { source = "pdf", importBatch
     accountReferenceSafe: parsed.account_last4 ? `••••${parsed.account_last4}` : "",
     debtType,
     currentBalance: currentBalance ?? 0,
-    statementDate: null,
+    statementDate: parsed.statement_date ?? null,
     apr,
     aprStatus,
     minimumPayment: parsed.min_due ?? null,
-    dueDate: null,
+    dueDate: parsed.due_date ?? null,
     ownerSuggestion: String(parsed.holder_name || "").trim(),
     includedInCorePayoffPlan: debtType !== "mortgage",
     warnings,

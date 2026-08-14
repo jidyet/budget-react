@@ -167,6 +167,37 @@ export function extractDay(dateStr) {
   return null;
 }
 
+const MONTH_NAMES = {
+  january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
+  july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
+};
+
+// Converts a raw date string as matched by extractLabeledDate (US-format
+// "MM/DD/YYYY" or "Month D, YYYY") into ISO "YYYY-MM-DD" for use in an
+// <input type="date">. Only ever called on a string that already matched
+// extractLabeledDate's own strict date pattern, so this never guesses at an
+// ambiguous format - it just reformats a date the statement already stated.
+export function dateStringToIso(dateStr) {
+  if (!dateStr) return null;
+  const slash = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slash) {
+    const month = Number(slash[1]);
+    const day = Number(slash[2]);
+    const year = Number(slash[3]);
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+  const word = dateStr.match(/^([A-Za-z]+) (\d{1,2}),?\s*(\d{4})$/);
+  if (word) {
+    const month = MONTH_NAMES[word[1].toLowerCase()];
+    if (!month) return null;
+    const day = Number(word[2]);
+    const year = Number(word[3]);
+    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+  return null;
+}
+
 export function firstCurrencyMatch(text, patterns) {
   for (const pattern of patterns) {
     const match = text.match(pattern);
@@ -386,7 +417,7 @@ export function extractAprPercent(text) {
 }
 
 export const HOLDER_NAME_BLOCKLIST = /^(?:payable|payment|balance|transfer|minimum|account|statement|interest|previous|current|new|due|date|total|amount|fee|charge|purchase|credit|debit|available|billing|return|transaction|activity|summary|account number|routing)$/i;
-export const HOLDER_NAME_BAD_PHRASE_RE = /\b(?:account notifications|your account|my account|notifications|statement for|account summary|rewards|customer service|payment options|minimum payment|new balance|debt|shared|solo|owner|viewer|member|admin|undeliverable|service requested|current resident|current occupant|postal customer|boxholder|or resident|forwarding service)\b/i;
+export const HOLDER_NAME_BAD_PHRASE_RE = /\b(?:account notifications|your account|my account|notifications|statement for|account summary|rewards|customer service|payment options|minimum payment|new balance|debt|shared|solo|owner|viewer|member|admin|undeliverable|service requested|current resident|current occupant|postal customer|boxholder|or resident|forwarding service|visa signature|visa platinum|visa infinite|visa business|mastercard|world elite|signature card|platinum card|business card)\b/i;
 export const BANK_NAME_RE = /^(?:discover|chase|bank of america|capital one|citi|wells fargo|navy federal|us bank|sofi|navient|mohela|nelnet|sallie mae|aes|affirm|synchrony|american express|firstmark services|firstmark)$/i;
 export const PERSON_SUFFIX_RE = /^(?:jr|sr|ii|iii|iv|v)$/i;
 export const INSTITUTION_HINT_KEYWORDS_RE = /\b(?:bank|federal|credit|financial|services|capital|citi|chase|discover|affirm|synchrony|nelnet|navient|mohela|sallie|aes|american express|firstmark|wells fargo|sofi|navy)\b/i;
@@ -683,6 +714,7 @@ export function enrichStatement(result, text) {
   const fees = extractLabeledCurrency(text, [/\bfees charged\b/i, /\btotal fees\b/i, /\bfees\b/i], { allowZero: true, searchLines: 1 })
     ?? firstCurrencyMatch(text, EXTRACTION_RE.fees);
   const dueDateFromLabels = extractLabeledDate(text, [/\bpayment due date\b/i, /\bnext due date\b/i, /\bdue date\b/i, /\bdue on\b/i, /\bpayment date\b/i], { searchLines: 1 });
+  const statementDateFromLabels = extractLabeledDate(text, [/\bstatement closing date\b/i, /\bclosing date\b/i, /\bstatement date\b/i, /\bstatement period end(?:ing| date)?\b/i], { searchLines: 1 });
   const derivedBalance = labeledBalance ?? result.balance ?? principalBalance ?? estimatedPayoff;
   const derivedRemainingBalance = explicitRemainingBalance ?? principalBalance ?? result.balance ?? estimatedPayoff;
   return {
@@ -706,6 +738,13 @@ export function enrichStatement(result, text) {
     holder_name: extractTrustedHolderName(text),
     min_due: minimumDue,
     due_day: strictDueDay ?? (dueDateFromLabels ? extractDay(dueDateFromLabels) : null) ?? result.due_day ?? null,
+    // Only ever set from a full date found under an explicit due-date-style
+    // label (dueDateFromLabels) - never from strictDueDay's lower-confidence
+    // "a date happened to appear near Minimum Payment Due" fallback, so this
+    // stays null in exactly the cases where inventing a full date would be
+    // guessing rather than reading what the statement actually says.
+    due_date: dueDateFromLabels ? dateStringToIso(dueDateFromLabels) : null,
+    statement_date: statementDateFromLabels ? dateStringToIso(statementDateFromLabels) : null,
     bank: sanitizeInstitutionHint(detectedProvider || result.bank || ""),
     account_hint: detectedProvider
       ? `${detectedProvider}${detectedLast4 ? ` . . . ${detectedLast4}` : ""}`

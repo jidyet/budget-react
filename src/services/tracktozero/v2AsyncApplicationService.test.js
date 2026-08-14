@@ -422,3 +422,59 @@ describe("TrackToZero v2 async application service: payoff queue ordering", () =
     expect(snapshot.payoffQueue.filter((debt) => debt.id === joint.id)).toHaveLength(1);
   });
 });
+
+describe("TrackToZero v2 async application service: import owner auto-suggest (convenience pre-fill, still human-confirmed)", () => {
+  it("pre-selects a verified household member when the parser's ownerSuggestion matches their real name", async () => {
+    const { service } = makeService();
+    const batch = await service.createImportBatch("household-seed", {
+      sourceType: "pdf",
+      sourceFilename: "boa.pdf",
+      candidates: [{
+        candidateId: "cand-suggest-1",
+        source: "pdf",
+        creditorName: "Bank of America",
+        accountName: "BOA Visa",
+        debtType: "credit_card",
+        currentBalance: 11184.44,
+        apr: null,
+        aprStatus: "unknown",
+        minimumPayment: 357,
+        dueDate: null,
+        ownerSuggestion: "Baba K Yusuf",
+        includedInCorePayoffPlan: true,
+        warnings: [],
+        duplicateStatus: "new",
+        decision: "pending_review",
+      }],
+    });
+    const candidate = batch.candidates[0];
+    expect(candidate.ownerType).toBe("member");
+    expect(candidate.ownerId).toBe("seed-admin");
+  });
+
+  it("leaves the candidate unmatched when the suggested name matches no real member (never invents one)", async () => {
+    const { service } = makeService();
+    const batch = await service.createImportBatch("household-seed", {
+      sourceType: "pdf",
+      sourceFilename: "boa.pdf",
+      candidates: [{
+        candidateId: "cand-suggest-2",
+        source: "pdf",
+        creditorName: "Bank of America",
+        accountName: "BOA Visa",
+        debtType: "credit_card",
+        currentBalance: 500,
+        apr: null,
+        aprStatus: "unknown",
+        minimumPayment: 25,
+        dueDate: null,
+        ownerSuggestion: "Kristina K Davis",
+        includedInCorePayoffPlan: true,
+        warnings: [],
+        duplicateStatus: "new",
+        decision: "pending_review",
+      }],
+    });
+    expect(batch.candidates[0].ownerType).not.toBe("member");
+  });
+});

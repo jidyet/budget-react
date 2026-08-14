@@ -1,6 +1,6 @@
 import { ROLE_PERMISSIONS } from "../../domain/tracktozero/constants.js";
 import { createStartingDebtSnapshotItem } from "../../domain/tracktozero/models.js";
-import { resolveDebtOwnership } from "../../domain/tracktozero/ownership.js";
+import { matchMemberByName, resolveDebtOwnership } from "../../domain/tracktozero/ownership.js";
 import { buildExpectedCheckpoints } from "../adapters/tracktozeroCalcAdapter.js";
 import { calculateWhatIfComparison } from "../calc/scenarioComparison.js";
 import {
@@ -394,9 +394,21 @@ export const createTrackToZeroV2AsyncAppService = ({
 
   const createImportBatch = async (workspaceId, { sourceType, sourceFilename = "", candidates = [], warnings = [], parserVersion = "1" } = {}) => {
     assertInteractive();
-    const { membership } = await getWorkspaceContext(workspaceId);
+    const { workspace, membership, members } = await getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot import debts into this workspace.");
     const batchId = id("import");
+    // Convenience pre-fill only: if the parser's raw ownerSuggestion matches a
+    // REAL verified household member by name, pre-select them instead of
+    // forcing a manual pick - the human still reviews/confirms (or changes)
+    // this before anything is committed, and resolveDebtOwnership re-verifies
+    // it against the real membership list regardless at commit time.
+    const withOwnerSuggestions = workspace.type === "household"
+      ? candidates.map((candidate) => {
+          if (candidate.ownerType && candidate.ownerType !== "unassigned") return candidate;
+          const match = matchMemberByName(candidate.ownerSuggestion, members);
+          return match ? { ...candidate, ownerType: "member", ownerId: match.uid } : candidate;
+        })
+      : candidates;
     return repository.saveImportBatch({
       id: batchId,
       workspaceId,
@@ -404,14 +416,14 @@ export const createTrackToZeroV2AsyncAppService = ({
       createdAt: asOf,
       sourceType,
       sourceFilename,
-      status: candidates.length ? "review_required" : "failed",
-      candidateCount: candidates.length,
+      status: withOwnerSuggestions.length ? "review_required" : "failed",
+      candidateCount: withOwnerSuggestions.length,
       confirmedCount: 0,
       rejectedCount: 0,
       duplicateCount: 0,
       warnings,
       metadata: { parserVersion },
-      candidates: candidates.map((candidate) => ({ ...candidate, importBatchId: batchId, workspaceId })),
+      candidates: withOwnerSuggestions.map((candidate) => ({ ...candidate, importBatchId: batchId, workspaceId })),
     });
   };
 

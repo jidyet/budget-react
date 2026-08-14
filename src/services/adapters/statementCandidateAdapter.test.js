@@ -98,11 +98,11 @@ describe("statementCandidateAdapter: reuses the existing parseStatement engine",
     expect(candidate.warnings.join(" ")).toMatch(/no balance could be found/i);
   });
 
-  it("surfaces a detected due day as a warning rather than inventing a full due date", () => {
+  it("pulls the full due date when the statement explicitly labels one (real information, not invented)", () => {
     const parsed = parseStatement(creditCardStatementText);
     const candidate = statementResultToCandidate(parsed, { source: "pdf", importBatchId: "b4", fileName: "chase.pdf" });
-    expect(candidate.dueDate).toBeNull();
-    expect(candidate.warnings.join(" ")).toMatch(/due day detected/i);
+    expect(candidate.dueDate).toBe("2026-09-15");
+    expect(candidate.warnings.join(" ")).not.toMatch(/due day detected/i);
   });
 
   it("infers debt type from loan-type context for student loan statements", () => {
@@ -224,6 +224,67 @@ describe("statementCandidateAdapter: owner suggestion must never be mail-handlin
 
   it("a genuine human cardholder name is still correctly detected (no regression from the boilerplate fix)", () => {
     const text = "Chase\nAccount Statement\n\nJohn A Smith\n123 Main St\nAnytown ST 12345\n\nNew Balance: $2,345.67\nMinimum Payment Due: $75.00";
+    const parsed = parseStatement(text);
+    expect(parsed.holder_name).toMatch(/John A?\.? Smith/i);
+  });
+});
+
+describe("statementCandidateAdapter: full statement/due dates should be pulled when actually present (not just a bare day)", () => {
+  it("REPRODUCTION: a real, fully-labeled Payment Due Date and Statement Closing Date are currently discarded (dueDate/statementDate always null)", () => {
+    const text = [
+      "Bank of America",
+      "Visa Signature",
+      "Account# 4400 6699 6587 9232",
+      "December 15 - January 14, 2026",
+      "",
+      "Account Summary/Payment Information",
+      "Previous Balance $10,399.09",
+      "New Balance Total $11,184.44",
+      "",
+      "Total Minimum Payment Due $357.00",
+      "Payment Due Date 02/11/2026",
+      "",
+      "Statement Closing Date 01/14/2026",
+      "Interest Charge Calculation",
+      "Purchases 24.49% APR",
+    ].join("\n");
+    const parsed = parseStatement(text);
+    const candidate = statementResultToCandidate(parsed, { source: "pdf", importBatchId: "b7", fileName: "boa.pdf" });
+    // These currently fail before the fix - the information is present on
+    // the statement but the code throws it away.
+    expect(candidate.dueDate).toBe("2026-02-11");
+    expect(candidate.statementDate).toBe("2026-01-14");
+    // The "only a day was found" warning must not fire when a full date was found.
+    expect(candidate.warnings.join(" ")).not.toMatch(/only the day-of-month could be read/i);
+  });
+
+  it("still never promotes a low-confidence day (found near 'Minimum Payment Due' but under no explicit due-date label) into a full due date (no regression on the original truth-hardening fix)", () => {
+    const text = "New Balance: $500.00\nMinimum Payment Due: $25.00 by 03/21/2026";
+    const parsed = parseStatement(text);
+    expect(parsed.due_day).toBe(21);
+    const candidate = statementResultToCandidate(parsed, { source: "pdf", importBatchId: "b8", fileName: "x.pdf" });
+    expect(candidate.dueDate).toBeNull();
+    expect(candidate.warnings.join(" ")).toMatch(/due day detected: 21.*only the day-of-month/i);
+  });
+});
+
+describe("statementCandidateAdapter: card product/network names must never be suggested as owner (regression)", () => {
+  it("REPRODUCTION: 'Visa Signature' (a card product name, not a person) must not be suggested as the account holder", () => {
+    const text = "Bank of America\nVisa Signature\nAccount# 4400 6699 6587 9232\n\nNew Balance Total $11,184.44\nTotal Minimum Payment Due $357.00";
+    const parsed = parseStatement(text);
+    expect(parsed.holder_name || "").not.toMatch(/visa signature/i);
+  });
+
+  it("similar card product/network names must also never be suggested as owner", () => {
+    for (const productName of ["Mastercard World Elite", "Visa Platinum", "World Elite Mastercard"]) {
+      const text = `Bank of America\n${productName}\nAccount# 1234\n\nNew Balance Total $500.00\nMinimum Payment Due $25.00`;
+      const parsed = parseStatement(text);
+      expect(parsed.holder_name || "").not.toMatch(/mastercard|world elite|visa platinum/i);
+    }
+  });
+
+  it("a genuine human cardholder name is still detected even when a card product name also appears on the statement", () => {
+    const text = "Bank of America\nVisa Signature\nJohn A Smith\n123 Main St\n\nNew Balance Total $500.00\nMinimum Payment Due $25.00";
     const parsed = parseStatement(text);
     expect(parsed.holder_name).toMatch(/John A?\.? Smith/i);
   });

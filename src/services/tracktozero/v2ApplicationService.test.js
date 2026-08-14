@@ -378,3 +378,87 @@ describe("TrackToZero v2 application service: payoff queue ordering and ownershi
     expect(occurrences[0].ownerType).toBe("joint");
   });
 });
+
+describe("TrackToZero v2 application service: import owner auto-suggest (convenience pre-fill, still human-confirmed)", () => {
+  it("pre-selects a verified household member when the parser's ownerSuggestion matches their real name", () => {
+    const { service } = serviceFor();
+    const batch = service.createImportBatch("household-seed", {
+      sourceType: "pdf",
+      sourceFilename: "boa.pdf",
+      candidates: [{
+        candidateId: "cand-suggest-1",
+        source: "pdf",
+        creditorName: "Bank of America",
+        accountName: "BOA Visa",
+        debtType: "credit_card",
+        currentBalance: 11184.44,
+        apr: null,
+        aprStatus: "unknown",
+        minimumPayment: 357,
+        dueDate: null,
+        ownerSuggestion: "Baba K Yusuf",
+        includedInCorePayoffPlan: true,
+        warnings: [],
+        duplicateStatus: "new",
+        decision: "pending_review",
+      }],
+    });
+    const candidate = batch.candidates[0];
+    expect(candidate.ownerType).toBe("member");
+    expect(candidate.ownerId).toBe("seed-admin");
+  });
+
+  it("leaves the candidate unassigned when the suggested name matches no real member (never invents one)", () => {
+    const { service } = serviceFor();
+    const batch = service.createImportBatch("household-seed", {
+      sourceType: "pdf",
+      sourceFilename: "boa.pdf",
+      candidates: [{
+        candidateId: "cand-suggest-2",
+        source: "pdf",
+        creditorName: "Bank of America",
+        accountName: "BOA Visa",
+        debtType: "credit_card",
+        currentBalance: 500,
+        apr: null,
+        aprStatus: "unknown",
+        minimumPayment: 25,
+        dueDate: null,
+        ownerSuggestion: "Kristina K Davis",
+        includedInCorePayoffPlan: true,
+        warnings: [],
+        duplicateStatus: "new",
+        decision: "pending_review",
+      }],
+    });
+    const candidate = batch.candidates[0];
+    expect(candidate.ownerType).not.toBe("member");
+    expect(candidate.ownerId).toBeFalsy();
+  });
+
+  it("does not attempt owner matching for Personal workspaces (owner is always forced to the signed-in user anyway)", () => {
+    const { service } = serviceFor();
+    const batch = service.createImportBatch("personal-seed", {
+      sourceType: "pdf",
+      sourceFilename: "boa.pdf",
+      candidates: [{
+        candidateId: "cand-suggest-3",
+        source: "pdf",
+        creditorName: "Bank of America",
+        accountName: "BOA Visa",
+        debtType: "credit_card",
+        currentBalance: 500,
+        apr: null,
+        aprStatus: "unknown",
+        minimumPayment: 25,
+        dueDate: null,
+        ownerSuggestion: "You You",
+        includedInCorePayoffPlan: true,
+        warnings: [],
+        duplicateStatus: "new",
+        decision: "pending_review",
+      }],
+    });
+    expect(batch.candidates[0].ownerType).not.toBe("member");
+  });
+});

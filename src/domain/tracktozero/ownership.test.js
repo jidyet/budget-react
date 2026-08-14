@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveDebtOwnership } from "./ownership.js";
+import { matchMemberByName, resolveDebtOwnership } from "./ownership.js";
 
 const householdMembers = [
   { workspaceId: "h1", uid: "owner-uid", role: "owner", status: "active", displayName: "Jidye" },
@@ -82,5 +82,52 @@ describe("resolveDebtOwnership", () => {
     expect(() =>
       resolveDebtOwnership({ workspaceType: "household", members: householdMembers, requested: { ownerType: "spouse" } })
     ).toThrow(/Invalid ownerType/);
+  });
+});
+
+describe("matchMemberByName", () => {
+  it("matches a suggestion with a middle initial the member profile doesn't have (first + last name match)", () => {
+    const match = matchMemberByName("Kristina K Davis", [
+      { uid: "u1", displayName: "Kristina Davis", status: "active" },
+      { uid: "u2", displayName: "Baba", status: "active" },
+    ]);
+    expect(match?.uid).toBe("u1");
+  });
+
+  it("matches an exact two-token name", () => {
+    const match = matchMemberByName("Baba Yusuf", [{ uid: "u1", displayName: "Baba Yusuf", status: "active" }]);
+    expect(match?.uid).toBe("u1");
+  });
+
+  it("does NOT match a different person, even with an overlapping last name", () => {
+    const match = matchMemberByName("Kristina K Davis", [{ uid: "u1", displayName: "John Davis", status: "active" }]);
+    expect(match).toBeNull();
+  });
+
+  it("does not match a removed/former member", () => {
+    const match = matchMemberByName("Kristina Davis", [{ uid: "u1", displayName: "Kristina Davis", status: "removed" }]);
+    expect(match).toBeNull();
+  });
+
+  it("returns null when there is no plausible suggestion (empty, single token, or junk mail boilerplate)", () => {
+    expect(matchMemberByName("", [{ uid: "u1", displayName: "Kristina Davis", status: "active" }])).toBeNull();
+    expect(matchMemberByName("Chase", [{ uid: "u1", displayName: "Kristina Davis", status: "active" }])).toBeNull();
+    expect(matchMemberByName("For Undeliverable Mail Only", [{ uid: "u1", displayName: "Kristina Davis", status: "active" }])).toBeNull();
+  });
+
+  it("returns null when there are no members to match against", () => {
+    expect(matchMemberByName("Kristina Davis", [])).toBeNull();
+  });
+});
+
+describe("matchMemberByName: single-token member profiles (common for invited/seeded members)", () => {
+  it("matches a first-name-only member profile against the suggestion's first token", () => {
+    const match = matchMemberByName("Baba K Yusuf", [{ uid: "u1", displayName: "Baba", status: "active" }]);
+    expect(match?.uid).toBe("u1");
+  });
+
+  it("does not match a first-name-only member against an unrelated suggestion", () => {
+    const match = matchMemberByName("Kristina K Davis", [{ uid: "u1", displayName: "Baba", status: "active" }]);
+    expect(match).toBeNull();
   });
 });

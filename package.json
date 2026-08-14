@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "emulators:v2": "node scripts/start-v2-local-emulators.mjs",
+    "dev:v2-local": "vite --mode v2-local --port 5184",
     "build": "vite build",
     "perf:check": "node scripts/check-bundle-budget.mjs",
     "test": "vitest run",

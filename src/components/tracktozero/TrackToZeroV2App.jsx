@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
-import { auth, getFirebaseConfig, getFirebaseStatus, login, logout, signup } from "../../firebase";
+import { auth as productionAuth, getFirebaseConfig, getFirebaseStatus, login as productionLogin, logout as productionLogout, signup as productionSignup } from "../../firebase";
 import {
   createTrackToZeroRepository,
   ensureTrackToZeroV2EmulatorActor,
+  getTrackToZeroV2LocalBetaAuth,
   TRACKTOZERO_V2_REPOSITORY_MODES,
 } from "../../services/tracktozero/repositoryRuntime";
 import { createTrackToZeroV2AsyncAppService, getUserSafeTrackToZeroError } from "../../services/tracktozero/v2AsyncApplicationService";
@@ -98,14 +99,14 @@ function Field({ label, children }) {
   return <label style={styles.label}><span>{label}</span>{children}</label>;
 }
 
-function AuthScreen({ onSubmit, state, setState, error, busy, firebaseReady }) {
+function AuthScreen({ onSubmit, state, setState, error, busy, firebaseReady, unavailableMessage, eyebrow = "Clean beta" }) {
   const title = state.mode === "signup" ? "Create your TrackToZero beta account" : "Sign in to TrackToZero beta";
   return (
     <main style={styles.shell}>
       <div style={styles.wrap}>
-        <Section title={firebaseReady ? title : "TrackToZero beta is temporarily unavailable"} eyebrow="Clean beta">
+        <Section title={firebaseReady ? title : "TrackToZero beta is temporarily unavailable"} eyebrow={eyebrow}>
           {!firebaseReady ? (
-            <p>Production Firebase is not configured for this release. The app is in a safe disabled state.</p>
+            <p>{unavailableMessage || "Production Firebase is not configured for this release. The app is in a safe disabled state."}</p>
           ) : (
             <form onSubmit={onSubmit} style={{ display: "grid", gap: 12, maxWidth: 460 }}>
               <p>Start fresh in the V2 command center. No demo debts are loaded.</p>
@@ -202,6 +203,8 @@ function WorkspaceBar({
     : members;
   const modeLabel = repositoryMode === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction
     ? "Clean beta workspace"
+    : repositoryMode === TRACKTOZERO_V2_REPOSITORY_MODES.localBeta
+    ? "Local beta workspace (emulator)"
     : mode === "legacy_preview" ? "Read-only legacy preview" : "Interactive seed workspace";
   return (
     <div style={{ ...styles.card, display: "grid", gridTemplateColumns: "1fr auto", gap: 12, alignItems: "center" }}>
@@ -773,6 +776,8 @@ function Settings({ snapshot, repositoryMode }) {
   const flags = getLaunchFlags();
   const dataMode = repositoryMode === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction
     ? "Clean V2 beta"
+    : repositoryMode === TRACKTOZERO_V2_REPOSITORY_MODES.localBeta
+    ? "Local beta (Firebase emulator)"
     : snapshot.mode === "legacy_preview" ? "Read-only legacy preview" : "Interactive v2 seed/test workspace";
   return (
     <Section title="Workspace settings" eyebrow="Settings">
@@ -800,6 +805,10 @@ const getRuntimeMode = () => {
   const env = typeof import.meta !== "undefined" ? import.meta.env || {} : {};
   const requested = env.VITE_TRACKTOZERO_V2_REPOSITORY_MODE;
   if (requested === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseEmulator) return TRACKTOZERO_V2_REPOSITORY_MODES.firebaseEmulator;
+  // localBeta: real fresh-signup flow against local emulators (see repositoryRuntime.js).
+  // Distinct from firebaseEmulator, which is a seeded actor-switcher QA harness -
+  // that mode is preserved exactly as-is.
+  if (requested === TRACKTOZERO_V2_REPOSITORY_MODES.localBeta) return TRACKTOZERO_V2_REPOSITORY_MODES.localBeta;
   if (requested === TRACKTOZERO_V2_REPOSITORY_MODES.inMemory) return TRACKTOZERO_V2_REPOSITORY_MODES.inMemory;
   return TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction;
 };
@@ -841,27 +850,63 @@ const productionWorkspaceCandidates = (uid) => [
 export default function TrackToZeroV2App() {
   const runtime = useMemo(() => getRuntimeConfig(), []);
   const isProductionRuntime = runtime.mode === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction;
+  const isLocalBetaRuntime = runtime.mode === TRACKTOZERO_V2_REPOSITORY_MODES.localBeta;
+  // Both production and local-beta use the real fresh-signup UI flow
+  // (AuthScreen, onAuthStateChanged, Personal/Household onboarding, Owner
+  // bootstrap) - they differ only in which Firebase project/emulator backs
+  // them. firebaseEmulator (seeded QA harness) and inMemory are unaffected.
+  const usesRealAuthUi = isProductionRuntime || isLocalBetaRuntime;
   const repository = useMemo(() => getRuntimeRepository(), []);
-  const [authState, setAuthState] = useState({ status: isProductionRuntime ? "loading" : "ready", user: null, error: "" });
+
+  // Fail closed: if local-beta mode can't establish its own emulator-backed
+  // auth (bad/missing host config), this throws inside the memo rather than
+  // ever falling back to the production `auth` instance.
+  const [localBetaAuthError, setLocalBetaAuthError] = useState("");
+  const localBetaAuthApi = useMemo(() => {
+    if (!isLocalBetaRuntime) return null;
+    try {
+      return getTrackToZeroV2LocalBetaAuth({
+        firebaseConfig: runtime.firebaseConfig,
+        emulatorHost: runtime.emulatorHost,
+        authEmulatorHost: runtime.authEmulatorHost,
+      });
+    } catch (error) {
+      setLocalBetaAuthError(error?.message || "Local beta configuration error.");
+      return null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLocalBetaRuntime]);
+  const activeAuth = isLocalBetaRuntime ? localBetaAuthApi?.auth : productionAuth;
+  const activeLogin = isLocalBetaRuntime ? localBetaAuthApi?.login : productionLogin;
+  const activeSignup = isLocalBetaRuntime ? localBetaAuthApi?.signup : productionSignup;
+  const activeLogout = isLocalBetaRuntime ? (localBetaAuthApi?.logout || (() => {})) : productionLogout;
+
+  const [authState, setAuthState] = useState({ status: usesRealAuthUi ? "loading" : "ready", user: null, error: "" });
   const [authForm, setAuthForm] = useState({ mode: "signup", email: "", password: "" });
   const [authBusy, setAuthBusy] = useState(false);
-  const [workspaceId, setWorkspaceId] = useState(isProductionRuntime ? "" : "personal-seed");
-  const [actorId, setActorId] = useState(isProductionRuntime ? "" : V2_TEST_ACTOR_ID);
+  const [workspaceId, setWorkspaceId] = useState(usesRealAuthUi ? "" : "personal-seed");
+  const [actorId, setActorId] = useState(usesRealAuthUi ? "" : V2_TEST_ACTOR_ID);
   const [tab, setTab] = useState("home");
   const [scenario, setScenario] = useState(null);
   const [runtimeState, setRuntimeState] = useState({ status: "idle", snapshot: null, workspaces: [], error: "" });
   const [writeState, setWriteState] = useState({ inProgress: false, action: "", error: "", success: "" });
   const requestSeq = useRef(0);
-  const asOf = useMemo(() => isProductionRuntime ? new Date().toISOString() : V2_TEST_NOW, [isProductionRuntime]);
+  const asOf = useMemo(() => usesRealAuthUi ? new Date().toISOString() : V2_TEST_NOW, [usesRealAuthUi]);
   const service = useMemo(() => createTrackToZeroV2AsyncAppService({ repository, actorId, asOf }), [repository, actorId, asOf]);
 
   useEffect(() => {
-    if (!isProductionRuntime) return undefined;
-    if (!auth) {
+    if (!usesRealAuthUi) return undefined;
+    if (isLocalBetaRuntime && localBetaAuthError) {
+      setAuthState({ status: "unavailable", user: null, error: localBetaAuthError });
+      return undefined;
+    }
+    if (!activeAuth) {
+      // Still resolving localBetaAuthApi (or, for production, genuinely unconfigured).
+      if (isLocalBetaRuntime) return undefined;
       setAuthState({ status: "unavailable", user: null, error: "Production Firebase is not configured for this release." });
       return undefined;
     }
-    return onAuthStateChanged(auth, (user) => {
+    return onAuthStateChanged(activeAuth, (user) => {
       setAuthState({ status: "ready", user, error: "" });
       setActorId(user?.uid || "");
       setWorkspaceId("");
@@ -869,17 +914,17 @@ export default function TrackToZeroV2App() {
       setScenario(null);
       setWriteState({ inProgress: false, action: "", error: "", success: "" });
     }, () => {
-      setAuthState({ status: "unavailable", user: null, error: "TrackToZero could not connect to Firebase Auth." });
+      setAuthState({ status: "unavailable", user: null, error: isLocalBetaRuntime ? "TrackToZero could not connect to the local Auth emulator." : "TrackToZero could not connect to Firebase Auth." });
     });
-  }, [isProductionRuntime]);
+  }, [usesRealAuthUi, isLocalBetaRuntime, localBetaAuthError, activeAuth]);
 
   const submitAuth = async (event) => {
     event.preventDefault();
     setAuthBusy(true);
     setAuthState((state) => ({ ...state, error: "" }));
     try {
-      if (authForm.mode === "signup") await signup(authForm.email, authForm.password);
-      else await login(authForm.email, authForm.password);
+      if (authForm.mode === "signup") await activeSignup(authForm.email, authForm.password);
+      else await activeLogin(authForm.email, authForm.password);
     } catch (error) {
       setAuthState((state) => ({ ...state, error: error?.message || "Authentication failed." }));
     } finally {
@@ -892,7 +937,7 @@ export default function TrackToZeroV2App() {
     requestSeq.current = requestId;
     setRuntimeState((state) => ({ ...state, status: "loading", error: "", snapshot: null }));
     try {
-      if (isProductionRuntime) {
+      if (usesRealAuthUi) {
         if (!authState.user || !actorId) return;
         if (!nextWorkspaceId) {
           const candidates = productionWorkspaceCandidates(actorId);
@@ -920,7 +965,7 @@ export default function TrackToZeroV2App() {
         });
       }
       const snapshot = await service.getWorkspaceSnapshot(nextWorkspaceId);
-      const workspaces = isProductionRuntime
+      const workspaces = usesRealAuthUi
         ? productionWorkspaceCandidates(actorId).filter((workspace) => workspace.id === nextWorkspaceId)
         : runtime.mode === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseEmulator
         ? runtime.seedWorkspaceIds.map((id) => ({ id, type: id.includes("household") ? "household" : "personal" }))
@@ -932,7 +977,7 @@ export default function TrackToZeroV2App() {
       const safe = getUserSafeTrackToZeroError(error);
       setRuntimeState({ status: safe.kind, workspaces: [], snapshot: null, error: safe.message });
     }
-  }, [actorId, authState.user, isProductionRuntime, repository, runtime, service, workspaceId]);
+  }, [actorId, authState.user, usesRealAuthUi, repository, runtime, service, workspaceId]);
 
   const runAction = async (action, callback, { write = true } = {}) => {
     setWriteState({ inProgress: write, action, error: "", success: "" });
@@ -974,9 +1019,13 @@ export default function TrackToZeroV2App() {
 
   const snapshot = runtimeState.snapshot;
   const workspaces = runtimeState.workspaces;
-  const firebaseReady = !isProductionRuntime || (getFirebaseStatus().configured && getFirebaseConfig().projectId === "budgetapp-c9306");
+  const productionReady = getFirebaseStatus().configured && getFirebaseConfig().projectId === "budgetapp-c9306";
+  const firebaseReady = isLocalBetaRuntime ? !localBetaAuthError : (!isProductionRuntime || productionReady);
+  const authUnavailableMessage = isLocalBetaRuntime
+    ? (localBetaAuthError || "Local beta configuration error: the local Firebase emulators are not reachable. Run `npm run emulators:v2` first.")
+    : "Production Firebase is not configured for this release. The app is in a safe disabled state.";
 
-  if (isProductionRuntime && (authState.status === "loading" || !authState.user)) {
+  if (usesRealAuthUi && (authState.status === "loading" || !authState.user)) {
     return (
       <AuthScreen
         onSubmit={submitAuth}
@@ -985,17 +1034,19 @@ export default function TrackToZeroV2App() {
         error={authState.error}
         busy={authBusy}
         firebaseReady={firebaseReady && authState.status !== "unavailable"}
+        unavailableMessage={authUnavailableMessage}
+        eyebrow={isLocalBetaRuntime ? "Local beta (emulator)" : "Clean beta"}
       />
     );
   }
 
-  if (isProductionRuntime && runtimeState.status === "needs_onboarding") {
+  if (usesRealAuthUi && runtimeState.status === "needs_onboarding") {
     return (
       <OnboardingScreen
         busy={writeState.inProgress}
         error={writeState.error}
         onChooseWorkspace={chooseProductionWorkspace}
-        onSignOut={logout}
+        onSignOut={activeLogout}
       />
     );
   }
@@ -1039,9 +1090,9 @@ export default function TrackToZeroV2App() {
           mode={snapshot.mode}
           repositoryMode={runtime.mode}
           allowNonMemberPreview={runtime.mode === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseEmulator}
-          canSwitchWorkspace={!isProductionRuntime}
-          canSwitchRole={!isProductionRuntime}
-          onSignOut={isProductionRuntime ? logout : null}
+          canSwitchWorkspace={!usesRealAuthUi}
+          canSwitchRole={!usesRealAuthUi}
+          onSignOut={usesRealAuthUi ? activeLogout : null}
         />
         <nav aria-label="TrackToZero 2.0 primary navigation" style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
           {["home", "debts", "plan", "settings"].map((item) => (

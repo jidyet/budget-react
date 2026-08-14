@@ -295,3 +295,110 @@ describe("TrackToZero v2 async application service: zero-balance debt must never
     expect(snapshot.targetDebt).toBeNull();
   });
 });
+
+describe("TrackToZero v2 async application service: household ownership foundation", () => {
+  it("Personal workspace always assigns the new debt to the signed-in member, ignoring any owner input", async () => {
+    const { service } = makeService();
+    const debt = await service.createNewDebt("personal-seed", {
+      name: "New Card",
+      currentBalance: 500,
+      minimumRequiredPayment: 25,
+      aprStatus: "unknown",
+      ownerType: "joint",
+      ownerId: "someone-else",
+    });
+    expect(debt.ownerType).toBe("member");
+    expect(debt.ownerId).toBe("seed-owner");
+    expect(debt.ownerLabel).toBe("You");
+  });
+
+  it("Household workspace resolves a verified member selection to that member's real display name, and rejects an unverified id", async () => {
+    const { service } = makeService();
+    const debt = await service.createNewDebt("household-seed", {
+      name: "Shared Card",
+      currentBalance: 500,
+      minimumRequiredPayment: 25,
+      aprStatus: "unknown",
+      ownerType: "member",
+      ownerId: "seed-admin",
+    });
+    expect(debt.ownerId).toBe("seed-admin");
+    expect(debt.ownerLabel).toBe("Baba");
+
+    await expect(
+      service.createNewDebt("household-seed", {
+        name: "Sketchy Debt",
+        currentBalance: 500,
+        minimumRequiredPayment: 25,
+        aprStatus: "unknown",
+        ownerType: "member",
+        ownerId: "not-a-real-member",
+      })
+    ).rejects.toThrow(/verified household member/i);
+  });
+
+  it("commitImportBatch never lets the parser's raw ownerSuggestion become the authoritative owner", async () => {
+    const { repository, service } = makeService();
+    const candidate = {
+      candidateId: "cand-owner-1",
+      source: "pdf",
+      creditorName: "Chase",
+      accountName: "Chase Card",
+      debtType: "credit_card",
+      currentBalance: 900,
+      apr: null,
+      aprStatus: "unknown",
+      minimumPayment: 40,
+      dueDate: null,
+      ownerSuggestion: "For Undeliverable Mail Only",
+      ownerType: "member",
+      ownerId: "seed-admin",
+      includedInCorePayoffPlan: true,
+      warnings: [],
+      duplicateStatus: "new",
+      decision: "pending_review",
+    };
+    const batch = await service.createImportBatch("household-seed", { sourceType: "pdf", sourceFilename: "chase.pdf", candidates: [candidate] });
+    await service.decideImportCandidate("household-seed", batch.id, "cand-owner-1", { decision: "confirmed" });
+    const { createdDebts } = await service.commitImportBatch("household-seed", batch.id);
+
+    expect(createdDebts).toHaveLength(1);
+    expect(createdDebts[0].ownerLabel).not.toMatch(/undeliverable/i);
+    expect(createdDebts[0].ownerId).toBe("seed-admin");
+    expect(createdDebts[0].ownerLabel).toBe("Baba");
+    expect((await repository.listDebts("household-seed")).find((debt) => debt.id === createdDebts[0].id).ownerLabel).toBe("Baba");
+  });
+
+  it("household ownership survives persistence through the async repository boundary", async () => {
+    const { repository, service } = makeService();
+    const debt = await service.createNewDebt("household-seed", {
+      name: "Persisted Card",
+      currentBalance: 250,
+      minimumRequiredPayment: 15,
+      aprStatus: "unknown",
+      ownerType: "member",
+      ownerId: "seed-contributor",
+    });
+    const reloaded = (await repository.listDebts("household-seed")).find((candidate) => candidate.id === debt.id);
+    expect(reloaded.ownerType).toBe("member");
+    expect(reloaded.ownerId).toBe("seed-contributor");
+    expect(reloaded.ownerLabel).toBe("Contributor");
+  });
+
+  it("household summary totals count every included debt exactly once, and Personal workspaces never compute one", async () => {
+    const { repository, service } = makeService();
+    repository.putWorkspace({ ...repository.getWorkspace("household-seed"), activePlanId: "" });
+    await service.createNewDebt("household-seed", { name: "Admin Debt", currentBalance: 1000, minimumRequiredPayment: 25, aprStatus: "unknown", ownerType: "member", ownerId: "seed-admin" });
+    await service.createNewDebt("household-seed", { name: "Joint Debt", currentBalance: 500, minimumRequiredPayment: 25, aprStatus: "unknown", ownerType: "joint" });
+
+    const snapshot = await service.getWorkspaceSnapshot("household-seed");
+    const summary = snapshot.householdOwnershipSummary;
+    expect(summary.total).toBe(snapshot.totalIncludedDebt);
+    const bucketTotal = summary.perMember.reduce((sum, member) => sum + member.total, 0) + summary.jointTotal + summary.unassignedTotal;
+    expect(bucketTotal).toBeCloseTo(summary.total, 2);
+    expect(summary.jointTotal).toBeGreaterThanOrEqual(500);
+
+    const personalSnapshot = await service.getWorkspaceSnapshot("personal-seed");
+    expect(personalSnapshot.householdOwnershipSummary).toBeNull();
+  });
+});

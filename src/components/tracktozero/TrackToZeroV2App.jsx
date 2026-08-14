@@ -10,6 +10,7 @@ import {
 import { createTrackToZeroV2AsyncAppService, getUserSafeTrackToZeroError } from "../../services/tracktozero/v2AsyncApplicationService";
 import { V2_TEST_ACTOR_ID, V2_TEST_NOW } from "../../services/tracktozero/v2SeedData";
 import { getLaunchFlags } from "../../config/launchFlags";
+import { effectiveOwnerType } from "../../domain/tracktozero/ownership.js";
 
 const money = (value) =>
   Number(value || 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
@@ -27,7 +28,8 @@ const newDebtDraft = () => ({
   apr: "",
   minimumRequiredPayment: "",
   dueDate: "",
-  ownerLabel: "",
+  ownerType: "unassigned",
+  ownerId: "",
   includedInCorePayoffPlan: true,
 });
 
@@ -97,6 +99,39 @@ function Section({ title, eyebrow, children }) {
 
 function Field({ label, children }) {
   return <label style={styles.label}><span>{label}</span>{children}</label>;
+}
+
+// Workspace-aware owner selector shared by manual debt entry and import
+// review. Personal workspaces have nothing to choose - every debt always
+// belongs to the signed-in member, so it's shown as a fixed, non-editable
+// fact. Household workspaces require an explicit choice from the REAL
+// verified member list, Joint/Household, or Unassigned - never free text,
+// so a parser suggestion or typo can never become an owner.
+function OwnerField({ workspace, members = [], ownerType, ownerId, onChange, disabled }) {
+  if (workspace?.type !== "household") {
+    return <Field label="Owner"><span style={styles.pill}>You</span></Field>;
+  }
+  const value = ownerType === "member" && ownerId ? `member:${ownerId}` : (ownerType || "unassigned");
+  return (
+    <Field label="Owner">
+      <select
+        style={styles.input}
+        disabled={disabled}
+        value={value}
+        onChange={(event) => {
+          const raw = event.target.value;
+          if (raw.startsWith("member:")) onChange({ ownerType: "member", ownerId: raw.slice(7) });
+          else onChange({ ownerType: raw, ownerId: "" });
+        }}
+      >
+        <option value="unassigned">Unassigned</option>
+        <option value="joint">Joint / Household</option>
+        {members.filter((member) => member.status !== "removed").map((member) => (
+          <option key={member.uid} value={`member:${member.uid}`}>{member.displayName || member.uid}</option>
+        ))}
+      </select>
+    </Field>
+  );
 }
 
 function AuthScreen({ onSubmit, state, setState, error, busy, firebaseReady, unavailableMessage, eyebrow = "Clean beta" }) {
@@ -271,6 +306,7 @@ function Home({ snapshot, scenario, onGoToPlan, onScenario }) {
             <StatusBadge status={snapshot.status} />
             <p>{snapshot.status.message}</p>
             {target && <p><strong>Why this debt:</strong> {snapshot.activeContext?.version?.strategy === "snowball" ? "Snowball target — smallest included balance." : "Avalanche target — highest APR included debt."}</p>}
+            {target && snapshot.workspace.type === "household" && <p><strong>Owner:</strong> {target.ownerLabel || "Unassigned"}</p>}
           </div>
           <div>
             <p><strong>Total included debt:</strong> {money(snapshot.totalIncludedDebt)}</p>
@@ -313,7 +349,7 @@ const DEBT_TYPE_OPTIONS = [
   ["other", "Other"],
 ];
 
-function ImportReviewCandidate({ candidate, canManage, busy, onUpdate, onDecide }) {
+function ImportReviewCandidate({ candidate, canManage, busy, onUpdate, onDecide, workspace, members }) {
   const decisionLabel = { pending_review: "Needs your review", confirmed: "Will be added", excluded: "Excluded", needs_information: "Needs information" }[candidate.decision] || candidate.decision;
   return (
     <article style={{ border: "1px solid #c7e3f8", borderRadius: 18, padding: 14, background: candidate.decision === "confirmed" ? "#f0fdf4" : candidate.decision === "excluded" ? "#fef2f2" : "#fff" }}>
@@ -339,8 +375,20 @@ function ImportReviewCandidate({ candidate, canManage, busy, onUpdate, onDecide 
         )}
         <Field label="Minimum payment"><input style={styles.input} type="number" min="0" step="0.01" disabled={!canManage} value={candidate.minimumPayment ?? ""} onChange={(event) => onUpdate({ minimumPayment: event.target.value === "" ? null : Number(event.target.value) })} /></Field>
         <Field label="Due date"><input style={styles.input} type="date" disabled={!canManage} value={candidate.dueDate || ""} onChange={(event) => onUpdate({ dueDate: event.target.value })} /></Field>
-        <Field label="Owner"><input style={styles.input} disabled={!canManage} value={candidate.ownerSuggestion || ""} onChange={(event) => onUpdate({ ownerSuggestion: event.target.value })} /></Field>
+        <OwnerField
+          workspace={workspace}
+          members={members}
+          ownerType={candidate.ownerType}
+          ownerId={candidate.ownerId}
+          disabled={!canManage}
+          onChange={(next) => onUpdate(next)}
+        />
       </div>
+      {workspace?.type === "household" && !!candidate.ownerSuggestion && (
+        <p style={{ color: "#5b7c98", fontSize: 13 }}>
+          The statement suggested &quot;{candidate.ownerSuggestion}&quot; as the account holder. This is a hint only - choose the real owner above before confirming.
+        </p>
+      )}
       <label style={{ display: "flex", alignItems: "center", gap: 8, margin: "10px 0" }}>
         <input type="checkbox" disabled={!canManage} checked={!!candidate.includedInCorePayoffPlan} onChange={(event) => onUpdate({ includedInCorePayoffPlan: event.target.checked })} />
         Include in core payoff plan
@@ -479,6 +527,8 @@ function ImportPanel({ snapshot, service, refresh, canManage }) {
             candidate={candidate}
             canManage={canManage}
             busy={busy}
+            workspace={snapshot.workspace}
+            members={snapshot.members}
             onUpdate={(patch) => updateCandidate(candidate.candidateId, patch)}
             onDecide={(decision) => decideCandidate(candidate.candidateId, decision)}
           />
@@ -515,19 +565,53 @@ function Debts({ snapshot, service, refresh, runAction, writeState }) {
   const [payment, setPayment] = useState({ debtId: snapshot.debts[0]?.id || "", amount: "" });
   const [balance, setBalance] = useState({ debtId: snapshot.debts[0]?.id || "", amount: "" });
   const [newDebt, setNewDebt] = useState(newDebtDraft);
+  const [ownerFilter, setOwnerFilter] = useState("all");
   const canManage = snapshot.permissions.manageDebts && snapshot.mode !== "legacy_preview";
   const canObserve = snapshot.permissions.recordObservations && snapshot.mode !== "legacy_preview";
+  const isHousehold = snapshot.workspace.type === "household";
+
+  const visibleDebts = !isHousehold || ownerFilter === "all"
+    ? snapshot.debts
+    : snapshot.debts.filter((debt) => (
+        ownerFilter === "joint" || ownerFilter === "unassigned"
+          ? effectiveOwnerType(debt) === ownerFilter
+          : debt.ownerId === ownerFilter
+      ));
 
   return (
     <>
       <Section title="What you owe" eyebrow="Debts">
+        {isHousehold && (
+          <div style={{ marginBottom: 12 }}>
+            <Field label="Filter by owner">
+              <select style={styles.input} value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)}>
+                <option value="all">Everyone</option>
+                {snapshot.members.filter((member) => member.status !== "removed").map((member) => (
+                  <option key={member.uid} value={member.uid}>{member.displayName || member.uid}</option>
+                ))}
+                <option value="joint">Joint / Household</option>
+                <option value="unassigned">Unassigned</option>
+              </select>
+            </Field>
+          </div>
+        )}
+        {isHousehold && snapshot.householdOwnershipSummary && (
+          <div style={{ ...styles.grid, marginBottom: 14 }}>
+            <p><strong>Total household debt:</strong> {money(snapshot.householdOwnershipSummary.total)} <span style={{ color: "#5b7c98" }}>(counted once)</span></p>
+            {snapshot.householdOwnershipSummary.perMember.map((member) => (
+              <p key={member.uid}><strong>{member.displayName}:</strong> {money(member.total)}</p>
+            ))}
+            <p><strong>Joint / Household:</strong> {money(snapshot.householdOwnershipSummary.jointTotal)}</p>
+            <p><strong>Unassigned:</strong> {money(snapshot.householdOwnershipSummary.unassignedTotal)}</p>
+          </div>
+        )}
         <div style={styles.grid}>
-          {snapshot.debts.map((debt) => (
+          {visibleDebts.map((debt) => (
             <article key={debt.id} style={{ border: "1px solid #c7e3f8", borderRadius: 18, padding: 14, background: debt.status === "paid_off" ? "#f0fdf4" : "#fff" }}>
               <h3 style={{ margin: 0 }}>{debt.name}</h3>
               <p>{money(snapshot.latestSnapshotsByDebt[debt.id]?.balance ?? debt.currentBalance)} · {debt.aprStatus === "unknown" ? "Unknown APR" : percent(debt.apr)}</p>
               <p>Required payment: {money(debt.minimumRequiredPayment)} · Due day: {debt.dueDay || "not set"}</p>
-              <p>Owner: {debt.ownerLabel || "Workspace"} · {debt.includedInCorePayoffPlan ? "Included in core plan" : "Excluded from core date"}</p>
+              <p>Owner: {debt.ownerLabel || "Unassigned"} · {debt.includedInCorePayoffPlan ? "Included in core plan" : "Excluded from core date"}</p>
               {snapshot.targetDebt?.id === debt.id && <span style={styles.pill}>Current target</span>}
             </article>
           ))}
@@ -582,7 +666,8 @@ function Debts({ snapshot, service, refresh, runAction, writeState }) {
                 aprStatus: newDebt.aprStatus,
                 apr: newDebt.aprStatus === "unknown" ? null : newDebt.aprStatus === "no_interest" ? 0 : Number(newDebt.apr),
                 dueDay,
-                ownerLabel: newDebt.ownerLabel || snapshot.membership?.displayName || "Workspace",
+                ownerType: newDebt.ownerType,
+                ownerId: newDebt.ownerId,
                 includedInCorePayoffPlan: !!newDebt.includedInCorePayoffPlan,
               });
               setNewDebt(newDebtDraft());
@@ -626,7 +711,13 @@ function Debts({ snapshot, service, refresh, runAction, writeState }) {
             </Field>
             {newDebt.aprStatus !== "unknown" && newDebt.aprStatus !== "no_interest" && <Field label="APR"><input style={styles.input} type="number" min="0" step="0.01" value={newDebt.apr} onChange={(event) => setNewDebt({ ...newDebt, apr: event.target.value })} /></Field>}
             <Field label="Due date"><input style={styles.input} type="date" value={newDebt.dueDate} onChange={(event) => setNewDebt({ ...newDebt, dueDate: event.target.value })} /></Field>
-            <Field label="Owner"><input style={styles.input} placeholder="Me, spouse, household..." value={newDebt.ownerLabel} onChange={(event) => setNewDebt({ ...newDebt, ownerLabel: event.target.value })} /></Field>
+            <OwnerField
+              workspace={snapshot.workspace}
+              members={snapshot.members}
+              ownerType={newDebt.ownerType}
+              ownerId={newDebt.ownerId}
+              onChange={(next) => setNewDebt({ ...newDebt, ...next })}
+            />
             <label style={{ display: "flex", alignItems: "center", gap: 8, margin: "8px 0 14px", fontWeight: 800 }}>
               <input type="checkbox" checked={!!newDebt.includedInCorePayoffPlan} onChange={(event) => setNewDebt({ ...newDebt, includedInCorePayoffPlan: event.target.checked })} />
               Include in my core payoff plan

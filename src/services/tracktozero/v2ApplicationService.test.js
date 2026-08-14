@@ -104,6 +104,195 @@ describe("TrackToZero v2 application service", () => {
   });
 });
 
+describe("TrackToZero v2 application service: household ownership foundation", () => {
+  it("Personal workspace always assigns the new debt to the signed-in member, ignoring any owner input", () => {
+    const { service } = serviceFor();
+    const debt = service.createNewDebt("personal-seed", {
+      name: "New Card",
+      currentBalance: 500,
+      minimumRequiredPayment: 25,
+      aprStatus: "unknown",
+      ownerType: "joint",
+      ownerId: "someone-else",
+    });
+    expect(debt.ownerType).toBe("member");
+    expect(debt.ownerId).toBe("seed-owner");
+    expect(debt.ownerLabel).toBe("You");
+  });
+
+  it("Household workspace resolves a verified member selection to that member's real display name", () => {
+    const { service } = serviceFor();
+    const debt = service.createNewDebt("household-seed", {
+      name: "Shared Card",
+      currentBalance: 500,
+      minimumRequiredPayment: 25,
+      aprStatus: "unknown",
+      ownerType: "member",
+      ownerId: "seed-admin",
+    });
+    expect(debt.ownerType).toBe("member");
+    expect(debt.ownerId).toBe("seed-admin");
+    expect(debt.ownerLabel).toBe("Baba");
+  });
+
+  it("Household workspace supports Joint and Unassigned, and defaults to Unassigned when no owner is chosen", () => {
+    const { service } = serviceFor();
+    const joint = service.createNewDebt("household-seed", { name: "Joint Loan", currentBalance: 500, minimumRequiredPayment: 25, aprStatus: "unknown", ownerType: "joint" });
+    expect(joint.ownerType).toBe("joint");
+    expect(joint.ownerLabel).toBe("Joint / Household");
+
+    const defaulted = service.createNewDebt("household-seed", { name: "Undecided Debt", currentBalance: 500, minimumRequiredPayment: 25, aprStatus: "unknown" });
+    expect(defaulted.ownerType).toBe("unassigned");
+    expect(defaulted.ownerLabel).toBe("Unassigned");
+  });
+
+  it("REPRODUCTION-STYLE: rejects an unverified member id instead of silently accepting it (no invented household members)", () => {
+    const { service } = serviceFor();
+    expect(() =>
+      service.createNewDebt("household-seed", {
+        name: "Sketchy Debt",
+        currentBalance: 500,
+        minimumRequiredPayment: 25,
+        aprStatus: "unknown",
+        ownerType: "member",
+        ownerId: "not-a-real-member",
+      })
+    ).toThrow(/verified household member/i);
+  });
+
+  it("commitImportBatch never lets the parser's raw ownerSuggestion become the authoritative owner - only the human-reviewed ownerType/ownerId choice does", () => {
+    const { repository, service } = serviceFor();
+    const candidate = {
+      candidateId: "cand-owner-1",
+      source: "pdf",
+      creditorName: "Chase",
+      accountName: "Chase Card",
+      debtType: "credit_card",
+      currentBalance: 900,
+      apr: null,
+      aprStatus: "unknown",
+      minimumPayment: 40,
+      dueDate: null,
+      ownerSuggestion: "For Undeliverable Mail Only",
+      ownerType: "member",
+      ownerId: "seed-admin",
+      includedInCorePayoffPlan: true,
+      warnings: [],
+      duplicateStatus: "new",
+      decision: "pending_review",
+    };
+    const batch = service.createImportBatch("household-seed", { sourceType: "pdf", sourceFilename: "chase.pdf", candidates: [candidate] });
+    service.decideImportCandidate("household-seed", batch.id, "cand-owner-1", { decision: "confirmed" });
+    const { createdDebts } = service.commitImportBatch("household-seed", batch.id);
+
+    expect(createdDebts).toHaveLength(1);
+    expect(createdDebts[0].ownerLabel).not.toMatch(/undeliverable/i);
+    expect(createdDebts[0].ownerType).toBe("member");
+    expect(createdDebts[0].ownerId).toBe("seed-admin");
+    expect(createdDebts[0].ownerLabel).toBe("Baba");
+    expect(repository.listDebts("household-seed").find((debt) => debt.id === createdDebts[0].id).ownerLabel).toBe("Baba");
+  });
+
+  it("commitImportBatch rejects an unverified owner selection on an import candidate too, failing just that candidate", () => {
+    const { service } = serviceFor();
+    const candidate = {
+      candidateId: "cand-owner-2",
+      source: "pdf",
+      creditorName: "Discover",
+      accountName: "Discover Card",
+      debtType: "credit_card",
+      currentBalance: 700,
+      apr: null,
+      aprStatus: "unknown",
+      minimumPayment: 30,
+      dueDate: null,
+      ownerSuggestion: "",
+      ownerType: "member",
+      ownerId: "not-a-real-member",
+      includedInCorePayoffPlan: true,
+      warnings: [],
+      duplicateStatus: "new",
+      decision: "pending_review",
+    };
+    const batch = service.createImportBatch("household-seed", { sourceType: "pdf", sourceFilename: "discover.pdf", candidates: [candidate] });
+    service.decideImportCandidate("household-seed", batch.id, "cand-owner-2", { decision: "confirmed" });
+
+    let caught = null;
+    try {
+      service.commitImportBatch("household-seed", batch.id);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeTruthy();
+    expect(caught.failures[0].message).toMatch(/verified household member/i);
+    expect(caught.createdDebts).toHaveLength(0);
+  });
+
+  it("household ownership survives persistence: a full repository round trip preserves ownerType/ownerId/ownerLabel exactly", () => {
+    const { repository, service } = serviceFor();
+    const debt = service.createNewDebt("household-seed", {
+      name: "Persisted Card",
+      currentBalance: 250,
+      minimumRequiredPayment: 15,
+      aprStatus: "unknown",
+      ownerType: "member",
+      ownerId: "seed-contributor",
+    });
+    const reloaded = repository.listDebts("household-seed").find((candidate) => candidate.id === debt.id);
+    expect(reloaded.ownerType).toBe("member");
+    expect(reloaded.ownerId).toBe("seed-contributor");
+    expect(reloaded.ownerLabel).toBe("Contributor");
+  });
+
+  it("household summary totals count every included debt exactly once across member/joint/unassigned buckets - no double-counting", () => {
+    const { repository, service } = serviceFor();
+    // The seeded household plan's active version freezes its starting debt
+    // snapshot at activation time, so newly added debts wouldn't be part of
+    // includedDebts until a reforecast. Clear activePlanId so this test
+    // exercises the (also real) pre-plan "all active debts" path instead.
+    repository.putWorkspace({ ...repository.getWorkspace("household-seed"), activePlanId: "" });
+    service.createNewDebt("household-seed", { name: "Admin Debt", currentBalance: 1000, minimumRequiredPayment: 25, aprStatus: "unknown", ownerType: "member", ownerId: "seed-admin" });
+    service.createNewDebt("household-seed", { name: "Joint Debt", currentBalance: 500, minimumRequiredPayment: 25, aprStatus: "unknown", ownerType: "joint" });
+    service.createNewDebt("household-seed", { name: "Undecided Debt", currentBalance: 200, minimumRequiredPayment: 25, aprStatus: "unknown" });
+
+    const snapshot = service.getWorkspaceSnapshot("household-seed");
+    const summary = snapshot.householdOwnershipSummary;
+    expect(summary).toBeTruthy();
+    expect(summary.total).toBe(snapshot.totalIncludedDebt);
+
+    const bucketTotal = summary.perMember.reduce((sum, member) => sum + member.total, 0) + summary.jointTotal + summary.unassignedTotal;
+    expect(bucketTotal).toBeCloseTo(summary.total, 2);
+
+    const adminEntry = summary.perMember.find((member) => member.uid === "seed-admin");
+    expect(adminEntry.displayName).toBe("Baba");
+    expect(adminEntry.total).toBeGreaterThanOrEqual(1000);
+    expect(summary.jointTotal).toBeGreaterThanOrEqual(500);
+    expect(summary.unassignedTotal).toBeGreaterThanOrEqual(200);
+  });
+
+  it("Personal workspaces never compute a household ownership summary", () => {
+    const { service } = serviceFor();
+    expect(service.getWorkspaceSnapshot("personal-seed").householdOwnershipSummary).toBeNull();
+  });
+
+  it("ownership fields never change payoff math: Snowball/Avalanche projection and totals are identical regardless of ownerType", () => {
+    const { repository, service } = serviceFor();
+    const before = service.getWorkspaceSnapshot("household-seed");
+    const debt = repository.listDebts("household-seed")[0];
+
+    service.updateDebt("household-seed", debt.id, { ownerType: "joint", ownerId: "" });
+    const afterJoint = service.getWorkspaceSnapshot("household-seed");
+    expect(afterJoint.totalIncludedDebt).toBe(before.totalIncludedDebt);
+    expect(afterJoint.projectedZeroDate).toBe(before.projectedZeroDate);
+    expect(afterJoint.projection).toEqual(before.projection);
+
+    service.updateDebt("household-seed", debt.id, { ownerType: "unassigned", ownerId: "" });
+    const afterUnassigned = service.getWorkspaceSnapshot("household-seed");
+    expect(afterUnassigned.totalIncludedDebt).toBe(before.totalIncludedDebt);
+    expect(afterUnassigned.projection).toEqual(before.projection);
+  });
+});
+
 describe("TrackToZero v2 application service: zero-balance debt must never become the current target (regression)", () => {
   const zeroOutDebt = (repository, debt) => {
     repository.saveDebt({ ...debt, currentBalance: 0 });

@@ -1,6 +1,8 @@
 import { ROLE_PERMISSIONS } from "../../domain/tracktozero/constants.js";
 import { createStartingDebtSnapshotItem } from "../../domain/tracktozero/models.js";
+import { resolveDebtOwnership } from "../../domain/tracktozero/ownership.js";
 import { buildExpectedCheckpoints } from "../adapters/tracktozeroCalcAdapter.js";
+import { summarizeHouseholdOwnership } from "./ownershipSummary.js";
 import { calculateWhatIfComparison } from "../calc/scenarioComparison.js";
 import { activatePlanTransaction, resolveActivePlanContext } from "./activePlanService.js";
 import {
@@ -107,6 +109,12 @@ export const createTrackToZeroV2AppService = ({
       || payableIncludedDebts[0]
       || null;
     const totalIncludedDebt = includedDebts.reduce((sum, debt) => sum + debtBalance(debt), 0);
+    const householdOwnershipSummary = summarizeHouseholdOwnership({
+      workspace: context.workspace,
+      members: context.members,
+      includedDebts,
+      debtBalance,
+    });
 
     return {
       ...context,
@@ -122,6 +130,7 @@ export const createTrackToZeroV2AppService = ({
       status,
       totalIncludedDebt,
       targetDebt,
+      householdOwnershipSummary,
       projectedZeroDate: projectionWithWarnings.projection.at(-1)?.month || activeContext?.version?.projectedZeroDate || "",
     };
   };
@@ -137,16 +146,23 @@ export const createTrackToZeroV2AppService = ({
 
   const createNewDebt = (workspaceId, input) => {
     assertInteractive();
-    const { membership } = getWorkspaceContext(workspaceId);
+    const { workspace, membership, members } = getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "manageDebts")) throw new Error("Your role can view debts, but cannot add debt terms.");
     if (typeof repository.createDebtWithOpeningSnapshot !== "function") {
       throw new Error("Debt setup requires an opening balance snapshot.");
     }
+    const ownership = resolveDebtOwnership({
+      workspaceType: workspace.type,
+      members,
+      actorId,
+      requested: { ownerType: input.ownerType, ownerId: input.ownerId },
+    });
     const debtId = input.id || (input.clientRequestId ? `debt-${stableIdPart(input.clientRequestId)}` : id("debt"));
     const openingBalanceSnapshotId = input.openingBalanceSnapshotId || `opening-${debtId}`;
     const result = repository.createDebtWithOpeningSnapshot({
       debt: {
         ...input,
+        ...ownership,
         id: debtId,
         workspaceId,
         createdAt: asOf,
@@ -250,7 +266,7 @@ export const createTrackToZeroV2AppService = ({
 
   const commitImportBatch = (workspaceId, batchId) => {
     assertInteractive();
-    const { membership } = getWorkspaceContext(workspaceId);
+    const { workspace, membership, members } = getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot commit this import.");
     const batch = repository.getImportBatch(workspaceId, batchId);
     if (!batch) throw new Error("Import batch not found");
@@ -264,6 +280,15 @@ export const createTrackToZeroV2AppService = ({
       const debtId = `debt-${stableIdPart(`${batchId}:${candidate.candidateId}`)}`;
       const openingBalanceSnapshotId = `opening-${debtId}`;
       try {
+        // candidate.ownerSuggestion is the parser's raw, non-authoritative
+        // guess and is never written to the Debt - only the human-reviewed
+        // ownerType/ownerId choice (verified below) becomes real ownership.
+        const ownership = resolveDebtOwnership({
+          workspaceType: workspace.type,
+          members,
+          actorId,
+          requested: { ownerType: candidate.ownerType, ownerId: candidate.ownerId },
+        });
         const result = repository.createDebtWithOpeningSnapshot({
           debt: {
             id: debtId,
@@ -275,7 +300,7 @@ export const createTrackToZeroV2AppService = ({
             apr: candidate.aprStatus === "unknown" ? null : candidate.apr,
             minimumRequiredPayment: candidate.minimumPayment ?? 0,
             dueDay: null,
-            ownerLabel: candidate.ownerSuggestion || "",
+            ...ownership,
             includedInCorePayoffPlan: candidate.includedInCorePayoffPlan,
             createdAt: asOf,
             createdBy: actorId,

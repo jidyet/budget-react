@@ -5,6 +5,7 @@ import {
   IMPORT_BATCH_STATUSES,
   IMPORT_CANDIDATE_DECISIONS,
   MEMBER_ROLES,
+  OWNER_TYPES,
   PLAN_STATUSES,
   PLAN_STRATEGIES,
   VERSION_REASONS,
@@ -58,6 +59,11 @@ export const createDebt = (input = {}) => {
   const debtType = optionalString(input.debtType) || "other";
   const aprStatus = requireEnum(input.aprStatus || "unknown", APR_STATUSES, "debt.aprStatus");
   const isMortgage = debtType.toLowerCase() === "mortgage";
+  const ownerId = optionalString(input.ownerId);
+  // Ownership defaults to "member" when a legacy/seed record already has an
+  // ownerId (backward compatible with records written before ownerType
+  // existed), otherwise "unassigned" - never guessed as "member" without one.
+  const ownerType = requireEnum(input.ownerType || (ownerId ? "member" : "unassigned"), OWNER_TYPES, "debt.ownerType");
   const debt = {
     id: requireString(input.id, "debt.id"),
     workspaceId: requireString(input.workspaceId, "debt.workspaceId"),
@@ -70,7 +76,13 @@ export const createDebt = (input = {}) => {
     apr: aprStatus === "unknown" ? null : normalizeAprDecimal(input.apr ?? 0, "debt.apr"),
     minimumRequiredPayment: requireMoney(input.minimumRequiredPayment, "debt.minimumRequiredPayment"),
     dueDay: input.dueDay == null || input.dueDay === "" ? null : Number(input.dueDay),
-    ownerId: optionalString(input.ownerId),
+    // ownerId is never free text: it is either empty, or the uid of a
+    // workspace member verified against the real membership list (enforced
+    // in the application-service layer, which has repository access - see
+    // resolveDebtOwnership in ownership.js). ownerLabel is a display-only
+    // string derived from that verified identity, never authoritative.
+    ownerType,
+    ownerId,
     ownerLabel: optionalString(input.ownerLabel),
     includedInCorePayoffPlan: input.includedInCorePayoffPlan ?? !isMortgage,
     openingBalanceSnapshotId: optionalString(input.openingBalanceSnapshotId),
@@ -82,6 +94,12 @@ export const createDebt = (input = {}) => {
   };
   if (debt.dueDay !== null && (!Number.isInteger(debt.dueDay) || debt.dueDay < 1 || debt.dueDay > 31)) {
     throw new Error("debt.dueDay must be 1-31");
+  }
+  if (debt.ownerType === "member" && !debt.ownerId) {
+    throw new Error("debt.ownerId is required when ownerType is \"member\"");
+  }
+  if (debt.ownerType !== "member" && debt.ownerId) {
+    throw new Error("debt.ownerId must be empty unless ownerType is \"member\"");
   }
   return deepFreezeClone(debt);
 };
@@ -196,7 +214,14 @@ export const createImportCandidate = (input = {}) => deepFreezeClone({
   aprStatus: requireEnum(input.aprStatus || "unknown", APR_STATUSES, "importCandidate.aprStatus"),
   minimumPayment: input.minimumPayment == null || input.minimumPayment === "" ? null : requireMoney(input.minimumPayment, "importCandidate.minimumPayment"),
   dueDate: optionalString(input.dueDate),
+  // ownerSuggestion is the parser's raw, non-authoritative guess at the
+  // holder name on the statement - shown to the human reviewer as a hint
+  // only. ownerType/ownerId are the actual (initially unassigned) ownership
+  // decision, which only becomes real once a human explicitly confirms it
+  // against the workspace's verified member list (see ownership.js).
   ownerSuggestion: optionalString(input.ownerSuggestion),
+  ownerType: requireEnum(input.ownerType || "unassigned", OWNER_TYPES, "importCandidate.ownerType"),
+  ownerId: optionalString(input.ownerId),
   includedInCorePayoffPlan: input.includedInCorePayoffPlan ?? (String(input.debtType).toLowerCase() !== "mortgage"),
   confidence: input.confidence == null ? null : Number(input.confidence),
   evidence: input.evidence && typeof input.evidence === "object" ? structuredClone(input.evidence) : {},

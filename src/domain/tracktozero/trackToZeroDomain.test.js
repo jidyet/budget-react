@@ -59,6 +59,24 @@ describe("debt domain", () => {
     expect(baseDebt({ debtType: "mortgage" }).includedInCorePayoffPlan).toBe(false);
     expect(baseDebt({ debtType: "mortgage", includedInCorePayoffPlan: true }).includedInCorePayoffPlan).toBe(true);
   });
+
+  it("defaults ownerType from a legacy ownerId (backward compatible) or to unassigned", () => {
+    expect(baseDebt({ ownerId: "u1" }).ownerType).toBe("member");
+    expect(baseDebt({}).ownerType).toBe("unassigned");
+  });
+
+  it("enforces the ownerType/ownerId cross-field contract - member requires an id, others forbid one", () => {
+    expect(() => baseDebt({ ownerType: "member", ownerId: "" })).toThrow(/ownerId is required/);
+    expect(() => baseDebt({ ownerType: "joint", ownerId: "u1" })).toThrow(/ownerId must be empty/);
+    expect(() => baseDebt({ ownerType: "unassigned", ownerId: "u1" })).toThrow(/ownerId must be empty/);
+    expect(baseDebt({ ownerType: "member", ownerId: "u1" }).ownerId).toBe("u1");
+    expect(baseDebt({ ownerType: "joint" }).ownerId).toBe("");
+    expect(baseDebt({ ownerType: "unassigned" }).ownerId).toBe("");
+  });
+
+  it("rejects an invalid ownerType", () => {
+    expect(() => baseDebt({ ownerType: "spouse" })).toThrow(/ownerType/);
+  });
 });
 
 describe("plans, versions, active pointer, and immutability", () => {

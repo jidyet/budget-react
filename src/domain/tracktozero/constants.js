@@ -10,6 +10,10 @@ export const EVENT_SOURCES = Object.freeze(["manual", "import", "future_bank_syn
 export const MIGRATION_STATES = Object.freeze(["legacy", "eligible", "migration_preview", "migrated", "rollback_allowed", "v2_native"]);
 export const IMPORT_BATCH_STATUSES = Object.freeze(["uploaded", "parsing", "review_required", "approved", "committing", "committed", "failed", "cancelled"]);
 export const IMPORT_CANDIDATE_DECISIONS = Object.freeze(["pending_review", "confirmed", "excluded", "duplicate", "needs_information"]);
+// "member": owned by one verified workspace member (Debt.ownerId is that member's uid).
+// "joint": owned by the household as a whole - no single member (Debt.ownerId is empty).
+// "unassigned": ownership not yet decided - never a default that implies false certainty.
+export const OWNER_TYPES = Object.freeze(["member", "joint", "unassigned"]);
 
 export const ROLE_PERMISSIONS = Object.freeze({
   owner: Object.freeze({

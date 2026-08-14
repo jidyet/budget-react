@@ -10,6 +10,7 @@ import {
   classifyPlanStatus,
   getIncludedDebts,
   monthKeyFromDate,
+  sortDebtsForStrategy,
 } from "./projectionStatusService.js";
 import { V2_TEST_NOW } from "./v2SeedData.js";
 
@@ -115,6 +116,10 @@ export const createTrackToZeroV2AppService = ({
       includedDebts,
       debtBalance,
     });
+    // The same ordering payoffSimulate itself uses - the numbered queue
+    // shown in the UI can never silently drift from what's actually being
+    // paid off first.
+    const payoffQueue = sortDebtsForStrategy(includedDebts, activeContext?.version?.strategy || "avalanche");
 
     return {
       ...context,
@@ -131,6 +136,7 @@ export const createTrackToZeroV2AppService = ({
       totalIncludedDebt,
       targetDebt,
       householdOwnershipSummary,
+      payoffQueue,
       projectedZeroDate: projectionWithWarnings.projection.at(-1)?.month || activeContext?.version?.projectedZeroDate || "",
     };
   };
@@ -356,9 +362,7 @@ export const createTrackToZeroV2AppService = ({
     };
     const { projection, warnings } = buildProjectionWithWarnings({ debts: included, planVersion: previewVersion, startMonth: month, startYear: year });
     const startingTotalBalance = included.reduce((sum, debt) => sum + Number(snapshotsByDebt[debt.id]?.balance ?? debt.currentBalance ?? 0), 0);
-    const payoffOrder = [...included].sort((a, b) => strategy === "snowball"
-      ? Number(a.currentBalance || 0) - Number(b.currentBalance || 0)
-      : (b.aprStatus === "unknown" ? -1 : Number(b.apr || 0)) - (a.aprStatus === "unknown" ? -1 : Number(a.apr || 0)));
+    const payoffOrder = sortDebtsForStrategy(included, strategy);
     return {
       strategy,
       extraMonthlyPayment,

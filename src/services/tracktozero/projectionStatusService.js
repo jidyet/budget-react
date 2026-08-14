@@ -40,6 +40,17 @@ export const getIncludedDebts = (debts = [], planVersion = null) => {
   return debts.filter((debt) => debt.status === "active" && includedIds.has(debt.id));
 };
 
+// The single shared definition of "payoff order" for a strategy - used
+// anywhere a numbered queue is shown (plan preview, active plan) so the
+// displayed order can never drift from what payoffSimulate actually pays
+// off first. Snowball: smallest balance first. Avalanche: highest APR
+// first, with unknown-APR debts treated as highest priority (matches
+// payoffSimulate's own conservative handling of unknown APR).
+export const sortDebtsForStrategy = (debts = [], strategy = "avalanche") =>
+  [...debts].sort((a, b) => strategy === "snowball"
+    ? Number(a.currentBalance || 0) - Number(b.currentBalance || 0)
+    : (b.aprStatus === "unknown" ? -1 : Number(b.apr || 0)) - (a.aprStatus === "unknown" ? -1 : Number(a.apr || 0)));
+
 export const evaluateProjectionWarnings = ({
   debts = [],
   planVersion = null,

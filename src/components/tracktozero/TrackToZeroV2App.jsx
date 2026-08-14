@@ -85,6 +85,10 @@ const styles = {
   },
   label: { display: "grid", gap: 5, fontSize: 13, fontWeight: 800, color: "#2f6289" },
   pill: { border: "1px solid #9bd0f7", borderRadius: 999, padding: "6px 10px", background: "#e7f6ff", fontWeight: 800 },
+  badgeTarget: { border: "1px solid #9bd0f7", borderRadius: 999, padding: "4px 10px", background: "#e7f6ff", fontWeight: 800, fontSize: 12 },
+  badgeWarning: { border: "1px solid #fbbf24", borderRadius: 999, padding: "4px 10px", background: "#fffbeb", color: "#92400e", fontWeight: 800, fontSize: 12 },
+  badgeMuted: { border: "1px solid #cbd5e1", borderRadius: 999, padding: "4px 10px", background: "#f1f5f9", color: "#475569", fontWeight: 800, fontSize: 12 },
+  badgeOwner: { border: "1px solid #86efac", borderRadius: 999, padding: "4px 10px", background: "#f0fdf4", color: "#166534", fontWeight: 800, fontSize: 12 },
 };
 
 function Section({ title, eyebrow, children }) {
@@ -215,6 +219,23 @@ function StatusBadge({ status }) {
     <span aria-label={`Plan status: ${status?.label || "Unknown"}`} style={{ ...styles.pill, background: palette[0], color: palette[1], borderColor: palette[1] }}>
       {status?.label || "Unknown"}
     </span>
+  );
+}
+
+// Small, honest badges summarizing a debt's state at a glance - every badge
+// reflects a real field, never an inferred/guessed one.
+function DebtBadges({ debt, isTarget, isHousehold }) {
+  const needsReview = debt.aprStatus === "unknown"
+    || Number(debt.minimumRequiredPayment || 0) <= 0
+    || (isHousehold && effectiveOwnerType(debt) === "unassigned");
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "6px 0" }}>
+      {isTarget && <span style={styles.badgeTarget}>Current target</span>}
+      {isHousehold && <span style={styles.badgeOwner}>{debt.ownerLabel || "Unassigned"}</span>}
+      {debt.aprStatus === "unknown" && <span style={styles.badgeWarning}>APR unknown</span>}
+      {needsReview && <span style={styles.badgeWarning}>Needs review</span>}
+      {!debt.includedInCorePayoffPlan && <span style={styles.badgeMuted}>Excluded from core date</span>}
+    </div>
   );
 }
 
@@ -517,23 +538,46 @@ function ImportPanel({ snapshot, service, refresh, canManage }) {
   const mortgageExcludedCount = confirmed.filter((c) => c.debtType === "mortgage" && !c.includedInCorePayoffPlan).length;
   const busy = importState.status === "committing" || importState.status === "saving-decision";
 
+  // Visual triage so the human reviewer sees the riskiest candidates first:
+  // decided items are already sorted out (shown last, dimmed by decision
+  // color); everything still pending_review is grouped by how much it
+  // actually needs attention rather than shown as one undifferentiated list.
+  const pending = candidates.filter((c) => c.decision === "pending_review");
+  const missingCandidates = candidates.filter((c) => c.decision === "needs_information");
+  const ambiguousCandidates = pending.filter((c) => c.duplicateStatus !== "new");
+  const needsReviewCandidates = pending.filter((c) => c.duplicateStatus === "new" && c.warnings?.length);
+  const confidentCandidates = pending.filter((c) => c.duplicateStatus === "new" && !c.warnings?.length);
+  const groups = [
+    { key: "missing", title: "Missing information", hint: "Nothing readable found - fill these in manually before confirming.", items: missingCandidates },
+    { key: "ambiguous", title: "Ambiguous / possible duplicate", hint: "May already exist in your workspace - check before confirming.", items: ambiguousCandidates },
+    { key: "needs_review", title: "Needs review", hint: "Parsed, but has warnings worth a second look.", items: needsReviewCandidates },
+    { key: "confident", title: "Looks good", hint: "Parsed cleanly with no warnings.", items: confidentCandidates },
+    { key: "decided", title: "Already decided", hint: "Confirmed or excluded - change your mind any time before adding.", items: candidates.filter((c) => c.decision === "confirmed" || c.decision === "excluded") },
+  ].filter((group) => group.items.length);
+
   return (
     <Section title={`Review import: ${batch.sourceFilename}`} eyebrow="Excel · review before anything is saved">
       {!!batch.warnings?.length && <ul style={{ color: "#92400e" }}>{batch.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
-      <div style={styles.grid}>
-        {candidates.map((candidate) => (
-          <ImportReviewCandidate
-            key={candidate.candidateId}
-            candidate={candidate}
-            canManage={canManage}
-            busy={busy}
-            workspace={snapshot.workspace}
-            members={snapshot.members}
-            onUpdate={(patch) => updateCandidate(candidate.candidateId, patch)}
-            onDecide={(decision) => decideCandidate(candidate.candidateId, decision)}
-          />
-        ))}
-      </div>
+      {groups.map((group) => (
+        <div key={group.key} style={{ marginBottom: 16 }}>
+          <p style={{ margin: "0 0 4px", fontWeight: 900, color: "#2f6289" }}>{group.title} ({group.items.length})</p>
+          <p style={{ margin: "0 0 10px", color: "#5b7c98", fontSize: 13 }}>{group.hint}</p>
+          <div style={styles.grid}>
+            {group.items.map((candidate) => (
+              <ImportReviewCandidate
+                key={candidate.candidateId}
+                candidate={candidate}
+                canManage={canManage}
+                busy={busy}
+                workspace={snapshot.workspace}
+                members={snapshot.members}
+                onUpdate={(patch) => updateCandidate(candidate.candidateId, patch)}
+                onDecide={(decision) => decideCandidate(candidate.candidateId, decision)}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
       <Section title="Review summary" eyebrow="Before you add anything">
         <div style={styles.grid}>
           <p><strong>Debts to create:</strong> {confirmed.length}</p>
@@ -611,8 +655,7 @@ function Debts({ snapshot, service, refresh, runAction, writeState }) {
               <h3 style={{ margin: 0 }}>{debt.name}</h3>
               <p>{money(snapshot.latestSnapshotsByDebt[debt.id]?.balance ?? debt.currentBalance)} · {debt.aprStatus === "unknown" ? "Unknown APR" : percent(debt.apr)}</p>
               <p>Required payment: {money(debt.minimumRequiredPayment)} · Due day: {debt.dueDay || "not set"}</p>
-              <p>Owner: {debt.ownerLabel || "Unassigned"} · {debt.includedInCorePayoffPlan ? "Included in core plan" : "Excluded from core date"}</p>
-              {snapshot.targetDebt?.id === debt.id && <span style={styles.pill}>Current target</span>}
+              <DebtBadges debt={debt} isTarget={snapshot.targetDebt?.id === debt.id} isHousehold={isHousehold} />
             </article>
           ))}
         </div>
@@ -775,7 +818,14 @@ function FirstPlanBuilder({ snapshot, service, refresh, runAction, writeState, c
           <p><strong>Estimated interest paid:</strong> {money(preview.estimatedInterest)}</p>
           <p><strong>Payment amount:</strong> minimums on every included debt, plus {money(preview.extraMonthlyPayment)}/mo extra toward the {preview.strategy === "snowball" ? "smallest-balance" : "highest-APR"} target</p>
           <p><strong>Payoff order:</strong></p>
-          <ol>{preview.payoffOrder.map((debt) => <li key={debt.id}>{debt.name} · {money(debt.currentBalance)} · {debt.aprStatus === "unknown" ? "Unknown APR" : percent(debt.apr)}</li>)}</ol>
+          <ol>
+            {preview.payoffOrder.map((debt) => (
+              <li key={debt.id}>
+                {debt.name} · {money(debt.currentBalance)} · {debt.aprStatus === "unknown" ? "Unknown APR" : percent(debt.apr)}
+                {snapshot.workspace.type === "household" && <> · {debt.ownerLabel || "Unassigned"}</>}
+              </li>
+            ))}
+          </ol>
           {!!preview.warnings.length && <ul>{preview.warnings.map((warning) => <li key={`${warning.code}-${warning.debtId}`}>{warning.severity}: {warning.message}</li>)}</ul>}
           <button type="button" disabled={!canPlan || writeState.inProgress} style={canPlan && !writeState.inProgress ? styles.primaryButton : styles.disabledButton} onClick={activatePlan}>
             {writeState.action === "activate plan" ? "Activating..." : "Activate this plan"}
@@ -803,9 +853,14 @@ function Plan({ snapshot, service, refresh, runAction, writeState }) {
         ) : <p>Create a payoff plan to see target order, milestones, and status.</p>}
         {!!snapshot.warnings.length && <ul>{snapshot.warnings.map((warning) => <li key={`${warning.code}-${warning.debtId}`}>{warning.severity}: {warning.message}</li>)}</ul>}
       </Section>
-      <Section title="Payoff order" eyebrow="Milestones">
-        <ol>
-          {snapshot.includedDebts.map((debt) => <li key={debt.id}>{debt.name} · {money(debt.currentBalance)} · {debt.aprStatus === "unknown" ? "Unknown APR" : percent(debt.apr)}</li>)}
+      <Section title="Payoff queue" eyebrow="Who's being paid off, and in what order">
+        <ol style={{ display: "grid", gap: 10, paddingLeft: 22 }}>
+          {snapshot.payoffQueue.map((debt) => (
+            <li key={debt.id} style={{ paddingLeft: 6 }}>
+              <strong>{debt.name}</strong> · {money(snapshot.latestSnapshotsByDebt[debt.id]?.balance ?? debt.currentBalance)} · {debt.aprStatus === "unknown" ? "Unknown APR" : percent(debt.apr)}
+              <DebtBadges debt={debt} isTarget={snapshot.targetDebt?.id === debt.id} isHousehold={snapshot.workspace.type === "household"} />
+            </li>
+          ))}
         </ol>
       </Section>
       {!active?.version ? (

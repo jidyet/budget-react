@@ -315,3 +315,51 @@ describe("statementCandidateAdapter: preserves actual APR candidate values, not 
     expect(candidate.evidence.aprCandidates).toContain(0);
   });
 });
+
+describe("statementCandidateAdapter: abbreviated month names ('Feb 03, 2026') must resolve a full due date, not just a day (regression)", () => {
+  it("REPRODUCTION: a real Capital One-style statement using 'Payment Due Date  Feb 03, 2026' currently falls back to a day-only warning instead of a full date", () => {
+    const text = [
+      "Capital One Quicksilver",
+      "Account ending in 2656",
+      "Dec 10, 2025 - Jan 09, 2026",
+      "",
+      "Payment Information",
+      "Payment Due Date",
+      "Feb 03, 2026",
+      "",
+      "New Balance $1,991.99",
+      "Minimum Payment Due $65.00",
+      "",
+      "Upcoming statement closing date: February 06, 2026",
+      "Interest Charged $45.87",
+      "Purchases 26.40% APR",
+    ].join("\n");
+    const parsed = parseStatement(text);
+    const candidate = statementResultToCandidate(parsed, { source: "pdf", importBatchId: "b12", fileName: "capitalone.pdf" });
+    expect(candidate.dueDate).toBe("2026-02-03");
+    expect(candidate.warnings.join(" ")).not.toMatch(/only the day-of-month could be read/i);
+  });
+
+  it("all three-letter month abbreviations resolve correctly", () => {
+    const cases = [
+      ["Jan 05, 2026", "2026-01-05"],
+      ["Feb 03, 2026", "2026-02-03"],
+      ["Mar 15, 2026", "2026-03-15"],
+      ["Apr 1, 2026", "2026-04-01"],
+      ["Jun 30, 2026", "2026-06-30"],
+      ["Jul 4, 2026", "2026-07-04"],
+      ["Aug 22, 2026", "2026-08-22"],
+      ["Sep 9, 2026", "2026-09-09"],
+      ["Sept 9, 2026", "2026-09-09"],
+      ["Oct 31, 2026", "2026-10-31"],
+      ["Nov 11, 2026", "2026-11-11"],
+      ["Dec 25, 2026", "2026-12-25"],
+    ];
+    for (const [raw, iso] of cases) {
+      const text = `New Balance $500.00\nMinimum Payment Due $25.00\nPayment Due Date ${raw}`;
+      const parsed = parseStatement(text);
+      const candidate = statementResultToCandidate(parsed, { source: "pdf", importBatchId: `b-${raw}`, fileName: "x.pdf" });
+      expect(candidate.dueDate).toBe(iso);
+    }
+  });
+});

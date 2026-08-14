@@ -4,9 +4,11 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import process from "node:process";
 import { assertFails, assertSucceeds, initializeTestEnvironment } from "@firebase/rules-unit-testing";
+import * as XLSX from "xlsx";
 import { FirebaseTrackToZeroRepository } from "../src/services/repositories/firebaseTrackToZeroRepository.js";
 import { runTrackToZeroRepositoryContractSuite } from "./support/trackToZeroRepositoryContract.js";
 import { createTrackToZeroV2AsyncAppService } from "../src/services/tracktozero/v2AsyncApplicationService.js";
+import { discoverWorkbookDebtCandidates } from "../src/services/adapters/workbookDebtDiscovery.js";
 
 // Proves the *real* FirebaseTrackToZeroRepository write/read path is genuinely
 // gated by firestore.v2.rules (not just client-side checks), using authenticated
@@ -353,6 +355,78 @@ test("REVIEW-1A: stale-review protection refuses to overwrite a debt that change
   assert.equal(live.currentBalance, 33500); // newer truth preserved, not overwritten
   const snapshots = await repoAs("viewer").listBalanceSnapshots("w1", debt.id);
   assert.equal(snapshots.length, 1); // only the opening snapshot - no stale import snapshot was written
+});
+
+// DATA-1 HOTFIX: a realistic multi-sheet household workbook (credit cards,
+// student loan with missing balance, business debt, ordinary bills, an
+// irrelevant sheet, monthly duplicate appearances) run through the REAL
+// DATA-1A discovery engine, then persisted through the REAL Firestore
+// repository. This is the exact path that used to fail with "Function
+// setDoc() called with invalid data. Unsupported field value: undefined"
+// because classification/bill-signal evidence entries carried a literal
+// undefined value - proving the fix at the only layer that actually matters
+// (a real setDoc call against real rules), not just a pure-function check.
+const addSheet = (wb, name, rows) => {
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  XLSX.utils.book_append_sheet(wb, ws, name);
+  return ws;
+};
+
+const buildRealisticWorkbook = () => {
+  const wb = XLSX.utils.book_new();
+  addSheet(wb, "Debt Tracker", [
+    ["Category", "Account / Cardholder", "Balance", "APR", "Minimum Payment"],
+    ["CREDIT CARDS", "Chase Freedom ending in 1234", 2200, "20.99%", 80],
+    ["STUDENT LOANS", "Firstmark Loan", null, "", 190],
+    ["BUSINESS", "Amex Business (Stallion)", 9100, "18.5%", 300],
+  ]);
+  addSheet(wb, "Home Expenses", [
+    ["Category", "Account / Cardholder", "Payment", "Balance"],
+    ["UTILITIES", "Electricity", 225, null],
+    ["SUBSCRIPTIONS", "Netflix", 22, null],
+  ]);
+  addSheet(wb, "Bank Holidays", [["Date", "Holiday"], ["2026-01-01", "New Year's Day"]]);
+  return wb;
+};
+
+test("DATA-1 HOTFIX: a realistic workbook's DATA-1A discovery output persists through the real Firestore ImportBatch write without an undefined-field rejection", async () => {
+  await seedBaseWorkspace();
+  const { candidates, scanSummary } = discoverWorkbookDebtCandidates({
+    workbook: buildRealisticWorkbook(), XLSX, fileName: "household.xlsx", importBatchId: "batch",
+  });
+  // Discovery actually ran and found the expected candidates - not just an
+  // empty/degenerate result that would trivially avoid the bug.
+  assert.ok(candidates.length >= 3, "expected credit card, student loan, and business candidates");
+  assert.ok(candidates.some((c) => c.evidence.classificationEvidence?.length), "expected at least one candidate with classification evidence (the exact field that used to carry undefined)");
+  assert.equal(candidates.some((c) => /Electricity|Netflix/.test(c.accountName)), false, "ordinary bills must not become debt candidates");
+  assert.ok(scanSummary.ordinaryBillsIgnored >= 1);
+
+  const service = createTrackToZeroV2AsyncAppService({ repository: repoAs("admin"), actorId: "admin", asOf: now().toISOString() });
+
+  const debtsBefore = await repoAs("admin").listDebts("w1");
+  const batch = await service.createImportBatch("w1", {
+    sourceType: "excel", sourceFilename: "household.xlsx", candidates, warnings: [],
+  });
+  assert.equal(batch.status, "review_required");
+  assert.equal(batch.candidates.length, candidates.length);
+
+  // No authoritative mutation happened just from parsing/persisting the
+  // batch (Part 22) - nothing is confirmed/committed yet.
+  assert.deepEqual(await repoAs("admin").listDebts("w1"), debtsBefore);
+
+  // Round-trips through real Firestore cleanly, proving the write succeeded
+  // and evidence.classificationEvidence[].value survived as null, not a
+  // dropped/undefined field.
+  const reloaded = await repoAs("viewer").getImportBatch("w1", batch.id);
+  const withEvidence = reloaded.candidates.find((c) => c.evidence?.classificationEvidence?.length);
+  assert.ok(withEvidence);
+  assert.equal(withEvidence.evidence.classificationEvidence[0].value, null);
+
+  // The business-scope debt must never silently become an authoritative
+  // household Debt from this write alone (Part 22/DATA-1A Part 20).
+  const business = candidates.find((c) => c.evidence.scopeSuggestion === "business_candidate");
+  assert.ok(business);
+  assert.equal(business.includedInCorePayoffPlan, false);
 });
 
 test("plan + planVersion: admin can write, viewer can read, contributor cannot write", async () => {

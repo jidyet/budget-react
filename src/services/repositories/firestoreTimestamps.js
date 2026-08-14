@@ -32,6 +32,33 @@ export const TIMESTAMP_FIELDS = {
   importBatch: ["createdAt", "updatedAt", "committedAt"],
 };
 
+// DATA-1 HOTFIX: a deliberate, single Firestore-write boundary that
+// guarantees no literal `undefined` ever reaches setDoc(), for every entity
+// kind - not just a point-fix for the one field that happened to trigger
+// this. Only recurses into plain objects/arrays; anything else (Timestamp,
+// Date, class instances) passes through untouched, so this can never
+// corrupt a value toFirestoreValue already converted. This is NOT
+// ignoreUndefinedProperties: undefined keys are omitted deliberately here
+// (optional-absent semantics), while null/false/0/"" - all meaningful,
+// explicit values - are preserved exactly.
+const isPlainObject = (value) =>
+  value !== null && typeof value === "object" && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
+
+export const sanitizeForFirestore = (value) => {
+  if (Array.isArray(value)) {
+    return value.filter((item) => item !== undefined).map(sanitizeForFirestore);
+  }
+  if (isPlainObject(value)) {
+    const result = {};
+    for (const [key, val] of Object.entries(value)) {
+      if (val === undefined) continue;
+      result[key] = sanitizeForFirestore(val);
+    }
+    return result;
+  }
+  return value;
+};
+
 export const toFirestoreDoc = (kind, obj) => {
   const fields = TIMESTAMP_FIELDS[kind];
   if (!fields) throw new Error(`Unknown entity kind for Firestore serialization: ${kind}`);
@@ -39,7 +66,7 @@ export const toFirestoreDoc = (kind, obj) => {
   for (const field of fields) {
     if (field in doc) doc[field] = toFirestoreValue(doc[field]);
   }
-  return doc;
+  return sanitizeForFirestore(doc);
 };
 
 export const fromFirestoreDoc = (kind, data) => {

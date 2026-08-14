@@ -507,7 +507,10 @@ function ImportPanel({ snapshot, service, refresh, canManage }) {
       });
       setImportState({ status: "review", batch, error: "" });
     } catch (error) {
-      setImportState({ status: "idle", batch: null, error: error?.message || "This file could not be imported." });
+      // Never show a raw Firestore/Firebase error as the primary message -
+      // getUserSafeTrackToZeroError translates it into friendly TrackToZero
+      // copy (DATA-1 HOTFIX Part 24).
+      setImportState({ status: "idle", batch: null, error: getUserSafeTrackToZeroError(error).message });
     }
   };
 

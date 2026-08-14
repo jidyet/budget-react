@@ -73,6 +73,16 @@ export const getUserSafeTrackToZeroError = (error) => {
       message: "TrackToZero beta is temporarily unavailable. Nothing was changed. Try again shortly.",
     };
   }
+  // DATA-1 HOTFIX: a raw Firestore write rejection (e.g. an internal
+  // serialization bug like the undefined-field ImportBatch failure this
+  // guards against) must never surface its technical wording as the
+  // primary import-failure message.
+  if (/setDoc|invalid data|unsupported field value/i.test(message)) {
+    return {
+      kind: "import_persistence_error",
+      message: "We couldn't save that file yet. Nothing was added. Try again.",
+    };
+  }
   return {
     kind: "repository_error",
     message: "TrackToZero could not complete that action. Nothing was changed. Try again.",

@@ -101,7 +101,15 @@ const stripOwnerSuffix = (label = "") => safeString(label).replace(/\s*\([^)]+\)
 
 const inferDebtTypeFromText = (text = "") => normalizeDebtType("", text);
 
-const evidence = ({ kind, source, weight = 1, provenance, value, truth = EVIDENCE_TRUTH.observed, note = "" }) => ({
+// DATA-1 HOTFIX: `value` previously had no default, and both call sites
+// below (classification/bill signal evidence) never pass one - Firestore's
+// setDoc() rejects any document containing a literal `undefined` field
+// value, so every ImportBatch containing at least one classified row (i.e.
+// almost any real workbook) failed to persist with "Unsupported field
+// value: undefined". A signal-only evidence entry has no discrete value
+// beyond its `source` description, so `null` (explicitly "no value", never
+// silently dropped) is the correct default, not an accidental gap.
+const evidence = ({ kind, source, weight = 1, provenance, value = null, truth = EVIDENCE_TRUTH.observed, note = "" }) => ({
   kind,
   source: safeString(source),
   weight,

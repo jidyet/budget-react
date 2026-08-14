@@ -144,6 +144,29 @@ describe("DATA-1A workbook debt discovery", () => {
     expect(candidates[0]).toMatchObject({ creditorName: "Chase", currentBalance: 1200, aprStatus: "known", minimumPayment: 35 });
   });
 
+  it("DATA-1 HOTFIX regression: classification/bill-signal evidence never contains a literal undefined value (Firestore setDoc rejects it)", () => {
+    const { candidates } = discoverWorkbookDebtCandidates({ workbook: buildSyntheticHouseholdBudget(), XLSX, fileName: "synthetic.xlsx", importBatchId: "batch" });
+    expect(candidates.length).toBeGreaterThan(0);
+    const walk = (node, path = "") => {
+      if (Array.isArray(node)) {
+        node.forEach((item, index) => walk(item, `${path}[${index}]`));
+        return;
+      }
+      if (node !== null && typeof node === "object") {
+        for (const [key, value] of Object.entries(node)) {
+          expect(value, `${path}.${key} must never be undefined (Firestore rejects it)`).not.toBeUndefined();
+          walk(value, `${path}.${key}`);
+        }
+      }
+    };
+    for (const candidate of candidates) walk(candidate.evidence, "evidence");
+    // The specific field that triggered the original bug: every signal
+    // entry explicitly carries null, not an omitted/undefined key.
+    const withSignals = candidates.find((candidate) => candidate.evidence.classificationEvidence?.length);
+    expect(withSignals).toBeTruthy();
+    expect(withSignals.evidence.classificationEvidence[0].value).toBeNull();
+  });
+
   it("readExcelFileToCandidates returns structured errors/metadata-compatible candidates without committing truth", async () => {
     const wb = XLSX.utils.book_new();
     addSheet(wb, "Debts", [

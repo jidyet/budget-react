@@ -69,6 +69,7 @@ export const createDebt = (input = {}) => {
     id: requireString(input.id, "debt.id"),
     workspaceId: requireString(input.workspaceId, "debt.workspaceId"),
     name: requireString(input.name, "debt.name"),
+    accountReferenceSafe: optionalString(input.accountReferenceSafe),
     debtType,
     status: requireEnum(input.status || "active", DEBT_STATUSES, "debt.status"),
     currentBalance: requireMoney(input.currentBalance, "debt.currentBalance"),

@@ -91,6 +91,29 @@ export class InMemoryTrackToZeroRepository {
     this.balanceSnapshots.set(this.key(`${openingSnapshot.workspaceId}/${openingSnapshot.debtId}`, openingSnapshot.id), clone(openingSnapshot));
     return { debt, openingSnapshot };
   }
+  updateDebtFromImportCandidate({ workspaceId, debtId, metadataPatch = {}, balanceSnapshot: snapshotInput, actorId, updatedAt }) {
+    const current = this.listDebts(workspaceId).find((debt) => debt.id === debtId);
+    if (!current) throw new Error("Debt not found");
+    const snapshot = createBalanceSnapshot({
+      ...snapshotInput,
+      workspaceId,
+      debtId,
+      source: "import",
+      createdBy: snapshotInput?.createdBy || actorId,
+      createdAt: snapshotInput?.createdAt || updatedAt,
+    });
+    const debt = createDebt({
+      ...current,
+      ...metadataPatch,
+      currentBalance: snapshot.balance,
+      balanceStatus: "confirmed",
+      updatedAt,
+      updatedBy: actorId,
+    });
+    this.debts.set(this.key(workspaceId, debtId), clone(debt));
+    this.balanceSnapshots.set(this.key(`${snapshot.workspaceId}/${snapshot.debtId}`, snapshot.id), clone(snapshot));
+    return { debt, balanceSnapshot: snapshot };
+  }
   listDebts(workspaceId) { return [...this.debts.values()].filter((d) => d.workspaceId === workspaceId).map(clone); }
 
   savePlan(input) {

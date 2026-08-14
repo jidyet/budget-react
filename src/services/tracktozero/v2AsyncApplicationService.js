@@ -14,6 +14,12 @@ import {
 import { deriveDebtPortfolioSummary } from "./portfolioSummary.js";
 import { V2_DATA_MODES, hasPermission } from "./v2ApplicationService.js";
 import { V2_TEST_NOW } from "./v2SeedData.js";
+import {
+  MATCH_CLASSIFICATIONS,
+  RECONCILIATION_DECISIONS,
+  buildResolutionEvidence,
+  enrichImportCandidatesWithDebtMatches,
+} from "./debtReconciliation.js";
 
 const id = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const stableIdPart = (value) => String(value || "")
@@ -26,6 +32,19 @@ const stableIdPart = (value) => String(value || "")
 const parseAsOf = (asOf) => {
   const date = new Date(asOf || V2_TEST_NOW);
   return { month: date.getUTCMonth() + 1, year: date.getUTCFullYear() };
+};
+
+const dueDayFromCandidate = (candidate = {}) => {
+  if (candidate.dueDay) return Number(candidate.dueDay);
+  if (!candidate.dueDate) return null;
+  const parsed = new Date(candidate.dueDate);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.getUTCDate();
+};
+
+const metadataPatchFromCandidate = (metadataUpdates = {}) => {
+  const allowed = ["apr", "aprStatus", "minimumRequiredPayment", "dueDay", "includedInCorePayoffPlan", "debtType", "ownerType", "ownerId", "ownerLabel", "accountReferenceSafe"];
+  return Object.fromEntries(Object.entries(metadataUpdates)
+    .filter(([key, value]) => allowed.includes(key) && value !== undefined));
 };
 
 export const getUserSafeTrackToZeroError = (error) => {
@@ -422,6 +441,15 @@ export const createTrackToZeroV2AsyncAppService = ({
           return match ? { ...candidate, ownerType: "member", ownerId: match.uid } : candidate;
         })
       : candidates;
+    const debts = await repository.listDebts(workspaceId);
+    const latestSnapshotsByDebt = await latestSnapshotsByDebtAsync(repository, workspaceId, debts);
+    const priorImportBatches = await (repository.listImportBatches?.(workspaceId) || []);
+    const reconciledCandidates = enrichImportCandidatesWithDebtMatches({
+      candidates: withOwnerSuggestions,
+      debts,
+      latestSnapshotsByDebt,
+      priorImportBatches,
+    });
     return repository.saveImportBatch({
       id: batchId,
       workspaceId,
@@ -429,14 +457,14 @@ export const createTrackToZeroV2AsyncAppService = ({
       createdAt: asOf,
       sourceType,
       sourceFilename,
-      status: withOwnerSuggestions.length ? "review_required" : "failed",
-      candidateCount: withOwnerSuggestions.length,
+      status: reconciledCandidates.length ? "review_required" : "failed",
+      candidateCount: reconciledCandidates.length,
       confirmedCount: 0,
       rejectedCount: 0,
-      duplicateCount: 0,
+      duplicateCount: reconciledCandidates.filter((candidate) => candidate.evidence?.reconciliation?.classification === MATCH_CLASSIFICATIONS.duplicateImport).length,
       warnings,
       metadata: { parserVersion },
-      candidates: withOwnerSuggestions.map((candidate) => ({ ...candidate, importBatchId: batchId, workspaceId })),
+      candidates: reconciledCandidates.map((candidate) => ({ ...candidate, importBatchId: batchId, workspaceId })),
     });
   };
 
@@ -460,6 +488,50 @@ export const createTrackToZeroV2AsyncAppService = ({
     });
   };
 
+  const resolveImportCandidateMatch = async (workspaceId, batchId, candidateId, { decision, targetDebtId = "", metadataUpdates = {}, patch = {} } = {}) => {
+    assertInteractive();
+    const { membership } = await getWorkspaceContext(workspaceId);
+    if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot review this import.");
+    if (!Object.values(RECONCILIATION_DECISIONS).includes(decision)) throw new Error("Unsupported reconciliation decision.");
+    const batch = await repository.getImportBatch(workspaceId, batchId);
+    if (!batch) throw new Error("Import batch not found");
+    if (batch.status !== "review_required") throw new Error("This import is no longer open for review.");
+    const debts = await repository.listDebts(workspaceId);
+    if (decision === RECONCILIATION_DECISIONS.updateExisting && !debts.some((debt) => debt.id === targetDebtId)) {
+      throw new Error("Target debt not found in this workspace.");
+    }
+    const candidates = batch.candidates.map((candidate) => {
+      if (candidate.candidateId !== candidateId) return candidate;
+      const resolution = buildResolutionEvidence({ decision, targetDebtId, metadataUpdates, actorId, resolvedAt: asOf });
+      const nextDecision = decision === RECONCILIATION_DECISIONS.unsure ? "needs_information" : "confirmed";
+      return {
+        ...candidate,
+        ...patch,
+        decision: nextDecision,
+        targetDebtId: decision === RECONCILIATION_DECISIONS.updateExisting ? targetDebtId : "",
+        duplicateOfDebtId: decision === RECONCILIATION_DECISIONS.updateExisting ? targetDebtId : candidate.duplicateOfDebtId,
+        duplicateStatus: decision === RECONCILIATION_DECISIONS.updateExisting ? "likely_duplicate" : candidate.duplicateStatus,
+        evidence: {
+          ...(candidate.evidence || {}),
+          reconciliation: {
+            ...(candidate.evidence?.reconciliation || {}),
+            resolution,
+          },
+        },
+      };
+    });
+    if (!candidates.some((candidate) => candidate.candidateId === candidateId)) throw new Error("Candidate not found in this import batch.");
+    return repository.saveImportBatch({
+      ...batch,
+      candidates,
+      confirmedCount: candidates.filter((c) => c.decision === "confirmed").length,
+      rejectedCount: candidates.filter((c) => c.decision === "excluded").length,
+      duplicateCount: candidates.filter((c) => c.evidence?.reconciliation?.classification === MATCH_CLASSIFICATIONS.duplicateImport).length,
+      updatedAt: asOf,
+      updatedBy: actorId,
+    });
+  };
+
   const commitImportBatch = async (workspaceId, batchId) => {
     assertInteractive();
     const { workspace, membership, members } = await getWorkspaceContext(workspaceId);
@@ -470,12 +542,39 @@ export const createTrackToZeroV2AsyncAppService = ({
     if (batch.status !== "review_required") throw new Error(`Import batch cannot be committed from status "${batch.status}".`);
 
     const createdDebts = [];
+    const updatedDebts = [];
     const failures = [];
     for (const candidate of batch.candidates) {
       if (candidate.decision !== "confirmed") continue;
-      const debtId = `debt-${stableIdPart(`${batchId}:${candidate.candidateId}`)}`;
+      const resolution = candidate.evidence?.reconciliation?.resolution || {};
+      const isExistingUpdate = resolution.decision === RECONCILIATION_DECISIONS.updateExisting;
+      const debtId = isExistingUpdate ? resolution.targetDebtId : `debt-${stableIdPart(`${batchId}:${candidate.candidateId}`)}`;
       const openingBalanceSnapshotId = `opening-${debtId}`;
       try {
+        if (isExistingUpdate) {
+          if (typeof repository.updateDebtFromImportCandidate !== "function") throw new Error("Repository cannot update an existing debt from import.");
+          const metadataPatch = metadataPatchFromCandidate(resolution.metadataUpdates || {});
+          const result = await repository.updateDebtFromImportCandidate({
+            workspaceId,
+            debtId,
+            metadataPatch,
+            balanceSnapshot: {
+              id: `import-${stableIdPart(`${batchId}:${candidate.candidateId}`)}`,
+              workspaceId,
+              debtId,
+              balance: candidate.currentBalance,
+              observedAt: candidate.statementDate || asOf,
+              source: "import",
+              notes: `Imported balance update from ${batch.sourceFilename || batch.sourceType} (batch ${batchId}, candidate ${candidate.candidateId}).`,
+              createdAt: asOf,
+              createdBy: actorId,
+            },
+            actorId,
+            updatedAt: asOf,
+          });
+          updatedDebts.push(result.debt);
+          continue;
+        }
         // candidate.ownerSuggestion is the parser's raw, non-authoritative
         // guess and is never written to the Debt - only the human-reviewed
         // ownerType/ownerId choice (verified below) becomes real ownership.
@@ -494,6 +593,7 @@ export const createTrackToZeroV2AsyncAppService = ({
             id: debtId,
             workspaceId,
             name: candidate.accountName || candidate.creditorName || "Imported debt",
+            accountReferenceSafe: candidate.accountReferenceSafe,
             debtType: candidate.debtType,
             currentBalance: candidate.currentBalance,
             // Carries the parser/spreadsheet's confidence in this balance
@@ -505,7 +605,7 @@ export const createTrackToZeroV2AsyncAppService = ({
             aprStatus: candidate.aprStatus,
             apr: candidate.aprStatus === "unknown" ? null : candidate.apr,
             minimumRequiredPayment: candidate.minimumPayment ?? 0,
-            dueDay: null,
+            dueDay: dueDayFromCandidate(candidate),
             ...ownership,
             includedInCorePayoffPlan: candidate.includedInCorePayoffPlan,
             createdAt: asOf,
@@ -543,8 +643,8 @@ export const createTrackToZeroV2AsyncAppService = ({
       failure: failures.length ? `${failures.length} candidate(s) failed to commit: ${failures.map((f) => f.candidateId).join(", ")}` : "",
       warnings: [...(batch.warnings || []), ...failures.map((f) => `Candidate ${f.candidateId} failed: ${f.message}`)],
     });
-    if (failures.length) throw Object.assign(new Error(`Import commit incomplete: ${failures.length} of ${confirmedCount} confirmed debts failed. ${createdDebts.length} succeeded and were kept; the batch was not marked committed so it can be retried.`), { batch: updatedBatch, createdDebts, failures });
-    return { batch: updatedBatch, createdDebts };
+    if (failures.length) throw Object.assign(new Error(`Import commit incomplete: ${failures.length} of ${confirmedCount} confirmed debts failed. ${createdDebts.length + updatedDebts.length} succeeded and were kept; the batch was not marked committed so it can be retried.`), { batch: updatedBatch, createdDebts, updatedDebts, failures });
+    return { batch: updatedBatch, createdDebts, updatedDebts };
   };
 
   const previewScenario = async (workspaceId, { extraMonthlyPayment = 100 } = {}) => {
@@ -628,6 +728,7 @@ export const createTrackToZeroV2AsyncAppService = ({
     recordBalanceSnapshot,
     createImportBatch,
     decideImportCandidate,
+    resolveImportCandidateMatch,
     commitImportBatch,
     previewDraftPlan,
     createDraftPlan,

@@ -484,6 +484,164 @@ describe("TrackToZero v2 async application service: import owner auto-suggest (c
   });
 });
 
+describe("TrackToZero v2 async application service: DATA-1B import reconciliation", () => {
+  const importCandidate = (overrides = {}) => ({
+    candidateId: "cand-reconcile-1",
+    source: "pdf",
+    creditorName: "Firstmark Services",
+    accountName: "Firstmark Loan ending in 1234",
+    accountReferenceSafe: "last4:1234",
+    debtType: "student_loan",
+    currentBalance: 11880,
+    statementDate: "2026-08-10",
+    apr: 7.5,
+    aprStatus: "known",
+    minimumPayment: 190,
+    dueDate: "2026-08-21",
+    ownerSuggestion: "You",
+    ownerType: "member",
+    ownerId: "seed-owner",
+    includedInCorePayoffPlan: true,
+    warnings: [],
+    duplicateStatus: "new",
+    decision: "pending_review",
+    ...overrides,
+  });
+
+  it("suggests an existing debt match and resolves update-existing as BalanceSnapshot only, preserving PlanVersion history", async () => {
+    const { repository, service } = makeService();
+    const existing = await service.createNewDebt("personal-seed", {
+      clientRequestId: "firstmark-1234",
+      name: "Firstmark Student Loan",
+      accountReferenceSafe: "last4:1234",
+      debtType: "student_loan",
+      currentBalance: 12000,
+      minimumRequiredPayment: 180,
+      aprStatus: "known",
+      apr: 7.25,
+      includedInCorePayoffPlan: true,
+    });
+    const versionsBefore = repository.listPlanVersions("personal-seed", "personal-plan");
+    const paymentsBefore = repository.listPaymentEvents("personal-seed", existing.id);
+    const snapshotsBefore = repository.listBalanceSnapshots("personal-seed", existing.id);
+
+    const batch = await service.createImportBatch("personal-seed", {
+      sourceType: "pdf",
+      sourceFilename: "firstmark.pdf",
+      candidates: [importCandidate()],
+    });
+    expect(batch.candidates[0].targetDebtId).toBe(existing.id);
+    expect(batch.candidates[0].evidence.reconciliation.classification).toBe("strong_match");
+
+    await service.resolveImportCandidateMatch("personal-seed", batch.id, "cand-reconcile-1", {
+      decision: "update_existing",
+      targetDebtId: existing.id,
+      metadataUpdates: { apr: 7.5, aprStatus: "known", minimumRequiredPayment: 190, dueDay: 21 },
+    });
+    const { createdDebts, updatedDebts } = await service.commitImportBatch("personal-seed", batch.id);
+    expect(createdDebts).toHaveLength(0);
+    expect(updatedDebts).toHaveLength(1);
+
+    const updated = repository.listDebts("personal-seed").find((debt) => debt.id === existing.id);
+    expect(updated.currentBalance).toBe(11880);
+    expect(updated.apr).toBeCloseTo(0.075, 6);
+    expect(updated.minimumRequiredPayment).toBe(190);
+    expect(updated.dueDay).toBe(21);
+    expect(repository.listPaymentEvents("personal-seed", existing.id)).toEqual(paymentsBefore);
+    expect(repository.listBalanceSnapshots("personal-seed", existing.id)).toHaveLength(snapshotsBefore.length + 1);
+    expect(repository.listPlanVersions("personal-seed", "personal-plan")).toEqual(versionsBefore);
+  });
+
+  it("lets the reviewer choose new debt even when the creditor resembles an existing debt", async () => {
+    const { repository, service } = makeService();
+    await service.createNewDebt("personal-seed", {
+      clientRequestId: "chase-1234",
+      name: "Chase Freedom",
+      accountReferenceSafe: "last4:1234",
+      debtType: "credit_card",
+      currentBalance: 1000,
+      minimumRequiredPayment: 35,
+      aprStatus: "known",
+      apr: 22,
+    });
+    const beforeCount = repository.listDebts("personal-seed").length;
+    const batch = await service.createImportBatch("personal-seed", {
+      sourceType: "excel",
+      sourceFilename: "chase.xlsx",
+      candidates: [importCandidate({
+        candidateId: "new-chase-line",
+        creditorName: "Chase Line of Credit",
+        accountName: "Chase Line of Credit ending in 9999",
+        accountReferenceSafe: "last4:9999",
+        debtType: "line_of_credit",
+        currentBalance: 2500,
+        minimumPayment: 80,
+      })],
+    });
+    await service.resolveImportCandidateMatch("personal-seed", batch.id, "new-chase-line", { decision: "new_debt" });
+    const { createdDebts, updatedDebts } = await service.commitImportBatch("personal-seed", batch.id);
+    expect(createdDebts).toHaveLength(1);
+    expect(updatedDebts).toHaveLength(0);
+    expect(createdDebts[0]).toMatchObject({ name: "Chase Line of Credit ending in 9999", accountReferenceSafe: "last4:9999" });
+    expect(repository.listDebts("personal-seed")).toHaveLength(beforeCount + 1);
+  });
+
+  it("persists an unsure/needs-review decision across reload and commits no authoritative mutation", async () => {
+    const { repository, service } = makeService();
+    const beforeCount = repository.listDebts("personal-seed").length;
+    const batch = await service.createImportBatch("personal-seed", {
+      sourceType: "pdf",
+      sourceFilename: "unclear.pdf",
+      candidates: [importCandidate({ candidateId: "unsure-1", accountReferenceSafe: "", creditorName: "Firstmark", accountName: "Firstmark Loan" })],
+    });
+    await service.resolveImportCandidateMatch("personal-seed", batch.id, "unsure-1", { decision: "unsure" });
+    const reloaded = repository.getImportBatch("personal-seed", batch.id);
+    expect(reloaded.candidates[0].decision).toBe("needs_information");
+    expect(reloaded.candidates[0].evidence.reconciliation.resolution.status).toBe("open");
+    const committed = await service.commitImportBatch("personal-seed", batch.id);
+    expect(committed.createdDebts).toHaveLength(0);
+    expect(committed.updatedDebts).toHaveLength(0);
+    expect(repository.listDebts("personal-seed")).toHaveLength(beforeCount);
+  });
+
+  it("flags a duplicate reimport and does not create another snapshot without an explicit update-existing resolution", async () => {
+    const { repository, service } = makeService();
+    const existing = await service.createNewDebt("personal-seed", {
+      clientRequestId: "boa-9999",
+      name: "Bank of America Cash Rewards",
+      accountReferenceSafe: "last4:9999",
+      debtType: "credit_card",
+      currentBalance: 5000,
+      minimumRequiredPayment: 150,
+      aprStatus: "known",
+      apr: 20,
+    });
+    const source = importCandidate({
+      candidateId: "boa-1",
+      creditorName: "BofA",
+      accountName: "BofA Cash Rewards",
+      accountReferenceSafe: "last4:9999",
+      debtType: "credit_card",
+      currentBalance: 4900,
+      statementDate: "2026-08-12",
+      minimumPayment: 150,
+    });
+    const first = await service.createImportBatch("personal-seed", { sourceType: "pdf", sourceFilename: "boa.pdf", candidates: [source] });
+    await service.resolveImportCandidateMatch("personal-seed", first.id, "boa-1", { decision: "update_existing", targetDebtId: existing.id });
+    await service.commitImportBatch("personal-seed", first.id);
+    const snapshotCount = repository.listBalanceSnapshots("personal-seed", existing.id).length;
+
+    const duplicate = await service.createImportBatch("personal-seed", { sourceType: "pdf", sourceFilename: "boa-again.pdf", candidates: [source] });
+    expect(duplicate.duplicateCount).toBe(1);
+    expect(duplicate.candidates[0].evidence.reconciliation.classification).toBe("duplicate_import");
+    const committed = await service.commitImportBatch("personal-seed", duplicate.id);
+    expect(committed.createdDebts).toHaveLength(0);
+    expect(committed.updatedDebts).toHaveLength(0);
+    expect(repository.listBalanceSnapshots("personal-seed", existing.id)).toHaveLength(snapshotCount);
+    expect(repository.listPaymentEvents("personal-seed", existing.id)).toHaveLength(0);
+  });
+});
+
 describe("TrackToZero v2 async application service: UX-0 end-to-end - a failed-import balance never becomes a confirmed payoff after commit", () => {
   it("REPRODUCTION: commitImportBatch propagates the candidate's unresolved balanceStatus onto the created Debt (async)", async () => {
     const { repository, service } = makeService();

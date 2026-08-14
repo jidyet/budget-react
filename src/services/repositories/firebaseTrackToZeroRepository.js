@@ -124,6 +124,36 @@ export class FirebaseTrackToZeroRepository {
     await batch.commit();
     return { debt, openingSnapshot };
   }
+  async updateDebtFromImportCandidate({ workspaceId, debtId, metadataPatch = {}, balanceSnapshot: snapshotInput, actorId, updatedAt }) {
+    const snapshot = createBalanceSnapshot({
+      ...snapshotInput,
+      workspaceId,
+      debtId,
+      source: "import",
+      createdBy: snapshotInput?.createdBy || actorId,
+      createdAt: snapshotInput?.createdAt || updatedAt,
+    });
+    return runTransaction(this.db, async (tx) => {
+      const debtRef = doc(this.db, v2Paths.debt(workspaceId, debtId));
+      const snapshotRef = doc(this.db, v2Paths.balanceSnapshot(workspaceId, debtId, snapshot.id));
+      const debtSnap = await tx.get(debtRef);
+      const existingSnapshot = await tx.get(snapshotRef);
+      if (!debtSnap.exists()) throw new Error("Debt not found");
+      if (existingSnapshot.exists()) throw new Error("Imported balance snapshot already exists");
+      const current = fromFirestoreDoc("debt", debtSnap.data());
+      const debt = createDebt({
+        ...current,
+        ...metadataPatch,
+        currentBalance: snapshot.balance,
+        balanceStatus: "confirmed",
+        updatedAt,
+        updatedBy: actorId,
+      });
+      tx.set(debtRef, toFirestoreDoc("debt", debt));
+      tx.set(snapshotRef, toFirestoreDoc("balanceSnapshot", snapshot));
+      return { debt, balanceSnapshot: snapshot };
+    });
+  }
   async listDebts(workspaceId) {
     const snap = await getDocs(collection(this.db, "workspaces", workspaceId, "debts"));
     return snap.docs.map((d) => fromFirestoreDoc("debt", d.data()));

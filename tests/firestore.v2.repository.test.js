@@ -44,6 +44,7 @@ async function createDebtWithOpeningSnapshot(repo, input = {}) {
     id: input.id || "d1",
     workspaceId: input.workspaceId || "w1",
     name: input.name || "Card",
+    accountReferenceSafe: input.accountReferenceSafe || "",
     currentBalance: input.currentBalance ?? 100,
     minimumRequiredPayment: input.minimumRequiredPayment ?? 10,
     aprStatus: input.aprStatus || "unknown",
@@ -255,6 +256,53 @@ test("import commit fails closed per-candidate: a candidate with an invalid bala
   assert.equal(debts[0].name, "Good Card");
   const finalBatch = await repoAs("viewer").getImportBatch("w1", batch.id);
   assert.notEqual(finalBatch.status, "committed");
+});
+
+test("import reconciliation update-existing writes one BalanceSnapshot in transaction and does not fabricate PaymentEvents", async () => {
+  await seedBaseWorkspace();
+  const { debt } = await createDebtWithOpeningSnapshot(repoAs("admin"), {
+    id: "firstmark-1234",
+    name: "Firstmark Student Loan",
+    accountReferenceSafe: "last4:1234",
+    currentBalance: 12000,
+    minimumRequiredPayment: 180,
+    createdBy: "admin",
+  });
+  const service = createTrackToZeroV2AsyncAppService({ repository: repoAs("admin"), actorId: "admin", asOf: now().toISOString() });
+  const batch = await service.createImportBatch("w1", {
+    sourceType: "pdf",
+    sourceFilename: "firstmark.pdf",
+    candidates: [sampleCandidate({
+      candidateId: "firstmark-c1",
+      creditorName: "Firstmark Services",
+      accountName: "Firstmark ending in 1234",
+      accountReferenceSafe: "last4:1234",
+      debtType: "student_loan",
+      currentBalance: 11880,
+      statementDate: "2026-02-01",
+      minimumPayment: 190,
+    })],
+    warnings: [],
+  });
+  assert.equal(batch.candidates[0].evidence.reconciliation.classification, "strong_match");
+  await service.resolveImportCandidateMatch("w1", batch.id, "firstmark-c1", {
+    decision: "update_existing",
+    targetDebtId: debt.id,
+    metadataUpdates: { minimumRequiredPayment: 190 },
+  });
+  const { batch: committed, createdDebts, updatedDebts } = await service.commitImportBatch("w1", batch.id);
+  assert.equal(committed.status, "committed");
+  assert.equal(createdDebts.length, 0);
+  assert.equal(updatedDebts.length, 1);
+
+  const debts = await repoAs("viewer").listDebts("w1");
+  assert.equal(debts.length, 1);
+  assert.equal(debts[0].currentBalance, 11880);
+  assert.equal(debts[0].minimumRequiredPayment, 190);
+  const snapshots = await repoAs("viewer").listBalanceSnapshots("w1", debt.id);
+  assert.equal(snapshots.length, 2);
+  assert.equal(snapshots[0].source, "import");
+  assert.equal((await repoAs("viewer").listPaymentEvents("w1", debt.id)).length, 0);
 });
 
 test("plan + planVersion: admin can write, viewer can read, contributor cannot write", async () => {

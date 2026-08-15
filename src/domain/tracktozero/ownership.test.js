@@ -92,6 +92,44 @@ describe("resolveDebtOwnership", () => {
       resolveDebtOwnership({ workspaceType: "household", members: householdMembers, requested: { ownerType: "spouse" } })
     ).toThrow(/Invalid ownerType/);
   });
+
+  // DATA-HH1
+  const householdPeople = [
+    { id: "person-1", workspaceId: "h1", displayName: "Babajide Yusuf", status: "active" },
+    { id: "person-merged", workspaceId: "h1", displayName: "Old Person", status: "merged" },
+  ];
+
+  it("Household: a verified household person resolves to that person's display name, without requiring an account", () => {
+    const result = resolveDebtOwnership({
+      workspaceType: "household",
+      members: householdMembers,
+      people: householdPeople,
+      requested: { ownerType: "person", ownerId: "person-1" },
+    });
+    expect(result).toEqual({ ownerType: "person", ownerId: "person-1", ownerLabel: "Babajide Yusuf" });
+  });
+
+  it("an unverified person id can never become an owner", () => {
+    expect(() =>
+      resolveDebtOwnership({
+        workspaceType: "household",
+        members: householdMembers,
+        people: householdPeople,
+        requested: { ownerType: "person", ownerId: "not-a-real-person-id" },
+      })
+    ).toThrow(/verified household person/i);
+  });
+
+  it("a merged (no longer live) person can no longer be selected as owner", () => {
+    expect(() =>
+      resolveDebtOwnership({
+        workspaceType: "household",
+        members: householdMembers,
+        people: householdPeople,
+        requested: { ownerType: "person", ownerId: "person-merged" },
+      })
+    ).toThrow(/verified household person/i);
+  });
 });
 
 describe("matchMemberByName", () => {

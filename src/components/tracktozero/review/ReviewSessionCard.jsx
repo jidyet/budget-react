@@ -9,6 +9,7 @@ import Field from "../ui/Field.jsx";
 import { ttzPalette, TYPE_SCALE } from "../theme.js";
 import { formatMoney, formatPercent } from "../formatting.js";
 import { REVIEW_TYPES } from "../../../services/tracktozero/reviewDomain.js";
+import { matchImportedOwnerToIdentity } from "../../../domain/tracktozero/personIdentity.js";
 import {
   REVIEW_TYPE_LABEL,
   addOlderBalanceLabel,
@@ -287,38 +288,98 @@ function DueDaySubSection({ staged, onStage }) {
   );
 }
 
-function OwnerSubSection({ item, members, staged, onStage }) {
+// DATA-HH1: owner resolution now offers three kinds of choice - a real
+// verified member, an existing household financial person (no account
+// required), Joint, or Unassigned - plus a way to add a genuinely new
+// household person on the spot. The live suggestion below is computed here,
+// not stored on the candidate (Part 31 - matching stays pure/derivable, no
+// redundant persisted state) - it is always a SUGGESTION; nothing here ever
+// auto-selects it (Part 6 - "possible is not automatic confirmation").
+function OwnerSubSection({ item, members, people = [], staged, onStage, onCreatePerson }) {
   const palette = ttzPalette;
   const candidate = item.candidate;
   const activeMembers = members.filter((member) => member.status !== "removed");
-  const [value, setValue] = useState(staged?.args ? (staged.args.ownerType === "member" ? `member:${staged.args.ownerId}` : staged.args.ownerType) : "");
-  const suggestionMatched = candidate.ownerSuggestion && activeMembers.some((member) => (member.displayName || "").toLowerCase() === candidate.ownerSuggestion.toLowerCase());
+  const activePeople = people.filter((person) => person.status !== "merged");
+  const [value, setValue] = useState(
+    staged?.args
+      ? staged.args.ownerType === "member" ? `member:${staged.args.ownerId}`
+      : staged.args.ownerType === "person" ? `person:${staged.args.ownerId}`
+      : staged.args.ownerType
+      : ""
+  );
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
+
+  const suggestion = candidate.ownerSuggestion
+    ? matchImportedOwnerToIdentity({ rawName: candidate.ownerSuggestion, members: activeMembers, people: activePeople })
+    : null;
+  const suggestedName = suggestion?.kind === "member"
+    ? activeMembers.find((member) => member.uid === suggestion.membershipUid)?.displayName
+    : suggestion?.kind === "person"
+      ? activePeople.find((person) => person.id === suggestion.personId)?.displayName
+      : "";
+
+  const stageOwner = (raw) => {
+    setValue(raw);
+    if (!raw) { onStage("owner", null); return; }
+    if (raw.startsWith("member:")) onStage("owner", { action: "resolveOwner", args: { ownerType: "member", ownerId: raw.slice(7) }, label: "Owner set" });
+    else if (raw.startsWith("person:")) onStage("owner", { action: "resolveOwner", args: { ownerType: "person", ownerId: raw.slice(7) }, label: "Owner set" });
+    else onStage("owner", { action: "resolveOwner", args: { ownerType: raw, ownerId: "" }, label: "Owner set" });
+  };
+
+  const useSuggestion = () => {
+    if (suggestion?.kind === "member") stageOwner(`member:${suggestion.membershipUid}`);
+    else if (suggestion?.kind === "person") stageOwner(`person:${suggestion.personId}`);
+  };
+
+  const handleCreatePerson = async () => {
+    if (!onCreatePerson) return;
+    setCreating(true);
+    setCreateError("");
+    try {
+      const person = await onCreatePerson(candidate.ownerSuggestion);
+      stageOwner(`person:${person.id}`);
+    } catch {
+      setCreateError("We couldn't add that person yet. Try again.");
+    } finally {
+      setCreating(false);
+    }
+  };
 
   return (
     <Card variant="default">
       <div style={{ ...TYPE_SCALE.cardTitle, color: palette.tx, marginBottom: 4 }}>Who does this belong to?</div>
       {candidate.ownerSuggestion ? (
         <p style={{ ...TYPE_SCALE.body, color: palette.tx2, marginBottom: 8 }}>
-          {suggestionMatched ? `Suggested owner: ${candidate.ownerSuggestion}` : `We couldn't match "${candidate.ownerSuggestion}" to someone in your household.`}
+          {suggestion?.status === "exact" || suggestion?.status === "strong"
+            ? `Suggested owner: ${candidate.ownerSuggestion}`
+            : suggestion?.status === "possible"
+              ? `Possible match: "${candidate.ownerSuggestion}" may be ${suggestedName} - please confirm.`
+              : `We couldn't match "${candidate.ownerSuggestion}" to someone in your household.`}
         </p>
       ) : null}
+      {(suggestion?.status === "strong" || suggestion?.status === "possible") && !value && suggestedName ? (
+        <div style={{ marginBottom: 8 }}>
+          <Button size="sm" variant="secondary" onClick={useSuggestion}>Use {suggestedName}</Button>
+        </div>
+      ) : null}
       <Field label="Confirmed owner">
-        <Select
-          value={value}
-          onChange={(event) => {
-            const raw = event.target.value;
-            setValue(raw);
-            if (!raw) { onStage("owner", null); return; }
-            if (raw.startsWith("member:")) onStage("owner", { action: "resolveOwner", args: { ownerType: "member", ownerId: raw.slice(7) }, label: "Owner set" });
-            else onStage("owner", { action: "resolveOwner", args: { ownerType: raw, ownerId: "" }, label: "Owner set" });
-          }}
-        >
+        <Select value={value} onChange={(event) => stageOwner(event.target.value)}>
           <option value="">Choose an owner</option>
           <option value="unassigned">Unassigned</option>
           <option value="joint">Joint / Household</option>
           {activeMembers.map((member) => <option key={member.uid} value={`member:${member.uid}`}>{member.displayName || member.uid}</option>)}
+          {activePeople.map((person) => <option key={person.id} value={`person:${person.id}`}>{person.displayName}</option>)}
         </Select>
       </Field>
+      {candidate.ownerSuggestion && onCreatePerson ? (
+        <div style={{ marginTop: 8 }}>
+          <Button size="sm" variant="ghost" disabled={creating} onClick={handleCreatePerson}>
+            {creating ? "Adding..." : `+ Add "${candidate.ownerSuggestion}" as a new household person`}
+          </Button>
+          {createError ? <p style={{ ...TYPE_SCALE.caption, color: palette.da, marginTop: 4 }}>{createError}</p> : null}
+        </div>
+      ) : null}
     </Card>
   );
 }
@@ -357,7 +418,7 @@ function DebtClassificationSubSection({ item, staged, onStage }) {
 // One card per open review item - every applicable section renders inline,
 // stacked, so the user answers whatever they know in one continuous scroll
 // instead of a modal per field (Part 2/34).
-export default function ReviewSessionCard({ item, isHousehold, members, debts, latestSnapshotsByDebt, stagedForItem = {}, onStage, onLeaveForLater, busy, resultMessage, resultTone }) {
+export default function ReviewSessionCard({ item, isHousehold, members, people = [], debts, latestSnapshotsByDebt, stagedForItem = {}, onStage, onLeaveForLater, onCreatePerson, busy, resultMessage, resultTone }) {
   const palette = ttzPalette;
   const candidate = item.candidate;
   const title = candidate.accountName || candidate.creditorName || "Debt statement";
@@ -393,7 +454,9 @@ export default function ReviewSessionCard({ item, isHousehold, members, debts, l
         {item.types.includes(REVIEW_TYPES.aprConfirmation) ? <AprSubSection item={item} staged={stagedForItem.apr} onStage={onStage} /> : null}
         {item.types.includes(REVIEW_TYPES.minimumPaymentConfirmation) ? <MinimumPaymentSubSection staged={stagedForItem.minimum} onStage={onStage} /> : null}
         {item.types.includes(REVIEW_TYPES.dueDateConfirmation) ? <DueDaySubSection staged={stagedForItem.dueDay} onStage={onStage} /> : null}
-        {isHousehold && item.types.includes(REVIEW_TYPES.ownerMatch) ? <OwnerSubSection item={item} members={members} staged={stagedForItem.owner} onStage={onStage} /> : null}
+        {isHousehold && item.types.includes(REVIEW_TYPES.ownerMatch) ? (
+          <OwnerSubSection item={item} members={members} people={people} staged={stagedForItem.owner} onStage={onStage} onCreatePerson={onCreatePerson} />
+        ) : null}
       </div>
     </Card>
   );

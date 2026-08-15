@@ -22,7 +22,14 @@ import { effectiveOwnerType, isBalanceUnresolved, isDebtNeedsReview, looksLikeJu
 // includedDebt/excludedDebt) because each debt is visited exactly once to
 // build those sums - the member/joint/unassigned breakdown below is a
 // separate partition of that SAME set for display, never re-summed back in.
-export const deriveDebtPortfolioSummary = ({ workspace, members = [], debts = [], debtBalance }) => {
+//
+// DATA-HH1: memberDebt's per-row breakdown includes BOTH real verified
+// members (ownerType "member") AND household financial persons who may
+// have no TrackToZero account at all (ownerType "person") - Home/Debts show
+// one consistent "who does this debt belong to" breakdown regardless of
+// which kind of identity actually owns it (Part 19/21 - "no hard-coded
+// names," the breakdown must work for any household).
+export const deriveDebtPortfolioSummary = ({ workspace, members = [], people = [], debts = [], debtBalance }) => {
   const active = debts.filter((debt) => debt.status === "active");
   const confirmed = active.filter((debt) => !isBalanceUnresolved(debt));
   const needsReviewDebtIds = active
@@ -50,11 +57,13 @@ export const deriveDebtPortfolioSummary = ({ workspace, members = [], debts = []
   for (const debt of includedConfirmed) {
     const balance = debtBalance(debt);
     const ownerType = effectiveOwnerType(debt);
-    if (ownerType === "member" && debt.ownerId) {
-      const member = members.find((candidate) => candidate.uid === debt.ownerId);
+    if ((ownerType === "member" || ownerType === "person") && debt.ownerId) {
+      const identity = ownerType === "member"
+        ? members.find((candidate) => candidate.uid === debt.ownerId)
+        : people.find((candidate) => candidate.id === debt.ownerId);
       const existing = byMember.get(debt.ownerId) || {
         uid: debt.ownerId,
-        displayName: member?.displayName || debt.ownerLabel || debt.ownerId,
+        displayName: identity?.displayName || debt.ownerLabel || debt.ownerId,
         total: 0,
         debtCount: 0,
       };

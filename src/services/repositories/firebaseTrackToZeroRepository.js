@@ -20,6 +20,7 @@ import {
   createPlanVersion,
   createWorkspace,
   createWorkspaceMembership,
+  createWorkspacePerson,
 } from "../../domain/tracktozero/models.js";
 import { v2Paths } from "./tracktozeroRepositories.js";
 import { fromFirestoreDoc, toFirestoreDoc } from "./firestoreTimestamps.js";
@@ -32,6 +33,7 @@ const entityKindForPath = (path) => {
   if (parts.length === 2) return "workspace";
   if (parts[2] === "members") return "member";
   if (parts[2] === "member_invites") return "memberInvite";
+  if (parts[2] === "people") return "person";
   if (parts[2] === "debts" && parts.length === 4) return "debt";
   if (parts[2] === "debts" && parts[4] === "payment_events") return "paymentEvent";
   if (parts[2] === "debts" && parts[4] === "balance_snapshots") return "balanceSnapshot";
@@ -99,6 +101,21 @@ export class FirebaseTrackToZeroRepository {
   async listMemberInvites(workspaceId) {
     const snap = await getDocs(collection(this.db, "workspaces", workspaceId, "member_invites"));
     return snap.docs.map((d) => ({ ...d.data() }));
+  }
+
+  // ── Person (DATA-HH1) ──────────────────────────────────────────────────
+  async saveWorkspacePerson(input) {
+    const person = createWorkspacePerson(input);
+    await setDoc(doc(this.db, v2Paths.person(person.workspaceId, person.id)), toFirestoreDoc("person", person));
+    return person;
+  }
+  async getWorkspacePerson(workspaceId, personId) {
+    const snap = await getDoc(doc(this.db, v2Paths.person(workspaceId, personId)));
+    return snap.exists() ? fromFirestoreDoc("person", snap.data()) : null;
+  }
+  async listWorkspacePersons(workspaceId) {
+    const snap = await getDocs(collection(this.db, "workspaces", workspaceId, "people"));
+    return snap.docs.map((d) => fromFirestoreDoc("person", d.data()));
   }
 
   // ── Debt ───────────────────────────────────────────────────────────────

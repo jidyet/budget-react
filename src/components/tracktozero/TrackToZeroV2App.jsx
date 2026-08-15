@@ -118,13 +118,43 @@ function Field({ label, children }) {
 // review. Personal workspaces have nothing to choose - every debt always
 // belongs to the signed-in member, so it's shown as a fixed, non-editable
 // fact. Household workspaces require an explicit choice from the REAL
-// verified member list, Joint/Household, or Unassigned - never free text,
-// so a parser suggestion or typo can never become an owner.
-function OwnerField({ workspace, members = [], ownerType, ownerId, onChange, disabled }) {
+// verified member list, an existing DATA-HH1 household person, Joint/
+// Household, or Unassigned - never free text, so a parser suggestion or
+// typo can never become an owner. onCreatePerson (optional) lets the caller
+// add a genuinely new household financial identity inline - it never
+// creates an Auth account or a WorkspaceMembership, only a Workspace-scoped
+// person another debt's owner can also reference.
+function OwnerField({ workspace, members = [], people = [], ownerType, ownerId, onChange, onCreatePerson, disabled }) {
+  const [addingPerson, setAddingPerson] = useState(false);
+  const [newPersonName, setNewPersonName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
+
   if (workspace?.type !== "household") {
     return <Field label="Owner"><span style={styles.pill}>You</span></Field>;
   }
-  const value = ownerType === "member" && ownerId ? `member:${ownerId}` : (ownerType || "unassigned");
+  const activePeople = people.filter((person) => person.status !== "merged");
+  const value = ownerType === "member" && ownerId ? `member:${ownerId}`
+    : ownerType === "person" && ownerId ? `person:${ownerId}`
+    : (ownerType || "unassigned");
+
+  const handleCreate = async () => {
+    const name = newPersonName.trim();
+    if (!name || !onCreatePerson) return;
+    setCreating(true);
+    setCreateError("");
+    try {
+      const person = await onCreatePerson(name);
+      onChange({ ownerType: "person", ownerId: person.id });
+      setAddingPerson(false);
+      setNewPersonName("");
+    } catch {
+      setCreateError("Couldn't add that person. Try again.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
   return (
     <Field label="Owner">
       <select
@@ -134,6 +164,7 @@ function OwnerField({ workspace, members = [], ownerType, ownerId, onChange, dis
         onChange={(event) => {
           const raw = event.target.value;
           if (raw.startsWith("member:")) onChange({ ownerType: "member", ownerId: raw.slice(7) });
+          else if (raw.startsWith("person:")) onChange({ ownerType: "person", ownerId: raw.slice(7) });
           else onChange({ ownerType: raw, ownerId: "" });
         }}
       >
@@ -142,7 +173,34 @@ function OwnerField({ workspace, members = [], ownerType, ownerId, onChange, dis
         {members.filter((member) => member.status !== "removed").map((member) => (
           <option key={member.uid} value={`member:${member.uid}`}>{member.displayName || member.uid}</option>
         ))}
+        {activePeople.map((person) => (
+          <option key={person.id} value={`person:${person.id}`}>{person.displayName}</option>
+        ))}
       </select>
+      {onCreatePerson && !disabled ? (
+        addingPerson ? (
+          <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center" }}>
+            <input
+              style={{ ...styles.input, flex: 1 }}
+              placeholder="Person's name"
+              value={newPersonName}
+              disabled={creating}
+              onChange={(event) => setNewPersonName(event.target.value)}
+            />
+            <button type="button" style={styles.button} disabled={creating || !newPersonName.trim()} onClick={handleCreate}>
+              {creating ? "Adding..." : "Add"}
+            </button>
+            <button type="button" style={styles.button} disabled={creating} onClick={() => { setAddingPerson(false); setNewPersonName(""); setCreateError(""); }}>
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button type="button" style={{ ...styles.button, marginTop: 6, fontSize: 12 }} onClick={() => setAddingPerson(true)}>
+            + Add a household person
+          </button>
+        )
+      ) : null}
+      {createError ? <p role="alert" style={{ color: "#991b1b", fontSize: 12, marginTop: 4 }}>{createError}</p> : null}
     </Field>
   );
 }
@@ -358,7 +416,7 @@ const DEBT_TYPE_OPTIONS = [
   ["other", "Other"],
 ];
 
-function ImportReviewCandidate({ candidate, canManage, busy, onUpdate, onDecide, workspace, members }) {
+function ImportReviewCandidate({ candidate, canManage, busy, onUpdate, onDecide, workspace, members, people, onCreatePerson }) {
   const decisionLabel = { pending_review: "Needs your review", confirmed: "Will be added", excluded: "Excluded", needs_information: "Needs information" }[candidate.decision] || candidate.decision;
   return (
     <article style={{ border: "1px solid #c7e3f8", borderRadius: 18, padding: 14, background: candidate.decision === "confirmed" ? "#f0fdf4" : candidate.decision === "excluded" ? "#fef2f2" : "#fff" }}>
@@ -387,10 +445,12 @@ function ImportReviewCandidate({ candidate, canManage, busy, onUpdate, onDecide,
         <OwnerField
           workspace={workspace}
           members={members}
+          people={people}
           ownerType={candidate.ownerType}
           ownerId={candidate.ownerId}
           disabled={!canManage}
           onChange={(next) => onUpdate(next)}
+          onCreatePerson={onCreatePerson}
         />
       </div>
       {workspace?.type === "household" && !!candidate.ownerSuggestion && (
@@ -415,6 +475,21 @@ function ImportReviewCandidate({ candidate, canManage, busy, onUpdate, onDecide,
 
 function ImportPanel({ snapshot, service, refresh, refreshReview, canManage }) {
   const [importState, setImportState] = useState({ status: "idle", batch: null, error: "" });
+  // DATA-HH1: merged with snapshot.people locally, mirroring Debts' and
+  // ReviewCenter's identical pattern - calling the full refresh() here
+  // would null out `snapshot` while in flight (see the top-level refresh
+  // callback), unmounting this whole panel and silently discarding
+  // whatever candidate edits/decisions the reviewer already made.
+  const [newlyCreatedPeople, setNewlyCreatedPeople] = useState([]);
+  const people = [...(snapshot.people || []), ...newlyCreatedPeople.filter((person) => !(snapshot.people || []).some((existing) => existing.id === person.id))];
+
+  // DATA-HH1: never touches Debt/BalanceSnapshot/PaymentEvent/PlanVersion -
+  // safe to run immediately.
+  const handleCreatePerson = async (displayName) => {
+    const person = await service.createImportedPerson(snapshot.workspace.id, { displayName });
+    setNewlyCreatedPeople((state) => (state.some((existing) => existing.id === person.id) ? state : [...state, person]));
+    return person;
+  };
 
   const handleFile = async (file) => {
     if (!file) return;
@@ -566,8 +641,10 @@ function ImportPanel({ snapshot, service, refresh, refreshReview, canManage }) {
                 busy={busy}
                 workspace={snapshot.workspace}
                 members={snapshot.members}
+                people={people}
                 onUpdate={(patch) => updateCandidate(candidate.candidateId, patch)}
                 onDecide={(decision) => decideCandidate(candidate.candidateId, decision)}
+                onCreatePerson={canManage ? handleCreatePerson : undefined}
               />
             ))}
           </div>
@@ -605,6 +682,15 @@ function Debts({ snapshot, service, refresh, refreshReview, runAction, writeStat
   const [balance, setBalance] = useState({ debtId: snapshot.debts[0]?.id || "", amount: "" });
   const [newDebt, setNewDebt] = useState(newDebtDraft);
   const [ownerFilter, setOwnerFilter] = useState("all");
+  // DATA-HH1: people created mid-form via "+ Add a household person" -
+  // merged with snapshot.people locally. A full refresh() is deliberately
+  // NOT used here: refresh() nulls out `snapshot` while it's in flight
+  // (see the top-level refresh callback), which unmounts this whole tab and
+  // would silently wipe out whatever the user had already typed into the
+  // in-progress "Add debt" form. This mirrors ReviewCenter.jsx's identical
+  // newlyCreatedPeople pattern.
+  const [newlyCreatedPeople, setNewlyCreatedPeople] = useState([]);
+  const people = [...(snapshot.people || []), ...newlyCreatedPeople.filter((person) => !(snapshot.people || []).some((existing) => existing.id === person.id))];
   const canManage = snapshot.permissions.manageDebts && snapshot.mode !== "legacy_preview";
   const canObserve = snapshot.permissions.recordObservations && snapshot.mode !== "legacy_preview";
   const isHousehold = snapshot.workspace.type === "household";
@@ -617,6 +703,14 @@ function Debts({ snapshot, service, refresh, refreshReview, runAction, writeStat
           ? effectiveOwnerType(debt) === ownerFilter
           : debt.ownerId === ownerFilter
       ));
+
+  // DATA-HH1: never touches Debt/BalanceSnapshot/PaymentEvent/PlanVersion -
+  // safe to run immediately, matching ImportPanel's own handleCreatePerson.
+  const handleCreatePerson = async (displayName) => {
+    const person = await service.createImportedPerson(snapshot.workspace.id, { displayName });
+    setNewlyCreatedPeople((state) => (state.some((existing) => existing.id === person.id) ? state : [...state, person]));
+    return person;
+  };
 
   return (
     <>
@@ -637,6 +731,9 @@ function Debts({ snapshot, service, refresh, refreshReview, runAction, writeStat
                 <option value="all">Everyone</option>
                 {snapshot.members.filter((member) => member.status !== "removed").map((member) => (
                   <option key={member.uid} value={member.uid}>{member.displayName || member.uid}</option>
+                ))}
+                {people.filter((person) => person.status !== "merged").map((person) => (
+                  <option key={person.id} value={person.id}>{person.displayName}</option>
                 ))}
                 <option value="joint">Joint / Household</option>
                 <option value="unassigned">Unassigned</option>
@@ -802,9 +899,11 @@ function Debts({ snapshot, service, refresh, refreshReview, runAction, writeStat
             <OwnerField
               workspace={snapshot.workspace}
               members={snapshot.members}
+              people={people}
               ownerType={newDebt.ownerType}
               ownerId={newDebt.ownerId}
               onChange={(next) => setNewDebt({ ...newDebt, ...next })}
+              onCreatePerson={canManage ? handleCreatePerson : undefined}
             />
             <label style={{ display: "flex", alignItems: "center", gap: 8, margin: "8px 0 14px", fontWeight: 800 }}>
               <input type="checkbox" checked={!!newDebt.includedInCorePayoffPlan} onChange={(event) => setNewDebt({ ...newDebt, includedInCorePayoffPlan: event.target.checked })} />

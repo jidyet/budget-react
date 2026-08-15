@@ -1,6 +1,7 @@
 import { ROLE_PERMISSIONS } from "../../domain/tracktozero/constants.js";
 import { createStartingDebtSnapshotItem } from "../../domain/tracktozero/models.js";
-import { isDebtNeedsReview, matchMemberByName, resolveDebtOwnership } from "../../domain/tracktozero/ownership.js";
+import { isDebtNeedsReview, resolveDebtOwnership } from "../../domain/tracktozero/ownership.js";
+import { matchImportedOwnerToIdentity } from "../../domain/tracktozero/personIdentity.js";
 import { buildExpectedCheckpoints } from "../adapters/tracktozeroCalcAdapter.js";
 import { deriveDebtPortfolioSummary } from "./portfolioSummary.js";
 import { calculateWhatIfComparison } from "../calc/scenarioComparison.js";
@@ -65,7 +66,10 @@ export const createTrackToZeroV2AppService = ({
     if (!workspace) throw new Error("Workspace not found");
     const membership = repository.getMembership(workspaceId, actorId) || repository.listMemberships?.(workspaceId)?.[0] || null;
     const members = repository.listMemberships?.(workspaceId) || [];
-    return { workspace, membership, members, permissions: ROLE_PERMISSIONS[membership?.role] || ROLE_PERMISSIONS.viewer };
+    // DATA-HH1: mirrors the async service's getWorkspaceContext exactly -
+    // see its comment for why `people` lives here.
+    const people = repository.listWorkspacePersons?.(workspaceId) || [];
+    return { workspace, membership, members, people, permissions: ROLE_PERMISSIONS[membership?.role] || ROLE_PERMISSIONS.viewer };
   };
 
   const getActivePlanContext = (workspaceId) => {
@@ -129,6 +133,7 @@ export const createTrackToZeroV2AppService = ({
     const portfolioSummary = deriveDebtPortfolioSummary({
       workspace: context.workspace,
       members: context.members,
+      people: context.people,
       debts,
       debtBalance,
     });
@@ -174,7 +179,7 @@ export const createTrackToZeroV2AppService = ({
 
   const createNewDebt = (workspaceId, input) => {
     assertInteractive();
-    const { workspace, membership, members } = getWorkspaceContext(workspaceId);
+    const { workspace, membership, members, people } = getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "manageDebts")) throw new Error("Your role can view debts, but cannot add debt terms.");
     if (typeof repository.createDebtWithOpeningSnapshot !== "function") {
       throw new Error("Debt setup requires an opening balance snapshot.");
@@ -182,6 +187,7 @@ export const createTrackToZeroV2AppService = ({
     const ownership = resolveDebtOwnership({
       workspaceType: workspace.type,
       members,
+      people,
       actorId,
       requested: { ownerType: input.ownerType, ownerId: input.ownerId },
     });
@@ -251,19 +257,21 @@ export const createTrackToZeroV2AppService = ({
 
   const createImportBatch = (workspaceId, { sourceType, sourceFilename = "", candidates = [], warnings = [], parserVersion = "1" } = {}) => {
     assertInteractive();
-    const { workspace, membership, members } = getWorkspaceContext(workspaceId);
+    const { workspace, membership, members, people } = getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot import debts into this workspace.");
     const batchId = id("import");
-    // Convenience pre-fill only: if the parser's raw ownerSuggestion matches a
-    // REAL verified household member by name, pre-select them instead of
-    // forcing a manual pick - the human still reviews/confirms (or changes)
-    // this before anything is committed, and resolveDebtOwnership re-verifies
-    // it against the real membership list regardless at commit time.
+    // Convenience pre-fill only (mirrors the async service's createImportBatch
+    // exactly - see its comment): an EXACT match against a real verified
+    // member or an existing household person (DATA-HH1) pre-selects them;
+    // "strong"/"possible" matches stay unassigned for explicit human review.
     const withOwnerSuggestions = workspace.type === "household"
       ? candidates.map((candidate) => {
           if (candidate.ownerType && candidate.ownerType !== "unassigned") return candidate;
-          const match = matchMemberByName(candidate.ownerSuggestion, members);
-          return match ? { ...candidate, ownerType: "member", ownerId: match.uid } : candidate;
+          const match = matchImportedOwnerToIdentity({ rawName: candidate.ownerSuggestion, members, people });
+          if (match.status !== "exact") return candidate;
+          return match.kind === "member"
+            ? { ...candidate, ownerType: "member", ownerId: match.membershipUid }
+            : { ...candidate, ownerType: "person", ownerId: match.personId };
         })
       : candidates;
     return repository.saveImportBatch({
@@ -306,7 +314,7 @@ export const createTrackToZeroV2AppService = ({
 
   const commitImportBatch = (workspaceId, batchId) => {
     assertInteractive();
-    const { workspace, membership, members } = getWorkspaceContext(workspaceId);
+    const { workspace, membership, members, people } = getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot commit this import.");
     const batch = repository.getImportBatch(workspaceId, batchId);
     if (!batch) throw new Error("Import batch not found");
@@ -326,6 +334,7 @@ export const createTrackToZeroV2AppService = ({
         const ownership = resolveDebtOwnership({
           workspaceType: workspace.type,
           members,
+          people,
           actorId,
           requested: { ownerType: candidate.ownerType, ownerId: candidate.ownerId },
         });

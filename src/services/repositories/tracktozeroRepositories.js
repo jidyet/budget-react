@@ -1,4 +1,4 @@
-import { createBalanceSnapshot, createDebt, createExpectedCheckpoint, createImportBatch, createPaymentEvent, createPayoffPlan, createPlanVersion, createWorkspace, createWorkspaceMembership } from "../../domain/tracktozero/models.js";
+import { createBalanceSnapshot, createDebt, createExpectedCheckpoint, createImportBatch, createPaymentEvent, createPayoffPlan, createPlanVersion, createWorkspace, createWorkspaceMembership, createWorkspacePerson } from "../../domain/tracktozero/models.js";
 import { activatePlanTransaction } from "../tracktozero/activePlanService.js";
 
 const clone = (value) => structuredClone(value);
@@ -7,6 +7,7 @@ export const v2Paths = {
   workspace: (workspaceId) => `workspaces/${workspaceId}`,
   member: (workspaceId, uid) => `workspaces/${workspaceId}/members/${uid}`,
   memberInvite: (workspaceId, inviteId) => `workspaces/${workspaceId}/member_invites/${inviteId}`,
+  person: (workspaceId, personId) => `workspaces/${workspaceId}/people/${personId}`,
   debt: (workspaceId, debtId) => `workspaces/${workspaceId}/debts/${debtId}`,
   plan: (workspaceId, planId) => `workspaces/${workspaceId}/plans/${planId}`,
   version: (workspaceId, planId, versionId) => `workspaces/${workspaceId}/plans/${planId}/versions/${versionId}`,
@@ -21,6 +22,7 @@ export const v2Paths = {
 const pathFromEntity = (entity) => {
   if (entity.kind === "workspace") return v2Paths.workspace(entity.workspace.id);
   if (entity.kind === "membership") return v2Paths.member(entity.membership.workspaceId, entity.membership.uid);
+  if (entity.kind === "person") return v2Paths.person(entity.person.workspaceId, entity.person.id);
   if (entity.kind === "debt") return v2Paths.debt(entity.debt.workspaceId, entity.debt.id);
   if (entity.kind === "balanceSnapshot") return v2Paths.balanceSnapshot(entity.snapshot.workspaceId, entity.snapshot.debtId, entity.snapshot.id);
   if (entity.kind === "plan") return v2Paths.plan(entity.plan.workspaceId, entity.plan.id);
@@ -35,6 +37,7 @@ export class InMemoryTrackToZeroRepository {
     this.workspaces = new Map(Object.entries(seed.workspaces || {}).map(([id, value]) => [id, clone(value)]));
     this.members = new Map(Object.entries(seed.members || {}).map(([key, value]) => [key, clone(value)]));
     this.memberInvites = new Map(Object.entries(seed.memberInvites || {}).map(([key, value]) => [key, clone(value)]));
+    this.people = new Map(Object.entries(seed.people || {}).map(([key, value]) => [key, clone(value)]));
     this.debts = new Map(Object.entries(seed.debts || {}).map(([key, value]) => [key, clone(value)]));
     this.plans = new Map(Object.entries(seed.plans || {}).map(([key, value]) => [key, clone(value)]));
     this.versions = new Map(Object.entries(seed.versions || {}).map(([key, value]) => [key, clone(value)]));
@@ -72,6 +75,20 @@ export class InMemoryTrackToZeroRepository {
   }
   listMemberInvites(workspaceId) {
     return [...this.memberInvites.values()].filter((invite) => invite.workspaceId === workspaceId).map(clone);
+  }
+
+  // DATA-HH1
+  saveWorkspacePerson(input) {
+    const person = createWorkspacePerson(input);
+    this.people.set(this.key(person.workspaceId, person.id), clone(person));
+    return person;
+  }
+  getWorkspacePerson(workspaceId, personId) {
+    const key = this.key(workspaceId, personId);
+    return this.people.has(key) ? clone(this.people.get(key)) : null;
+  }
+  listWorkspacePersons(workspaceId) {
+    return [...this.people.values()].filter((person) => person.workspaceId === workspaceId).map(clone);
   }
 
   saveDebt(input) {
@@ -239,6 +256,7 @@ export class InMemoryTrackToZeroRepository {
     const workspaceId = parts[1];
     if (parts.length === 2) return this.getWorkspace(workspaceId);
     if (parts[2] === "members") return this.getMembership(workspaceId, parts[3]);
+    if (parts[2] === "people") return this.getWorkspacePerson(workspaceId, parts[3]);
     if (parts[2] === "debts" && parts.length === 4) {
       return this.listDebts(workspaceId).find((debt) => debt.id === parts[3]) || null;
     }
@@ -264,6 +282,7 @@ export class InMemoryTrackToZeroRepository {
     const workspaceId = parts[1];
     if (parts.length === 2) return this.workspaces.delete(workspaceId);
     if (parts[2] === "members") return this.members.delete(this.key(workspaceId, parts[3]));
+    if (parts[2] === "people") return this.people.delete(this.key(workspaceId, parts[3]));
     if (parts[2] === "debts" && parts.length === 4) return this.debts.delete(this.key(workspaceId, parts[3]));
     if (parts[2] === "debts" && parts[4] === "balance_snapshots") {
       return this.balanceSnapshots.delete(this.key(`${workspaceId}/${parts[3]}`, parts[5]));

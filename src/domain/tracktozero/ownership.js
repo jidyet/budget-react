@@ -16,11 +16,13 @@ export const effectiveOwnerType = (debt) => debt?.ownerType || (debt?.ownerId ? 
 // - Personal workspaces always default to the signed-in member - there is
 //   never a choice to make, and nothing the caller requests can override it.
 // - Household workspaces require an explicit choice: a verified member uid,
-//   "joint" (the household as a whole), or "unassigned" (decision deferred).
-//   A member uid that isn't in the real, active membership list is REJECTED,
-//   never silently accepted or invented - this is what stops arbitrary
-//   parser text (or any other unverified string) from becoming an owner.
-export const resolveDebtOwnership = ({ workspaceType, members = [], actorId, requested = {} } = {}) => {
+//   a verified WorkspacePerson id (DATA-HH1 - a financial identity that may
+//   have no TrackToZero account at all), "joint" (the household as a
+//   whole), or "unassigned" (decision deferred). A member uid or person id
+//   that isn't in the real, active list is REJECTED, never silently
+//   accepted or invented - this is what stops arbitrary parser text (or any
+//   other unverified string) from becoming an owner.
+export const resolveDebtOwnership = ({ workspaceType, members = [], people = [], actorId, requested = {} } = {}) => {
   if (workspaceType === "personal") {
     const self = members.find((member) => member.uid === actorId);
     return { ownerType: "member", ownerId: actorId, ownerLabel: self?.displayName || "You" };
@@ -40,6 +42,15 @@ export const resolveDebtOwnership = ({ workspaceType, members = [], actorId, req
     return { ownerType: "member", ownerId: memberId, ownerLabel: match.displayName || memberId };
   }
 
+  if (ownerType === "person") {
+    const personId = String(requested.ownerId || "").trim();
+    const match = personId ? people.find((person) => person.id === personId && person.status !== "merged") : null;
+    if (!match) {
+      throw new Error("Owner must be a verified household person. Choose Joint/Household or Unassigned instead.");
+    }
+    return { ownerType: "person", ownerId: personId, ownerLabel: match.displayName || personId };
+  }
+
   if (ownerType === "joint") {
     return { ownerType: "joint", ownerId: "", ownerLabel: "Joint / Household" };
   }
@@ -47,39 +58,41 @@ export const resolveDebtOwnership = ({ workspaceType, members = [], actorId, req
   return { ownerType: "unassigned", ownerId: "", ownerLabel: "Unassigned" };
 };
 
-const nameTokens = (value) => String(value || "")
+export const nameTokens = (value) => String(value || "")
   .toLowerCase()
   .split(/[^a-z]+/)
   .filter((token) => token.length >= 2);
+
+// Exact token equality (never fuzzy/substring matching) between a raw name
+// and a candidate's display name - shared by matchMemberByName and
+// DATA-HH1's person-matching engine so both use the identical definition of
+// "confident enough to pre-fill." A single-token candidate (e.g. seeded/
+// invited as just "Baba") matches if that token equals either the raw
+// name's first or last token; a multi-token candidate matches on first+last
+// (ignoring middle names/initials, so "Kristina K Davis" still matches a
+// candidate named "Kristina Davis").
+export const namesTokenMatch = (rawName, candidateName) => {
+  const rawTokens = nameTokens(rawName);
+  if (rawTokens.length < 2) return false;
+  const first = rawTokens[0];
+  const last = rawTokens.at(-1);
+  const candidateTokens = nameTokens(candidateName);
+  if (candidateTokens.length === 1) return candidateTokens[0] === first || candidateTokens[0] === last;
+  if (candidateTokens.length >= 2) return candidateTokens[0] === first && candidateTokens.at(-1) === last;
+  return false;
+};
 
 // A convenience pre-fill only - never authoritative on its own. When a
 // statement parser's raw ownerSuggestion (e.g. a cardholder name printed on
 // a PDF) matches a REAL verified household member, the import review UI can
 // pre-select that member instead of forcing a manual pick every time.
-// Household member profiles are frequently just a first name (e.g. seeded/
-// invited as "Baba"), so a single-token member matches if that token equals
-// either the suggestion's first or last token; a multi-token member matches
-// on first+last (ignoring middle names/initials, so "Kristina K Davis" still
-// matches a member profile of "Kristina Davis"). Either way this is exact
-// token equality, never fuzzy/substring matching, to avoid matching two
-// different people. Whatever this returns is still just a starting
-// selection: resolveDebtOwnership re-verifies against the real membership
-// list before anything is saved, so a false match here can never itself
-// grant ownership - the human still reviews and confirms (or changes) it
-// before the import is committed.
-export const matchMemberByName = (suggestion, members = []) => {
-  const suggestionTokens = nameTokens(suggestion);
-  if (suggestionTokens.length < 2) return null;
-  const first = suggestionTokens[0];
-  const last = suggestionTokens.at(-1);
-  return members.find((member) => {
-    if (member.status === "removed") return false;
-    const memberTokens = nameTokens(member.displayName);
-    if (memberTokens.length === 1) return memberTokens[0] === first || memberTokens[0] === last;
-    if (memberTokens.length >= 2) return memberTokens[0] === first && memberTokens.at(-1) === last;
-    return false;
-  }) || null;
-};
+// Whatever this returns is still just a starting selection:
+// resolveDebtOwnership re-verifies against the real membership list before
+// anything is saved, so a false match here can never itself grant
+// ownership - the human still reviews and confirms (or changes) it before
+// the import is committed.
+export const matchMemberByName = (suggestion, members = []) =>
+  members.find((member) => member.status !== "removed" && namesTokenMatch(suggestion, member.displayName)) || null;
 
 // ── Balance truth (UX-0) ──────────────────────────────────────────────────
 //

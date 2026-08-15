@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import ReviewCard from "./ReviewCard.jsx";
 import ReviewCenter from "./ReviewCenter.jsx";
 import ReviewDetail from "./ReviewDetail.jsx";
+import ReviewSessionCard from "./ReviewSessionCard.jsx";
 import { buildPreSaveSummary } from "./reviewSessionSummary.js";
 import ResolvedHistory from "./ResolvedHistory.jsx";
 import HomeQuickCheck from "./HomeQuickCheck.jsx";
@@ -440,5 +441,70 @@ describe("REVIEW-1C: buildPreSaveSummary - truthful pre-save categorization", ()
     const staged = { [missingApr.id]: { apr: { action: "resolveApr", args: { apr: 0.05 } } } };
     const summaryAfterStaging = buildPreSaveSummary([missingApr], staged);
     expect(summaryAfterStaging.missingAprCount).toBe(0);
+  });
+});
+
+describe("DATA-HH1: OwnerSubSection (ReviewSessionCard)", () => {
+  const ownerCandidate = (overrides = {}) => ({
+    candidateId: "owner-cand-1",
+    accountName: "Discover Card",
+    currentBalance: 1200,
+    statementDate: "2026-08-10",
+    aprStatus: "known",
+    apr: 0.05,
+    minimumPayment: 40,
+    dueDate: "2026-08-05",
+    ownerType: "unassigned",
+    ownerId: "",
+    evidence: {},
+    ...overrides,
+  });
+  const ownerItem = (candidateOverrides = {}) =>
+    toReviewItem({ batch: batch({ id: "owner-batch" }), candidate: ownerCandidate(candidateOverrides) });
+
+  const members = [{ uid: "m1", displayName: "Kristina Davis", status: "active" }];
+  const people = [{ id: "p1", displayName: "Babajide Yusuf", status: "active", aliases: [] }];
+
+  it("offers real members AND existing household people as owner choices", () => {
+    const html = render(h(ReviewSessionCard, {
+      item: ownerItem({ ownerSuggestion: "Someone Else Entirely" }), isHousehold: true, members, people, debts: [], latestSnapshotsByDebt: {},
+      onStage: () => {}, onLeaveForLater: () => {},
+    }));
+    expect(html).toContain("Kristina Davis");
+    expect(html).toContain("Babajide Yusuf");
+    expect(html).toContain("Joint / Household");
+    expect(html).toContain("Unassigned");
+  });
+
+  it("shows an exact-match suggestion for a name that matches an existing household person", () => {
+    const html = render(h(ReviewSessionCard, {
+      item: ownerItem({ ownerSuggestion: "Babajide Yusuf" }), isHousehold: true, members, people, debts: [], latestSnapshotsByDebt: {},
+      onStage: () => {}, onLeaveForLater: () => {},
+    }));
+    expect(html).toContain("Suggested owner: Babajide Yusuf");
+  });
+
+  it("shows a possible-match suggestion (initial + surname) as a confirmation prompt, never auto-selected", () => {
+    const html = render(h(ReviewSessionCard, {
+      item: ownerItem({ ownerSuggestion: "B. Yusuf" }), isHousehold: true, members, people, debts: [], latestSnapshotsByDebt: {},
+      onStage: () => {}, onLeaveForLater: () => {},
+    }));
+    expect(html).toContain("Possible match");
+    expect(html).toContain("Use Babajide Yusuf");
+  });
+
+  it("offers to add a genuinely unmatched name as a new household person, and never without an onCreatePerson handler", () => {
+    const html = render(h(ReviewSessionCard, {
+      item: ownerItem({ ownerSuggestion: "Jordan Taylor" }), isHousehold: true, members, people, debts: [], latestSnapshotsByDebt: {},
+      onStage: () => {}, onLeaveForLater: () => {}, onCreatePerson: async () => people[0],
+    }));
+    expect(html).toContain("couldn&#x27;t match");
+    expect(html).toContain("Add &quot;Jordan Taylor&quot; as a new household person");
+
+    const withoutHandler = render(h(ReviewSessionCard, {
+      item: ownerItem({ ownerSuggestion: "Jordan Taylor" }), isHousehold: true, members, people, debts: [], latestSnapshotsByDebt: {},
+      onStage: () => {}, onLeaveForLater: () => {},
+    }));
+    expect(withoutHandler).not.toContain("new household person");
   });
 });

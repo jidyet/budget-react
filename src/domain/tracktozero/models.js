@@ -7,6 +7,8 @@ import {
   IMPORT_CANDIDATE_DECISIONS,
   MEMBER_ROLES,
   OWNER_TYPES,
+  PERSON_KINDS,
+  PERSON_STATUSES,
   PLAN_STATUSES,
   PLAN_STRATEGIES,
   VERSION_REASONS,
@@ -56,6 +58,33 @@ export const createWorkspaceMembership = (input = {}) => {
   return deepFreezeClone(membership);
 };
 
+// DATA-HH1: a Workspace-scoped financial identity for a person referenced by
+// imported/entered data who may or may not have a TrackToZero account. This
+// is deliberately NOT an authenticated account, NOT a WorkspaceMembership,
+// and grants zero access to anything - see personIdentity.js and
+// ownership.js's DATA-HH1 comments for the full contract. Every persisted
+// WorkspacePerson is kind "imported_person"; "authenticated_member" is only
+// ever a classification value the matching engine/owner-display resolver
+// returns for a real WorkspaceMembership, never its own stored document.
+export const createWorkspacePerson = (input = {}) => deepFreezeClone({
+  id: requireString(input.id, "person.id"),
+  workspaceId: requireString(input.workspaceId, "person.workspaceId"),
+  displayName: requireString(input.displayName, "person.displayName"),
+  normalizedName: requireString(input.normalizedName, "person.normalizedName"),
+  aliases: Array.isArray(input.aliases) ? [...new Set(input.aliases.map((alias) => String(alias || "").trim()).filter(Boolean))] : [],
+  kind: requireEnum(input.kind || "imported_person", PERSON_KINDS, "person.kind"),
+  status: requireEnum(input.status || "active", PERSON_STATUSES, "person.status"),
+  // Set only once this person is later explicitly, securely connected to a
+  // real WorkspaceMembership (UX-6) - DATA-HH1 never sets this itself.
+  workspaceMembershipId: optionalString(input.workspaceMembershipId),
+  mergedIntoPersonId: optionalString(input.mergedIntoPersonId),
+  source: optionalString(input.source) || "import_confirmed",
+  createdAt: nowOr(input.createdAt),
+  createdBy: requireString(input.createdBy, "person.createdBy"),
+  updatedAt: optionalTimestamp(input.updatedAt),
+  updatedBy: optionalString(input.updatedBy),
+});
+
 export const createDebt = (input = {}) => {
   const debtType = optionalString(input.debtType) || "other";
   const aprStatus = requireEnum(input.aprStatus || "unknown", APR_STATUSES, "debt.aprStatus");
@@ -104,11 +133,12 @@ export const createDebt = (input = {}) => {
   if (debt.dueDay !== null && (!Number.isInteger(debt.dueDay) || debt.dueDay < 1 || debt.dueDay > 31)) {
     throw new Error("debt.dueDay must be 1-31");
   }
-  if (debt.ownerType === "member" && !debt.ownerId) {
-    throw new Error("debt.ownerId is required when ownerType is \"member\"");
+  const ownerIdRequired = debt.ownerType === "member" || debt.ownerType === "person";
+  if (ownerIdRequired && !debt.ownerId) {
+    throw new Error(`debt.ownerId is required when ownerType is "${debt.ownerType}"`);
   }
-  if (debt.ownerType !== "member" && debt.ownerId) {
-    throw new Error("debt.ownerId must be empty unless ownerType is \"member\"");
+  if (!ownerIdRequired && debt.ownerId) {
+    throw new Error("debt.ownerId must be empty unless ownerType is \"member\" or \"person\"");
   }
   return deepFreezeClone(debt);
 };

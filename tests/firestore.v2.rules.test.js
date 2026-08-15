@@ -16,6 +16,10 @@ const snapshot = (workspaceId = "w1", debtId = "d1", uid = "contrib") => ({ id: 
 const plan = (workspaceId = "w1", id = "plan1") => ({ id, workspaceId, status: "draft", activeVersionId: "", createdAt: now(), createdBy: "owner" });
 const version = (workspaceId = "w1", planId = "plan1", id = "v1") => ({ id, workspaceId, planId, versionNumber: 1, strategy: "avalanche", asOf: now(), startingDebtSnapshot: [], extraMonthlyPayment: 0, createdAt: now(), createdBy: "owner", createdBecause: "activation" });
 const invite = (workspaceId = "w1", id = "invite1", createdBy = "owner") => ({ id, workspaceId, email: "future@example.test", role: "viewer", status: "pending", createdAt: now(), createdBy });
+const person = (workspaceId = "w1", id = "person1", createdBy = "owner", displayName = "Babajide Yusuf") => ({
+  id, workspaceId, displayName, normalizedName: "babajide yusuf", aliases: [], kind: "imported_person", status: "active",
+  workspaceMembershipId: "", mergedIntoPersonId: "", source: "import_confirmed", createdAt: now(), createdBy,
+});
 
 async function seed(callback) {
   await testEnv.withSecurityRulesDisabled(async (context) => callback(context.firestore()));
@@ -156,4 +160,44 @@ test("payment and balance core fields cannot be mutated", async () => {
   await assertFails(admin.doc("workspaces/w1/debts/d1/balance_snapshots/s1").update({ balance: 10 }));
   await assertFails(admin.doc("workspaces/w1/debts/d1/balance_snapshots/s1").update({ observedAt: new Date("2026-02-01T00:00:00.000Z") }));
   await assertSucceeds(admin.doc("workspaces/w1/debts/d1/balance_snapshots/s1").update({ notes: "audited" }));
+});
+
+// DATA-HH1
+test("owner and admin can create/update household people; viewer can read but never write", async () => {
+  await seedWorkspace();
+  const owner = testEnv.authenticatedContext("owner").firestore();
+  const admin = testEnv.authenticatedContext("admin").firestore();
+  const viewer = testEnv.authenticatedContext("viewer").firestore();
+
+  await assertSucceeds(owner.doc("workspaces/w1/people/person1").set(person("w1", "person1", "owner")));
+  await assertSucceeds(admin.doc("workspaces/w1/people/person2").set(person("w1", "person2", "admin", "Kristina Davis")));
+  await assertSucceeds(admin.doc("workspaces/w1/people/person1").update({ workspaceId: "w1", id: "person1", aliases: ["Jide Yusuf"] }));
+
+  await assertSucceeds(viewer.doc("workspaces/w1/people/person1").get());
+  await assertFails(viewer.doc("workspaces/w1/people/person3").set(person("w1", "person3", "viewer")));
+  await assertFails(viewer.doc("workspaces/w1/people/person1").update({ workspaceId: "w1", id: "person1", aliases: ["Should fail"] }));
+});
+
+test("contributor can read but cannot create or edit household people (manageDebts-tier only)", async () => {
+  await seedWorkspace();
+  await seed(async (db) => { await db.doc("workspaces/w1/people/person1").set(person()); });
+  const contrib = testEnv.authenticatedContext("contrib").firestore();
+  await assertSucceeds(contrib.doc("workspaces/w1/people/person1").get());
+  await assertFails(contrib.doc("workspaces/w1/people/person4").set(person("w1", "person4", "contrib")));
+  await assertFails(contrib.doc("workspaces/w1/people/person1").update({ workspaceId: "w1", id: "person1", aliases: ["Should fail"] }));
+});
+
+test("non-members and unauthenticated users cannot read or write household people", async () => {
+  await seed(async (db) => { await db.doc("workspaces/w1/people/person1").set(person()); });
+  await assertFails(testEnv.unauthenticatedContext().firestore().doc("workspaces/w1/people/person1").get());
+  const outsider = testEnv.authenticatedContext("outsider").firestore();
+  await assertFails(outsider.doc("workspaces/w1/people/person1").get());
+  await assertFails(outsider.doc("workspaces/w1/people/person5").set(person("w1", "person5", "outsider")));
+});
+
+test("a person document from another workspace can never be forged into this one", async () => {
+  await seedWorkspace();
+  const owner = testEnv.authenticatedContext("owner").firestore();
+  // The path's workspaceId (w1) must match the document's own workspaceId field.
+  await assertFails(owner.doc("workspaces/w1/people/cross").set(person("w2", "cross", "owner")));
 });

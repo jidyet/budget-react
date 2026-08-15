@@ -96,7 +96,13 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
   const [showResolved, setShowResolved] = useState(true);
   const [tab, setTab] = useState("needsReview");
   const [cursorId, setCursorId] = useState(null);
+  // DATA-HH1: people created mid-session via "+ Add as a new household
+  // person" (see handleCreatePerson below) - merged with snapshot.people so
+  // a newly-created person is immediately selectable without waiting on a
+  // full workspace snapshot reload.
+  const [newlyCreatedPeople, setNewlyCreatedPeople] = useState([]);
   const isHousehold = snapshot.workspace.type === "household";
+  const people = [...(snapshot.people || []), ...newlyCreatedPeople.filter((person) => !(snapshot.people || []).some((existing) => existing.id === person.id))];
 
   const openItems = sortOpenReviewItems(reviewSnapshot?.openItems || []);
   const resolvedItems = reviewSnapshot?.resolvedItems || [];
@@ -139,6 +145,16 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
       if (!Object.keys(forItem).length) delete next[item.id];
       return next;
     });
+  };
+
+  // DATA-HH1: creating a household person never touches Debt/BalanceSnapshot/
+  // PaymentEvent/PlanVersion (Part 4) - it's safe to run immediately rather
+  // than staging it, exactly like the already-immediate "Leave for later"
+  // (Part 3/42 only gates AUTHORITATIVE financial mutation behind Save).
+  const handleCreatePerson = async (displayName) => {
+    const person = await service.createImportedPerson(workspaceId, { displayName });
+    setNewlyCreatedPeople((state) => (state.some((existing) => existing.id === person.id) ? state : [...state, person]));
+    return person;
   };
 
   const handleLeaveForLater = async (item) => {
@@ -276,11 +292,13 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
                     item={currentItem}
                     isHousehold={isHousehold}
                     members={snapshot.members}
+                    people={people}
                     debts={snapshot.debts}
                     latestSnapshotsByDebt={snapshot.latestSnapshotsByDebt}
                     stagedForItem={staged[currentItem.id] || {}}
                     onStage={(subtype, entry) => handleStage(currentItem, subtype, entry)}
                     onLeaveForLater={() => handleLeaveForLater(currentItem)}
+                    onCreatePerson={handleCreatePerson}
                     busy={saving}
                     resultMessage={itemResults[currentItem.id]?.message}
                     resultTone={itemResults[currentItem.id]?.tone}

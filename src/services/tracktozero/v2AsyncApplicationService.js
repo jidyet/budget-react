@@ -1,6 +1,7 @@
 import { ROLE_PERMISSIONS } from "../../domain/tracktozero/constants.js";
 import { createStartingDebtSnapshotItem } from "../../domain/tracktozero/models.js";
-import { isDebtNeedsReview, matchMemberByName, resolveDebtOwnership } from "../../domain/tracktozero/ownership.js";
+import { isDebtNeedsReview, resolveDebtOwnership } from "../../domain/tracktozero/ownership.js";
+import { findDuplicateMember, findDuplicatePerson, matchImportedOwnerToIdentity, normalizePersonName } from "../../domain/tracktozero/personIdentity.js";
 import { buildExpectedCheckpoints } from "../adapters/tracktozeroCalcAdapter.js";
 import { calculateWhatIfComparison } from "../calc/scenarioComparison.js";
 import {
@@ -193,15 +194,23 @@ export const createTrackToZeroV2AsyncAppService = ({
   const getWorkspaceContext = async (workspaceId) => {
     const workspace = await repository.getWorkspace(workspaceId);
     if (!workspace) throw new Error("Workspace not found");
-    const [membership, members] = await Promise.all([
+    const [membership, members, people] = await Promise.all([
       repository.getMembership(workspaceId, actorId),
       repository.listMemberships?.(workspaceId) || [],
+      repository.listWorkspacePersons?.(workspaceId) || [],
     ]);
     if (!membership || membership.status !== "active") throw new Error("You are not a member of this workspace.");
     return {
       workspace,
       membership,
       members,
+      // DATA-HH1: Workspace-scoped financial identities (see
+      // domain/tracktozero/personIdentity.js) - distinct from `members`,
+      // never implying an authenticated account or WorkspaceMembership.
+      // Loaded here, once per request, the same way `members` already is,
+      // so every call site that already destructures getWorkspaceContext's
+      // return gets `people` for free without a second round trip.
+      people,
       permissions: ROLE_PERMISSIONS[membership?.role] || ROLE_PERMISSIONS.viewer,
     };
   };
@@ -253,6 +262,7 @@ export const createTrackToZeroV2AsyncAppService = ({
     const portfolioSummary = deriveDebtPortfolioSummary({
       workspace: context.workspace,
       members: context.members,
+      people: context.people,
       debts,
       debtBalance,
     });
@@ -284,7 +294,7 @@ export const createTrackToZeroV2AsyncAppService = ({
 
   const createNewDebt = async (workspaceId, input) => {
     assertInteractive();
-    const { workspace, membership, members } = await getWorkspaceContext(workspaceId);
+    const { workspace, membership, members, people } = await getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "manageDebts")) throw new Error("Your role can view debts, but cannot add debt terms.");
     if (typeof repository.createDebtWithOpeningSnapshot !== "function") {
       throw new Error("Debt setup requires an opening balance snapshot.");
@@ -292,6 +302,7 @@ export const createTrackToZeroV2AsyncAppService = ({
     const ownership = resolveDebtOwnership({
       workspaceType: workspace.type,
       members,
+      people,
       actorId,
       requested: { ownerType: input.ownerType, ownerId: input.ownerId },
     });
@@ -450,19 +461,25 @@ export const createTrackToZeroV2AsyncAppService = ({
 
   const createImportBatch = async (workspaceId, { sourceType, sourceFilename = "", candidates = [], warnings = [], parserVersion = "1" } = {}) => {
     assertInteractive();
-    const { workspace, membership, members } = await getWorkspaceContext(workspaceId);
+    const { workspace, membership, members, people } = await getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot import debts into this workspace.");
     const batchId = id("import");
-    // Convenience pre-fill only: if the parser's raw ownerSuggestion matches a
-    // REAL verified household member by name, pre-select them instead of
-    // forcing a manual pick - the human still reviews/confirms (or changes)
-    // this before anything is committed, and resolveDebtOwnership re-verifies
-    // it against the real membership list regardless at commit time.
+    // Convenience pre-fill only: if the parser's raw ownerSuggestion is an
+    // EXACT match (DATA-HH1's matching engine - never "strong"/"possible",
+    // those stay unassigned for the human to explicitly confirm in Review)
+    // against a REAL verified member or an existing household person,
+    // pre-select them instead of forcing a manual pick - the human still
+    // reviews/confirms (or changes) this before anything is committed, and
+    // resolveDebtOwnership re-verifies it against the live member/person
+    // lists regardless at commit time.
     const withOwnerSuggestions = workspace.type === "household"
       ? candidates.map((candidate) => {
           if (candidate.ownerType && candidate.ownerType !== "unassigned") return candidate;
-          const match = matchMemberByName(candidate.ownerSuggestion, members);
-          return match ? { ...candidate, ownerType: "member", ownerId: match.uid } : candidate;
+          const match = matchImportedOwnerToIdentity({ rawName: candidate.ownerSuggestion, members, people });
+          if (match.status !== "exact") return candidate;
+          return match.kind === "member"
+            ? { ...candidate, ownerType: "member", ownerId: match.membershipUid }
+            : { ...candidate, ownerType: "person", ownerId: match.personId };
         })
       : candidates;
     const debts = await repository.listDebts(workspaceId);
@@ -574,7 +591,7 @@ export const createTrackToZeroV2AsyncAppService = ({
 
   const commitImportBatch = async (workspaceId, batchId) => {
     assertInteractive();
-    const { workspace, membership, members } = await getWorkspaceContext(workspaceId);
+    const { workspace, membership, members, people } = await getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot commit this import.");
     const batch = await repository.getImportBatch(workspaceId, batchId);
     if (!batch) throw new Error("Import batch not found");
@@ -628,6 +645,7 @@ export const createTrackToZeroV2AsyncAppService = ({
         const ownership = resolveDebtOwnership({
           workspaceType: workspace.type,
           members,
+          people,
           actorId,
           requested: { ownerType: candidate.ownerType, ownerId: candidate.ownerId },
         });
@@ -799,8 +817,10 @@ export const createTrackToZeroV2AsyncAppService = ({
     resolveMissingInformation(workspaceId, batchId, candidateId, { fields: { dueDay: Number(dueDay) } });
 
   // Owner resolution (Part 19) - authoritative ownership is restricted to a
-  // verified workspace member, Joint/Household, or Unassigned. Parser text
-  // (ownerSuggestion) is never accepted here as a value in its own right.
+  // verified workspace member, a verified household person (DATA-HH1 -
+  // financial-data evidence only, never proof of an account), Joint/
+  // Household, or Unassigned. Parser text (ownerSuggestion) is never
+  // accepted here as a value in its own right.
   const resolveOwner = async (workspaceId, batchId, candidateId, { ownerType, ownerId = "" } = {}) => {
     if (!OWNER_TYPES.includes(ownerType)) throw new Error("Unsupported owner type.");
     if (ownerType === "member") {
@@ -809,7 +829,128 @@ export const createTrackToZeroV2AsyncAppService = ({
         throw new Error("Owner must be a verified workspace member.");
       }
     }
-    return resolveMissingInformation(workspaceId, batchId, candidateId, { fields: { ownerType, ownerId: ownerType === "member" ? ownerId : "" } });
+    if (ownerType === "person") {
+      const { people } = await getWorkspaceContext(workspaceId);
+      if (!people.some((person) => person.id === ownerId && person.status !== "merged")) {
+        throw new Error("Owner must be a verified household person.");
+      }
+    }
+    const ownerIdToStore = ownerType === "member" || ownerType === "person" ? ownerId : "";
+    return resolveMissingInformation(workspaceId, batchId, candidateId, { fields: { ownerType, ownerId: ownerIdToStore } });
+  };
+
+  // ── DATA-HH1: household financial-person identities ─────────────────────
+  // listWorkspacePersons/createImportedPerson/confirmAlias/
+  // mergeWorkspacePersons are the ONE place a WorkspacePerson is read or
+  // written - UI code never touches the repository's people collection
+  // directly (Part 30). None of these ever create an Auth account, a
+  // WorkspaceMembership, or send an invitation (Part 25/26) - they only
+  // establish/adjust a Workspace-scoped financial identity that Debt
+  // ownership can reference without requiring an account.
+  const listWorkspacePersons = async (workspaceId) => {
+    const { people } = await getWorkspaceContext(workspaceId);
+    return people;
+  };
+
+  const createImportedPerson = async (workspaceId, { displayName } = {}) => {
+    assertInteractive();
+    const { membership, members, people } = await getWorkspaceContext(workspaceId);
+    if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot add household people.");
+    const name = String(displayName || "").trim();
+    if (!name) throw new Error("A name is required to add a household person.");
+    // Duplicate guard (Part 5/23) - never shadows an existing verified
+    // member with a competing "person" identity for the same real person.
+    const duplicateMember = findDuplicateMember(name, members);
+    if (duplicateMember) {
+      throw new Error(`${duplicateMember.displayName || "This person"} is already a workspace member - choose them instead of adding a new person.`);
+    }
+    // Exact-normalized duplicate people are never created twice; creating
+    // the "same" person again is idempotent and just returns the existing one.
+    const duplicatePerson = findDuplicatePerson(name, people);
+    if (duplicatePerson) return duplicatePerson;
+    return repository.saveWorkspacePerson({
+      id: id("person"),
+      workspaceId,
+      displayName: name,
+      normalizedName: normalizePersonName(name),
+      aliases: [],
+      kind: "imported_person",
+      status: "active",
+      source: "import_confirmed",
+      createdAt: asOf,
+      createdBy: actorId,
+    });
+  };
+
+  // A confirmed alias is the ONLY way a nickname/shortened name (e.g. "Jide"
+  // for "Babajide Yusuf") becomes an automatic future match (Part 8) - never
+  // inferred, always an explicit human decision recorded here.
+  const confirmAlias = async (workspaceId, personId, aliasRawName) => {
+    assertInteractive();
+    const { membership, people } = await getWorkspaceContext(workspaceId);
+    if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot edit household people.");
+    const person = people.find((candidate) => candidate.id === personId && candidate.status !== "merged");
+    if (!person) throw new Error("Household person not found in this workspace.");
+    const alias = String(aliasRawName || "").trim();
+    if (!alias) throw new Error("An alias name is required.");
+    const normalizedAlias = normalizePersonName(alias);
+    if ((person.aliases || []).some((existing) => normalizePersonName(existing) === normalizedAlias)) return person;
+    return repository.saveWorkspacePerson({
+      ...person,
+      aliases: [...(person.aliases || []), alias],
+      updatedAt: asOf,
+      updatedBy: actorId,
+    });
+  };
+
+  // Safe domain support for resolving an accidental duplicate (Part 24) -
+  // reassigns every Debt owned by mergeFromPersonId to keepPersonId, merges
+  // aliases (including the merged-from person's own name, so it's still
+  // recognized on a future import), and marks the merged-from person
+  // terminal. Idempotent: merging an already-merged person a second time is
+  // a no-op, never a duplicate mutation or a confusing error on retry.
+  const mergeWorkspacePersons = async (workspaceId, { keepPersonId, mergeFromPersonId } = {}) => {
+    assertInteractive();
+    const { membership, people } = await getWorkspaceContext(workspaceId);
+    if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot merge household people.");
+    if (!keepPersonId || !mergeFromPersonId) throw new Error("Both a person to keep and a person to merge are required.");
+    if (keepPersonId === mergeFromPersonId) throw new Error("Cannot merge a person into themselves.");
+    const keepPerson = people.find((person) => person.id === keepPersonId && person.status !== "merged");
+    if (!keepPerson) throw new Error("Household person to keep was not found in this workspace.");
+    const mergeFromPerson = people.find((person) => person.id === mergeFromPersonId);
+    if (!mergeFromPerson) throw new Error("Household person to merge was not found in this workspace.");
+    if (mergeFromPerson.status === "merged") {
+      return { keepPerson, mergeFromPerson, reassignedDebtCount: 0, alreadyMerged: true };
+    }
+
+    const debts = await repository.listDebts(workspaceId);
+    const toReassign = debts.filter((debt) => debt.ownerType === "person" && debt.ownerId === mergeFromPersonId);
+    for (const debt of toReassign) {
+      await repository.saveDebt({
+        ...debt,
+        ownerId: keepPersonId,
+        ownerLabel: keepPerson.displayName,
+        updatedAt: asOf,
+        updatedBy: actorId,
+      });
+    }
+
+    const mergedAliases = [...new Set([...(keepPerson.aliases || []), ...(mergeFromPerson.aliases || []), mergeFromPerson.displayName])];
+    const savedKeepPerson = await repository.saveWorkspacePerson({
+      ...keepPerson,
+      aliases: mergedAliases,
+      updatedAt: asOf,
+      updatedBy: actorId,
+    });
+    const savedMergeFromPerson = await repository.saveWorkspacePerson({
+      ...mergeFromPerson,
+      status: "merged",
+      mergedIntoPersonId: keepPersonId,
+      updatedAt: asOf,
+      updatedBy: actorId,
+    });
+
+    return { keepPerson: savedKeepPerson, mergeFromPerson: savedMergeFromPerson, reassignedDebtCount: toReassign.length, alreadyMerged: false };
   };
 
   // Business-scope resolution (Part 20). "exclude" is terminal (dismissed,
@@ -1190,6 +1331,10 @@ export const createTrackToZeroV2AsyncAppService = ({
     resolveMinimumPayment,
     resolveDueDate,
     resolveOwner,
+    listWorkspacePersons,
+    createImportedPerson,
+    confirmAlias,
+    mergeWorkspacePersons,
     resolveBusinessScope,
     resolveDebtClassification,
     dismissDuplicate,

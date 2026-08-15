@@ -160,6 +160,24 @@ service cloud.firestore {
         allow delete: if isMigrationOperator(workspaceId);
       }
 
+      // DATA-HH1: a Workspace-scoped financial identity for a person who may
+      // have no TrackToZero account at all - never an Auth user, never a
+      // WorkspaceMembership, gates identically to import_batches/debts
+      // (same manageDebts-tier role - createImportedPerson/confirmAlias/
+      // mergeWorkspacePersons all require it in the application service).
+      // No delete: a merge sets status "merged" via update, it never
+      // removes the document, so Debt.ownerId references never dangle.
+      match /people/{personId} {
+        allow read: if isViewerPlus(workspaceId);
+        allow create: if isAdminPlus(workspaceId)
+          && request.resource.data.workspaceId == workspaceId
+          && request.resource.data.id == personId
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if isAdminPlus(workspaceId)
+          && request.resource.data.workspaceId == workspaceId
+          && request.resource.data.id == personId;
+      }
+
       match /debts/{debtId} {
         allow read: if isViewerPlus(workspaceId);
         allow create: if isAdminPlus(workspaceId)

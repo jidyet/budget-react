@@ -22,6 +22,7 @@ export const fromFirestoreValue = (value) => {
 export const TIMESTAMP_FIELDS = {
   workspace: ["createdAt", "updatedAt"],
   member: ["createdAt", "updatedAt"],
+  person: ["createdAt", "updatedAt"],
   debt: ["createdAt", "updatedAt", "paidOffAt"],
   plan: ["createdAt", "activatedAt", "completedAt", "updatedAt"],
   version: ["createdAt", "asOf"],

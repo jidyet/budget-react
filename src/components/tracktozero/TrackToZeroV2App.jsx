@@ -17,7 +17,7 @@ import QaHarnessControls from "./layout/QaHarnessControls.jsx";
 import StatusBadge from "./ui/StatusBadge.jsx";
 import ReviewCenter from "./review/ReviewCenter.jsx";
 import HomeCommandCenter from "./home/HomeCommandCenter.jsx";
-import PlanHub from "./plan/PlanHub.jsx";
+import PlanSection from "./plan/PlanSection.jsx";
 import { deriveDebtPortfolioView } from "./debtPortfolioView.js";
 import { formatMoney as money, formatPercent as percent } from "./formatting.js";
 const todayInputValue = () => new Date().toISOString().slice(0, 10);
@@ -976,38 +976,7 @@ function FirstPlanBuilder({ snapshot, service, refresh, runAction, writeState, c
 }
 
 function Plan({ snapshot, service, refresh, runAction, writeState }) {
-  const canPlan = snapshot.permissions.managePlans && snapshot.mode !== "legacy_preview";
-  const active = snapshot.activeContext;
-  return (
-    <>
-      <Section title={active?.plan ? "Active payoff plan" : "No active payoff plan"} eyebrow="Plan">
-        {active?.version ? (
-          <div style={styles.grid}>
-            <p><strong>Strategy:</strong> {active.version.strategy}</p>
-            <p><strong>Extra monthly:</strong> {money(active.version.extraMonthlyPayment)}</p>
-            <p><strong>Current version:</strong> {active.version.versionNumber}</p>
-            <p><strong>Estimated $0 date:</strong> {snapshot.projectedZeroDate}</p>
-          </div>
-        ) : <p>Create a payoff plan to see target order, milestones, and status.</p>}
-        {!!snapshot.warnings.length && <ul>{snapshot.warnings.map((warning) => <li key={`${warning.code}-${warning.debtId}`}>{warning.severity}: {warning.message}</li>)}</ul>}
-      </Section>
-      <Section title="Payoff queue" eyebrow="Who's being paid off, and in what order">
-        <ol style={{ display: "grid", gap: 10, paddingLeft: 22 }}>
-          {snapshot.payoffQueue.map((debt) => (
-            <li key={debt.id} style={{ paddingLeft: 6 }}>
-              <strong>{debt.name}</strong> · {money(snapshot.latestSnapshotsByDebt[debt.id]?.balance ?? debt.currentBalance)} · {debt.aprStatus === "unknown" ? "Unknown APR" : percent(debt.apr)}
-              <DebtBadges debt={debt} isTarget={snapshot.targetDebt?.id === debt.id} isHousehold={snapshot.workspace.type === "household"} />
-            </li>
-          ))}
-        </ol>
-      </Section>
-      {!active?.version ? (
-        <FirstPlanBuilder snapshot={snapshot} service={service} refresh={refresh} runAction={runAction} writeState={writeState} canPlan={canPlan} />
-      ) : (
-        <PlanHub snapshot={snapshot} service={service} refresh={refresh} runAction={runAction} writeState={writeState} />
-      )}
-    </>
-  );
+  return <PlanSection snapshot={snapshot} service={service} refresh={refresh} runAction={runAction} writeState={writeState} />;
 }
 
 function MigrationPanel() {
@@ -1301,6 +1270,31 @@ export default function TrackToZeroV2App() {
     };
   }, [refresh, refreshReview, workspaceId]);
 
+  // UX-4.1: the top-level tab was never synced with the URL, so a fresh
+  // load or refresh at /plan/<destination> silently rendered Home instead
+  // (tab defaults to "home" and never reads the URL) - PlanSection's own
+  // pushState-based sub-routing only ever worked once you were ALREADY on
+  // the Plan tab by clicking through the nav. This keeps `tab` and the URL
+  // in agreement both ways: on first load/refresh, and on Back/Forward.
+  // Only Plan has real distinct URLs today, so leaving Plan for any other
+  // tab resets the URL to "/" rather than inventing routes the rest of the
+  // app doesn't have yet.
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const syncTabFromLocation = () => setTab(window.location.pathname.startsWith("/plan") ? "plan" : "home");
+    syncTabFromLocation();
+    window.addEventListener("popstate", syncTabFromLocation);
+    return () => window.removeEventListener("popstate", syncTabFromLocation);
+  }, []);
+
+  const navigateTab = (nextTab) => {
+    setTab(nextTab);
+    if (typeof window === "undefined") return;
+    const onPlanPath = window.location.pathname.startsWith("/plan");
+    if (nextTab === "plan" && !onPlanPath) window.history.pushState({}, "", "/plan/my-plan");
+    else if (nextTab !== "plan" && onPlanPath) window.history.pushState({}, "", "/");
+  };
+
   const snapshot = runtimeState.snapshot;
   const workspaces = runtimeState.workspaces;
   const productionReady = getFirebaseStatus().configured && getFirebaseConfig().projectId === "budgetapp-c9306";
@@ -1366,11 +1360,11 @@ export default function TrackToZeroV2App() {
     repositoryMode: runtime.mode,
     snapshotMode: snapshot.mode,
     activeTab: tab,
-    onSelectTab: setTab,
+    onSelectTab: navigateTab,
     userName: snapshot.membership?.displayName || authState.user?.displayName || "",
     userEmail: authState.user?.email || "",
     userRole: snapshot.membership?.role || "viewer",
-    onGoToSettings: () => setTab("settings"),
+    onGoToSettings: () => navigateTab("settings"),
     onSignOut: usesRealAuthUi ? activeLogout : null,
     // REVIEW-1C Part 32: the nav badge represents work that genuinely still
     // needs the user's attention, not every open review - an item the user
@@ -1405,7 +1399,7 @@ export default function TrackToZeroV2App() {
             {writeState.error || writeState.success}
           </div>
         )}
-        {tab === "home" && <Home snapshot={snapshot} scenario={scenario} reviewSnapshot={reviewState.snapshot} onGoToPlan={() => setTab("plan")} onGoToReview={() => setTab("review")} onScenario={(extra) => runAction("preview scenario", async () => {
+        {tab === "home" && <Home snapshot={snapshot} scenario={scenario} reviewSnapshot={reviewState.snapshot} onGoToPlan={() => navigateTab("plan")} onGoToReview={() => navigateTab("review")} onScenario={(extra) => runAction("preview scenario", async () => {
           setScenario(await service.previewScenario(workspaceId, { extraMonthlyPayment: extra }));
         }, { write: false })} />}
         {tab === "review" && (

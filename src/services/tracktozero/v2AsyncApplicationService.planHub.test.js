@@ -9,6 +9,49 @@ const makeService = (actorId = "seed-owner") => {
   return { repository, service };
 };
 
+describe("UX-4.1: applyReforecast refreshes startingDebtSnapshot", () => {
+  it("a debt added after activation joins the payoff queue once the plan is reforecasted, not just once but on every subsequent reforecast too", async () => {
+    const { repository, service } = makeService();
+    const before = await service.getWorkspaceSnapshot("household-seed");
+    expect(before.payoffQueue.some((debt) => debt.id === "new-debt")).toBe(false);
+
+    repository.saveDebt({
+      id: "new-debt", workspaceId: "household-seed", name: "New Store Card", debtType: "credit_card",
+      status: "active", currentBalance: 300, minimumRequiredPayment: 20, aprStatus: "known", apr: 0.18,
+      ownerId: "seed-owner", ownerLabel: "Jidye", includedInCorePayoffPlan: true,
+      createdAt: V2_TEST_NOW, createdBy: "seed-owner",
+    });
+
+    const stillMissing = await service.getWorkspaceSnapshot("household-seed");
+    expect(stillMissing.payoffQueue.some((debt) => debt.id === "new-debt")).toBe(false);
+
+    await service.applyReforecast("household-seed", { extraMonthlyPayment: 250 });
+    const afterReforecast = await service.getWorkspaceSnapshot("household-seed");
+    expect(afterReforecast.payoffQueue.some((debt) => debt.id === "new-debt")).toBe(true);
+    expect(afterReforecast.activeContext.version.extraMonthlyPayment).toBe(250);
+  });
+
+  it("a debt marked excluded from the core plan (e.g. a mortgage) never joins the queue, even after reforecasting", async () => {
+    const { repository, service } = makeService();
+    repository.saveDebt({
+      id: "mortgage-debt", workspaceId: "household-seed", name: "Family Mortgage", debtType: "mortgage",
+      status: "active", currentBalance: 250000, minimumRequiredPayment: 1800, aprStatus: "known", apr: 0.062,
+      ownerId: "seed-owner", ownerLabel: "Jidye", includedInCorePayoffPlan: false,
+      createdAt: V2_TEST_NOW, createdBy: "seed-owner",
+    });
+    await service.applyReforecast("household-seed", { extraMonthlyPayment: 220 });
+    const snapshot = await service.getWorkspaceSnapshot("household-seed");
+    expect(snapshot.payoffQueue.some((debt) => debt.id === "mortgage-debt")).toBe(false);
+  });
+
+  it("preserves the prior PlanVersion's own startingDebtSnapshot untouched (history stays immutable)", async () => {
+    const { repository, service } = makeService();
+    const priorVersion = repository.getPlanVersion("household-seed", "household-plan", "household-version-1");
+    await service.applyReforecast("household-seed", { extraMonthlyPayment: 210 });
+    expect(repository.getPlanVersion("household-seed", "household-plan", "household-version-1")).toEqual(priorVersion);
+  });
+});
+
 describe("UX-4: compareStrategies", () => {
   it("previews both Snowball and Avalanche read-only, against the same live debts/extra baseline", async () => {
     const { repository, service } = makeService();
@@ -91,6 +134,25 @@ describe("UX-4: previewCustomTarget", () => {
     const planBefore = repository.getPlanVersion("household-seed", "household-plan", "household-version-1");
     await service.previewCustomTarget("household-seed", { targetDebtId: "household-priceline" });
     expect(repository.getPlanVersion("household-seed", "household-plan", "household-version-1")).toEqual(planBefore);
+  });
+
+  it("defaults extraMonthlyPayment to the active plan's own extra when no override is given (unchanged pre-existing behavior)", async () => {
+    const { service } = makeService();
+    const result = await service.previewCustomTarget("household-seed", { targetDebtId: "household-priceline" });
+    expect(result.custom.extraMonthlyPayment).toBe(200);
+    expect(result.baseline.extraMonthlyPayment).toBe(200);
+  });
+
+  it("UX-4.1: honors an explicit extraMonthlyPayment override, so a targeted What-If preview works even with no active plan", async () => {
+    const { repository } = makeService("solo-uid");
+    repository.saveWorkspace({ id: "no-plan-ws3", type: "household", status: "active", createdAt: V2_TEST_NOW, createdBy: "solo-uid" });
+    repository.saveMembership({ workspaceId: "no-plan-ws3", uid: "solo-uid", role: "owner", status: "active", displayName: "Solo", createdAt: V2_TEST_NOW });
+    repository.saveDebt({ id: "solo-debt", workspaceId: "no-plan-ws3", name: "Card", currentBalance: 500, minimumRequiredPayment: 25, aprStatus: "known", apr: 0.2, includedInCorePayoffPlan: true, createdAt: V2_TEST_NOW, createdBy: "solo-uid" });
+    const service = createTrackToZeroV2AsyncAppService({ repository, actorId: "solo-uid", asOf: V2_TEST_NOW });
+    const result = await service.previewCustomTarget("no-plan-ws3", { targetDebtId: "solo-debt", extraMonthlyPayment: 300 });
+    expect(result.custom.extraMonthlyPayment).toBe(300);
+    expect(result.baseline.extraMonthlyPayment).toBe(300);
+    expect(result.custom.payoffOrder[0].id).toBe("solo-debt");
   });
 });
 

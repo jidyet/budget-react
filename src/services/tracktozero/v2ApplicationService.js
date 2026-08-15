@@ -511,8 +511,16 @@ export const createTrackToZeroV2AppService = ({
     if (!hasPermission(membership, "managePlans")) throw new Error("Your role cannot reforecast payoff plans.");
     const snapshot = getWorkspaceSnapshot(workspaceId);
     if (!snapshot.activeContext?.plan || !snapshot.activeContext?.version) throw new Error("No active plan to reforecast");
+    // UX-4.1 fix (kept in parity with the async service's applyReforecast):
+    // re-derive startingDebtSnapshot from currently-eligible debts on every
+    // reforecast, instead of carrying the old version's frozen snapshot
+    // forward unchanged - otherwise a debt added after activation could
+    // never actually join the plan no matter how many times it was
+    // reforecasted.
+    const included = snapshot.debts.filter((debt) => debt.includedInCorePayoffPlan !== false && debt.status === "active");
     const nextVersion = repository.savePlanVersion({
       ...snapshot.activeContext.version,
+      startingDebtSnapshot: included.map(createStartingDebtSnapshotItem),
       ...overrides,
       id: id("version"),
       versionNumber: Number(snapshot.activeContext.version.versionNumber || 1) + 1,

@@ -1279,8 +1279,19 @@ export const createTrackToZeroV2AsyncAppService = ({
     if (!hasPermission(membership, "managePlans")) throw new Error("Your role cannot reforecast payoff plans.");
     const snapshot = await getWorkspaceSnapshot(workspaceId);
     if (!snapshot.activeContext?.plan || !snapshot.activeContext?.version) throw new Error("No active plan to reforecast");
+    // UX-4.1 fix: a reforecast is a fresh snapshot of the plan's basis, not
+    // just its payment/strategy - re-derive startingDebtSnapshot from the
+    // debts that are eligible RIGHT NOW (the same rule createDraftPlan uses),
+    // so a debt added since the last activation/reforecast actually joins
+    // the plan instead of silently staying excluded forever. Previously this
+    // spread the OLD version's frozen snapshot forward unchanged, so "just
+    // reforecast to include it" was a false promise - a newly added debt
+    // never actually joined the payoff queue no matter how many times you
+    // reforecasted.
+    const included = snapshot.debts.filter((debt) => debt.includedInCorePayoffPlan !== false && debt.status === "active");
     const nextVersion = {
       ...snapshot.activeContext.version,
+      startingDebtSnapshot: included.map(createStartingDebtSnapshotItem),
       ...overrides,
       id: id("version"),
       versionNumber: Number(snapshot.activeContext.version.versionNumber || 1) + 1,
@@ -1391,13 +1402,19 @@ export const createTrackToZeroV2AsyncAppService = ({
   // Avalanche - "custom" is a preview-only pseudo-strategy payoffEngine.js
   // understands (see orderPayoffTargets) but PLAN_STRATEGIES never accepts,
   // so it structurally can never be persisted as an activatable strategy.
-  const previewCustomTarget = async (workspaceId, { targetDebtId } = {}) => {
+  // extraMonthlyPayment is optional - when omitted this defaults to the
+  // active plan's own extra (or 0 with none), exactly as before. When given
+  // (e.g. What If's "Add money every month" mode scoped to one debt), the
+  // preview honestly reflects a NEW hypothetical payment amount, not just a
+  // reordering at the existing one - still zero-write, still never
+  // presented as Snowball/Avalanche.
+  const previewCustomTarget = async (workspaceId, { targetDebtId, extraMonthlyPayment: extraOverride } = {}) => {
     const snapshot = await getWorkspaceSnapshot(workspaceId);
     const { month, year } = parseAsOf(asOf);
     const target = snapshot.debts.find((debt) => debt.id === targetDebtId);
     if (!target) return null;
     const baseVersion = snapshot.activeContext?.version || null;
-    const extraMonthlyPayment = Number(baseVersion?.extraMonthlyPayment || 0);
+    const extraMonthlyPayment = extraOverride != null ? Number(extraOverride) || 0 : Number(baseVersion?.extraMonthlyPayment || 0);
     const baseline = buildPlanPreviewFromDebts({ debts: snapshot.debts, planVersionLike: { strategy: baseVersion?.strategy || "avalanche", extraMonthlyPayment }, startMonth: month, startYear: year });
     const custom = buildPlanPreviewFromDebts({ debts: snapshot.debts, planVersionLike: { strategy: "custom", extraMonthlyPayment }, startMonth: month, startYear: year, customTargetOrder: [target.id] });
     return { targetDebtId: target.id, targetDebtName: target.name, baseline, custom };

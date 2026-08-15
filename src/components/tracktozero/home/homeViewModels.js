@@ -248,9 +248,15 @@ export const deriveHomeContext = (snapshot, reviewSnapshot, scenario) => {
   // Paid-off debts
   const paidOffDebts = derivePaidOffDebts(snapshot);
 
-  // Review counts (from shared ReviewSnapshot)
-  const openReviewCount = reviewSnapshot?.openCount || 0;
+  // Review counts (from shared ReviewSnapshot only - never recomputed here,
+  // REVIEW-1C Part 33). openReviewCount uses the actionable count (excludes
+  // items the user already chose "later" on) so Home's Quick Check headline
+  // never disagrees with the nav badge (Part 32). blockingReviewCount is
+  // deliberately NOT filtered by deferred status - a blocking review that
+  // was deferred must still keep the plan untrusted (Part 12).
+  const openReviewCount = reviewSnapshot?.actionableCount ?? reviewSnapshot?.openCount ?? 0;
   const blockingReviewCount = reviewSnapshot?.blockingCount || 0;
+  const deferredBlockingCount = reviewSnapshot?.deferredBlockingCount || 0;
   const hasBlockingReview = blockingReviewCount > 0;
 
   // Scenario / What-If
@@ -295,6 +301,7 @@ export const deriveHomeContext = (snapshot, reviewSnapshot, scenario) => {
     // Reviews
     openReviewCount,
     blockingReviewCount,
+    deferredBlockingCount,
     hasBlockingReview,
 
     // Household

@@ -234,6 +234,38 @@ export const getReviewCountsByType = (batches = []) => {
 export const sortOpenReviewItems = (items = []) =>
   [...items].sort((a, b) => (Number(b.blocking) - Number(a.blocking)) || (Date.parse(a.createdAt || 0) - Date.parse(b.createdAt || 0)));
 
+// ── Deferred / "later" grouping (REVIEW-1C Part 11) ─────────────────────
+// A deferred review is still OPEN, unresolved evidence - deferring never
+// changes financial-authority status. This is purely a presentation-layer
+// distinction so the UI can tell "needs attention now" from "user chose
+// later" without inventing a new status value. deferReview always routes
+// through resolveImportCandidateMatch with decision "unsure", which always
+// stamps reviewResolution.type = "deferred" regardless of the item's
+// original review type - so this check works uniformly for every type.
+export const isDeferred = (item) => item.resolution?.type === REVIEW_RESOLUTION_TYPES.deferred;
+
+// Items that still need the user's attention now (open, never deferred, or
+// deferred-then-reopened is not a concept - deferring is the terminal
+// "later" choice until the user explicitly returns to finish it).
+export const getNeedsAttentionItems = (batches = []) => getOpenReviewItems(batches).filter((item) => !isDeferred(item));
+
+// Items the user explicitly chose to save for later - still open, still
+// unresolved, but intentionally out of the "needs attention now" list so
+// the product doesn't nag about a decision the user already made to defer.
+export const getLaterItems = (batches = []) => getOpenReviewItems(batches).filter((item) => isDeferred(item));
+
+// The nav badge / "needs a quick check" headline count (Part 32) - deferred
+// items don't make the badge count grow forever just because the user
+// chose "later" on them. Blocking-trust presentation on Home is a SEPARATE
+// concern (getBlockingReviewCount already includes deferred-blocking items
+// on purpose, since deferring a blocking review must never look trusted).
+export const getActionableOpenCount = (batches = []) => getNeedsAttentionItems(batches).length;
+
+// How many of the currently blocking reviews were explicitly deferred -
+// lets Home use softer "saved for later" copy for those without changing
+// the underlying blocking-count truth (Part 12).
+export const getDeferredBlockingCount = (batches = []) => getOpenReviewItems(batches).filter((item) => item.blocking && isDeferred(item)).length;
+
 // ── Stale-review protection (Part 28) ───────────────────────────────────
 // A lightweight fingerprint of the target debt's observed state, captured
 // at the moment a match/resolution decision is made. Captured once, up

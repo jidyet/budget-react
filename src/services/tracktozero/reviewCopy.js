@@ -132,3 +132,42 @@ export const RESOLUTION_HISTORY_LABEL = Object.freeze({
   classified_as_debt: "Marked as a debt",
   added_historical_snapshot: "Added as an older balance",
 });
+
+// ── REVIEW-1C: batch session voice ──────────────────────────────────────
+
+// Progress readout (Part 28) - plain counts, no gamification.
+export const reviewProgressLabel = (answeredCount, totalCount) =>
+  `${answeredCount} of ${totalCount} answered`;
+
+export const saveWhatIKnowLabel = () => "Save what I know";
+export const skipAllForNowLabel = () => "Skip all for now";
+export const leaveForLaterLabel = () => "Leave for later";
+export const finishThisLabel = () => "Finish this";
+
+export const skipAllConfirmTitle = () => "Skip these for now?";
+export const skipAllConfirmBody = () => "You can come back anytime.";
+
+// Save result summary (Part 4/7) - truthful, never "batch mutation complete".
+export const saveResultSummary = ({ resolvedCount, staleCount, failedCount, stillOpenCount }) => {
+  const parts = [];
+  if (resolvedCount > 0) parts.push(`${resolvedCount} update${resolvedCount === 1 ? "" : "s"} saved.`);
+  if (staleCount > 0) parts.push(`${staleCount} need${staleCount === 1 ? "s" : ""} another look - something changed.`);
+  if (failedCount > 0) parts.push(`${failedCount} couldn't save yet.`);
+  if (!parts.length && stillOpenCount > 0) parts.push("Nothing to save yet.");
+  if (stillOpenCount > 0 && resolvedCount > 0) parts.push(`${stillOpenCount} still need${stillOpenCount === 1 ? "s" : ""} information.`);
+  return parts.join(" ");
+};
+
+export const skipAllResultSummary = (deferredCount) =>
+  deferredCount === 1 ? "Saved for later. It'll stay here until you're ready." : `Saved ${deferredCount} for later. They'll stay here until you're ready.`;
+
+// Saved-for-later section (Part 10, 14).
+export const laterSectionTitle = () => "Saved for later";
+export const laterSectionHint = () => "We'll keep these here for later. Nothing about your plan changed because you skipped them.";
+export const laterItemBlockingNote = () => "This still affects your payoff plan.";
+
+// Historical-statement staged choice (Part 27).
+export const historicalStatementQuestion = () => "This statement is older than your latest balance.";
+export const historicalStatementNote = () => "Adding it won't replace your current balance.";
+export const addOlderBalanceLabel = () => "Add older balance";
+export const ignoreStatementLabel = () => "Ignore this statement";

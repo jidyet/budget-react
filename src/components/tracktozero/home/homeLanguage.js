@@ -123,6 +123,13 @@ export const quickCheckHeadline = (openCount, blockingCount) => {
 };
 export const quickCheckCta = () => "Review them";
 
+// REVIEW-1C Part 12: when every currently blocking review was explicitly
+// saved for later (not merely never looked at), Home can say so honestly -
+// the plan is still untrusted, but the copy doesn't pretend the user never
+// engaged with it.
+export const quickCheckDeferredBlockingLine = (deferredBlockingCount) =>
+  `${deferredBlockingCount} item${deferredBlockingCount === 1 ? "" : "s"} ${deferredBlockingCount === 1 ? "was" : "were"} saved for later and still affect${deferredBlockingCount === 1 ? "s" : ""} your payoff plan.`;
+
 // Blocking-review Home trust state - a genuinely distinct treatment, not
 // the normal active-plan command center wearing a warning color.
 export const blockingReviewTrustNote = () =>

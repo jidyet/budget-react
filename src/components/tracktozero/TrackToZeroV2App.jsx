@@ -1302,7 +1302,11 @@ export default function TrackToZeroV2App() {
     userRole: snapshot.membership?.role || "viewer",
     onGoToSettings: () => setTab("settings"),
     onSignOut: usesRealAuthUi ? activeLogout : null,
-    navBadges: { review: reviewState.snapshot?.openCount || 0 },
+    // REVIEW-1C Part 32: the nav badge represents work that genuinely still
+    // needs the user's attention, not every open review - an item the user
+    // already chose "Skip all for now"/"Leave for later" on stays open
+    // (still unresolved evidence) but no longer inflates this count.
+    navBadges: { review: reviewState.snapshot?.actionableCount ?? reviewState.snapshot?.openCount ?? 0 },
   };
 
   return (

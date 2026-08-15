@@ -110,7 +110,7 @@ describe("REVIEW-1B: HomeQuickCheck", () => {
   });
 });
 
-describe("REVIEW-1B: ReviewCenter", () => {
+describe("REVIEW-1C: ReviewCenter (batch session)", () => {
   const snapshot = {
     workspace: { type: "personal" },
     members: [],
@@ -128,7 +128,7 @@ describe("REVIEW-1B: ReviewCenter", () => {
     expect(html).toContain("all caught up");
   });
 
-  it("shows a truthful summary and filter chips when reviews are open", () => {
+  it("shows a truthful summary, the batch session card, and the save-what-I-know action bar when reviews are open", () => {
     const openItem = item();
     const html = render(h(ReviewCenter, {
       snapshot, service: {}, workspaceId: "personal-seed",
@@ -137,7 +137,9 @@ describe("REVIEW-1B: ReviewCenter", () => {
     }));
     expect(html).toContain("1 thing needs a quick check");
     expect(html).toContain("Firstmark Services");
-    expect(html).toContain("All");
+    expect(html).toContain("0 of 1 answered");
+    expect(html).toContain("Save what I know");
+    expect(html).toContain("Skip all for now");
   });
 });
 

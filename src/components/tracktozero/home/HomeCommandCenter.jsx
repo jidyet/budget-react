@@ -23,7 +23,7 @@
 
 import React, { useMemo } from "react";
 import { ttzPalette, toneColors, TYPE_SCALE } from "../theme.js";
-import { formatMoney, formatShortDate } from "../formatting.js";
+import { formatMoney, formatPercent, formatShortDate } from "../formatting.js";
 import Card from "../ui/Card.jsx";
 import Button from "../ui/Button.jsx";
 import { deriveHomeContext } from "./homeViewModels.js";
@@ -239,7 +239,7 @@ function YourNextMoveCard({ homeContext, onRecordPayment, onViewDetails }) {
           <div>
             <div style={{ ...TYPE_SCALE.caption, color: palette.muted, fontWeight: 600, letterSpacing: "0.3px" }}>APR</div>
             <div style={{ ...TYPE_SCALE.body, color: palette.tx, marginTop: 6, fontWeight: 700, fontSize: "1.1em" }}>
-              {currentTarget.apr != null ? `${(currentTarget.apr * 100).toFixed(2)}%` : "Unknown"}
+              {formatPercent(currentTarget.apr)}
             </div>
           </div>
         </div>
@@ -543,9 +543,14 @@ function WhatIfCard({ homeContext, onPreviewScenario }) {
 // ─────────────────────────────────────────────────────────────────────────
 
 function BlockingReviewState({ homeContext, onGoToReview, onViewDetails }) {
-  const { currentTarget, totalDebt, openReviewCount, blockingReviewCount, isHousehold } = homeContext;
+  const { currentTarget, totalDebt, openReviewCount, blockingReviewCount, deferredBlockingCount, isHousehold } = homeContext;
   const palette = ttzPalette;
   const tones = toneColors(palette);
+  // REVIEW-1C Part 12: skipping a blocking review must never look like it
+  // resolved the trust problem - but the copy can honestly acknowledge the
+  // user already made a "later" decision on it, distinct from "never
+  // looked at this yet".
+  const allBlockingDeferred = blockingReviewCount > 0 && deferredBlockingCount >= blockingReviewCount;
 
   return (
     <div style={{ display: "grid", gap: GAP_LARGE }}>
@@ -554,7 +559,7 @@ function BlockingReviewState({ homeContext, onGoToReview, onViewDetails }) {
           {lang.quickCheckLabel()}
         </div>
         <div style={{ ...TYPE_SCALE.pageTitle, color: palette.tx, marginBottom: SPACING }}>
-          {lang.quickCheckHeadline(openReviewCount, blockingReviewCount)}
+          {allBlockingDeferred ? lang.quickCheckDeferredBlockingLine(deferredBlockingCount) : lang.quickCheckHeadline(openReviewCount, blockingReviewCount)}
         </div>
         <p style={{ ...TYPE_SCALE.body, color: palette.tx2, marginBottom: GAP_LARGE }}>
           {lang.blockingReviewTrustNote()}

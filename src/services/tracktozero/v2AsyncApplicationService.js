@@ -23,7 +23,9 @@ import {
 import {
   REVIEW_RESOLUTION_TYPES,
   debtStateFingerprint,
+  getActionableOpenCount,
   getBlockingReviewCount,
+  getDeferredBlockingCount,
   getOpenReviewCount,
   getOpenReviewItems,
   getResolvedReviewItems,
@@ -31,6 +33,7 @@ import {
   sortOpenReviewItems,
 } from "./reviewDomain.js";
 import { OWNER_TYPES } from "../../domain/tracktozero/constants.js";
+import { FRIENDLY_SAVE_FAILURE, FRIENDLY_STALE_MESSAGE } from "./reviewCopy.js";
 
 const id = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const stableIdPart = (value) => String(value || "")
@@ -691,7 +694,18 @@ export const createTrackToZeroV2AsyncAppService = ({
     });
 
     const confirmedCount = batch.candidates.filter((c) => c.decision === "confirmed").length;
-    const committed = failures.length === 0;
+    // REVIEW-1C: a batch holds multiple independently-reviewed candidates
+    // (Part 5/40 - "per-item independent atomic resolution"). Committing one
+    // decided candidate must never lock the whole batch away from the
+    // others still legitimately pending - resolveImportCandidateMatch and
+    // deferReview both require batch.status === "review_required" to act on
+    // ANY candidate, so this batch can only flip to "committed" once every
+    // candidate has actually reached a terminal state (confirmed-and-
+    // committed, or excluded/dismissed). A candidate still "pending_review"
+    // or "needs_information" (deferred - still OPEN per reviewDomain.js)
+    // must keep the batch open, or it becomes permanently unreachable.
+    const stillNeedsDecision = nextCandidates.some((c) => c.decision !== "confirmed" && c.decision !== "excluded");
+    const committed = failures.length === 0 && !stillNeedsDecision;
     const updatedBatch = await repository.saveImportBatch({
       ...batch,
       candidates: nextCandidates,
@@ -943,8 +957,145 @@ export const createTrackToZeroV2AsyncAppService = ({
       resolvedItems: getResolvedReviewItems(batches),
       openCount: getOpenReviewCount(batches),
       blockingCount: getBlockingReviewCount(batches),
+      // REVIEW-1C: actionableCount excludes items the user already chose to
+      // defer - the ONE source the nav badge and batch-review progress both
+      // read from, so they can never disagree (Part 32).
+      actionableCount: getActionableOpenCount(batches),
+      deferredBlockingCount: getDeferredBlockingCount(batches),
       countsByType: getReviewCountsByType(batches),
     };
+  };
+
+  // ── REVIEW-1C: batch review orchestration ───────────────────────────────
+  // saveReviewSession/skipAllOpenReviews never write anything themselves -
+  // they only call the same named REVIEW-1A resolution primitives every
+  // individual resolution already uses (Part 5/40), one item at a time, and
+  // aggregate the real outcomes. A bad item can never roll back or corrupt
+  // an unrelated item's successful resolution, because each call is its own
+  // independent, already-atomic/idempotent operation.
+  const REVIEW_SESSION_ACTIONS = {
+    resolveAsExistingDebt: (workspaceId, batchId, candidateId, args) => resolveAsExistingDebt(workspaceId, batchId, candidateId, args),
+    resolveAsNewDebt: (workspaceId, batchId, candidateId) => resolveAsNewDebt(workspaceId, batchId, candidateId),
+    resolveBalance: (workspaceId, batchId, candidateId, args) => resolveBalance(workspaceId, batchId, candidateId, args),
+    resolveApr: (workspaceId, batchId, candidateId, args) => resolveApr(workspaceId, batchId, candidateId, args),
+    resolveMinimumPayment: (workspaceId, batchId, candidateId, args) => resolveMinimumPayment(workspaceId, batchId, candidateId, args),
+    resolveDueDate: (workspaceId, batchId, candidateId, args) => resolveDueDate(workspaceId, batchId, candidateId, args),
+    resolveOwner: (workspaceId, batchId, candidateId, args) => resolveOwner(workspaceId, batchId, candidateId, args),
+    resolveBusinessScope: (workspaceId, batchId, candidateId, args) => resolveBusinessScope(workspaceId, batchId, candidateId, args),
+    resolveDebtClassification: (workspaceId, batchId, candidateId, args) => resolveDebtClassification(workspaceId, batchId, candidateId, args),
+    dismissDuplicate: (workspaceId, batchId, candidateId) => dismissDuplicate(workspaceId, batchId, candidateId),
+    addHistoricalSnapshot: (workspaceId, batchId, candidateId, args) => addHistoricalSnapshot(workspaceId, batchId, candidateId, args),
+  };
+  // Only these two decide a Debt's identity and require the two-phase
+  // resolve-then-commit primitive - everything else in the map above
+  // completes the moment its own call returns.
+  const MATCH_SESSION_ACTIONS = new Set(["resolveAsExistingDebt", "resolveAsNewDebt"]);
+
+  // "Save What I Know" (Part 4/40). stagedAnswers is a flat list of
+  // independent field-level intents - NOT grouped by review item - because
+  // that already matches how each resolution service is independently
+  // safe/complete (Part 17): a candidate with two open fields can have one
+  // saved and the other left open without any special-casing here.
+  const saveReviewSession = async (workspaceId, stagedAnswers = []) => {
+    assertInteractive();
+    const resolvedEntries = [];
+    const failedEntries = [];
+    const batchIdsNeedingCommit = new Set();
+    // Tracks which match-action entries actually got their decision recorded
+    // this round (runner call succeeded) - the final reconciliation loop
+    // below must only re-classify THESE, never an entry whose own resolve
+    // call already failed and was already pushed to failedEntries above, or
+    // that one staged answer gets counted twice (Part 49's idempotency
+    // guarantee extends to the save-session summary itself, not just the
+    // underlying Firestore writes).
+    const recordedMatchEntryKeys = new Set();
+
+    // Sequential, not parallel (Part 52) - bounded, predictable Firestore
+    // load regardless of how many items are staged, and it keeps failure
+    // attribution simple (no interleaved partial writes to reason about).
+    for (const entry of stagedAnswers) {
+      const { importBatchId, importCandidateId, action, args } = entry;
+      const runner = REVIEW_SESSION_ACTIONS[action];
+      if (!runner) {
+        failedEntries.push({ ...entry, message: "We don't know how to save that yet." });
+        continue;
+      }
+      try {
+        await runner(workspaceId, importBatchId, importCandidateId, args);
+        if (MATCH_SESSION_ACTIONS.has(action)) {
+          batchIdsNeedingCommit.add(importBatchId);
+          recordedMatchEntryKeys.add(`${importBatchId}:${importCandidateId}:${action}`);
+        } else resolvedEntries.push(entry);
+      } catch (error) {
+        failedEntries.push({ ...entry, message: getUserSafeTrackToZeroError(error).message });
+      }
+    }
+
+    // Commit each affected batch exactly once (not once per candidate) -
+    // commitImportBatch already resolves every "confirmed" candidate in
+    // that batch and isolates failures per candidate internally.
+    const staleCandidateIds = new Set();
+    const commitFailureMessageByCandidateId = new Map();
+    for (const batchId of batchIdsNeedingCommit) {
+      try {
+        await commitImportBatch(workspaceId, batchId);
+      } catch (commitError) {
+        for (const failure of commitError?.failures || []) {
+          if (failure.code === "stale_review") staleCandidateIds.add(failure.candidateId);
+          else commitFailureMessageByCandidateId.set(failure.candidateId, FRIENDLY_SAVE_FAILURE);
+        }
+      }
+    }
+
+    // Truth comes from re-reading the shared selector, not from trusting
+    // individual promise resolutions - this is what actually persisted.
+    const snapshot = await getReviewSnapshot(workspaceId);
+    const openIds = new Set(snapshot.openItems.map((item) => item.id));
+    const staleEntries = [];
+    for (const entry of stagedAnswers) {
+      if (!MATCH_SESSION_ACTIONS.has(entry.action)) continue;
+      if (!recordedMatchEntryKeys.has(`${entry.importBatchId}:${entry.importCandidateId}:${entry.action}`)) continue;
+      const itemId = `${entry.importBatchId}:${entry.importCandidateId}`;
+      if (staleCandidateIds.has(entry.importCandidateId)) {
+        staleEntries.push({ ...entry, message: FRIENDLY_STALE_MESSAGE });
+      } else if (openIds.has(itemId)) {
+        failedEntries.push({ ...entry, message: commitFailureMessageByCandidateId.get(entry.importCandidateId) || FRIENDLY_SAVE_FAILURE });
+      } else {
+        resolvedEntries.push(entry);
+      }
+    }
+
+    return {
+      resolved: resolvedEntries,
+      failed: failedEntries,
+      stale: staleEntries,
+      resolvedCount: resolvedEntries.length,
+      failedCount: failedEntries.length,
+      staleCount: staleEntries.length,
+      snapshot,
+    };
+  };
+
+  // "Skip All For Now" (Part 9) - defers every currently open review one at
+  // a time via the exact same deferReview primitive individual "Leave for
+  // later" already uses. Zero authoritative mutation by construction:
+  // deferReview never creates a Debt/BalanceSnapshot/PaymentEvent or
+  // touches a PlanVersion (see resolveImportCandidateMatch's "unsure" path).
+  const skipAllOpenReviews = async (workspaceId) => {
+    assertInteractive();
+    const before = await getReviewSnapshot(workspaceId);
+    const deferredEntries = [];
+    const failedEntries = [];
+    for (const item of before.openItems) {
+      try {
+        await deferReview(workspaceId, item.importBatchId, item.importCandidateId);
+        deferredEntries.push(item);
+      } catch (error) {
+        failedEntries.push({ item, message: getUserSafeTrackToZeroError(error).message });
+      }
+    }
+    const snapshot = await getReviewSnapshot(workspaceId);
+    return { deferredCount: deferredEntries.length, failedCount: failedEntries.length, failed: failedEntries, snapshot };
   };
 
   const previewScenario = async (workspaceId, { extraMonthlyPayment = 100 } = {}) => {
@@ -1044,6 +1195,8 @@ export const createTrackToZeroV2AsyncAppService = ({
     dismissDuplicate,
     addHistoricalSnapshot,
     getReviewSnapshot,
+    saveReviewSession,
+    skipAllOpenReviews,
     previewDraftPlan,
     createDraftPlan,
     activatePlan,

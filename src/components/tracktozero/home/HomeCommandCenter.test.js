@@ -15,164 +15,274 @@ const debt = (overrides = {}) => ({
   apr: 0.2099,
   minimumRequiredPayment: 80,
   includedInCorePayoffPlan: true,
+  ownerLabel: "Kristina",
+  dueDay: 21,
   ...overrides,
 });
 
 const startingItem = (debtId, balance) => ({ debtId, balance, includedInCorePayoffPlan: true, debtType: "credit_card" });
 
 const activePlanSnapshot = (overrides = {}) => ({
-  workspace: { type: "personal" },
+  asOf: "2026-08-15T00:00:00.000Z",
+  workspace: { id: "w1", type: "personal" },
   debts: [debt()],
   includedDebts: [debt()],
   latestSnapshotsByDebt: { d1: { balance: 500, observedAt: "2026-08-01T00:00:00.000Z" } },
-  activeContext: { version: { startingDebtSnapshot: [startingItem("d1", 1000)], strategy: "avalanche", extraMonthlyPayment: 100 } },
-  portfolioSummary: { totalWorkspaceDebt: 1000, includedDebt: 1000 },
+  balanceHistoryByDebt: {
+    d1: [
+      { balance: 1000, observedAt: "2026-07-01T00:00:00.000Z" },
+      { balance: 700, observedAt: "2026-07-20T00:00:00.000Z" },
+      { balance: 500, observedAt: "2026-08-01T00:00:00.000Z" },
+    ],
+  },
+  activeContext: {
+    version: {
+      id: "v1",
+      startingDebtSnapshot: [startingItem("d1", 1000)],
+      strategy: "avalanche",
+      extraMonthlyPayment: 100,
+      asOf: "2026-07-01T00:00:00.000Z",
+    },
+  },
+  expectedCheckpoints: [
+    { period: "2026-08", expectedTotalBalance: 500 },
+    { period: "2026-09", expectedTotalBalance: 250 },
+    { period: "2026-10", expectedTotalBalance: 0 },
+  ],
+  portfolioSummary: { totalWorkspaceDebt: 500, includedDebt: 500, excludedDebt: 0 },
   warnings: [],
-  status: { code: "on_track" },
+  status: { code: "on_track", label: "On track", message: "Your actual progress matches the plan." },
   targetDebt: debt(),
   payoffQueue: [debt()],
-  projectedZeroDate: "2028-01",
+  projectedZeroDate: "2026-10",
   ...overrides,
 });
 
 const noop = () => {};
 const baseProps = {
-  onGoToPlan: noop, onGoToReview: noop, onUploadBudget: noop, onAddDebt: noop,
-  onRecordPayment: noop, onViewDetails: noop, onSeeOptions: noop,
+  onGoToPlan: noop,
+  onGoToReview: noop,
+  onUploadBudget: noop,
+  onAddDebt: noop,
+  onRecordPayment: noop,
+  onViewDetails: noop,
+  onSeeOptions: noop,
+  onViewMyPlan: noop,
+  onCompareStrategies: noop,
+  onTryWhatIf: noop,
+  onGoToDebts: noop,
 };
 
-describe("UX-2 fix 1: no fabricated payment recommendation", () => {
-  it("never renders 'Recommended payment' and instead states the truthful focus action", () => {
+describe("UX-2.1 Home redesign", () => {
+  it("shows the redesigned first viewport: debt freedom, next move, payoff progress, and plan summary", () => {
+    const html = render(h(HomeCommandCenter, { ...baseProps, snapshot: activePlanSnapshot(), reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
+    expect(html).toContain("Debt freedom");
+    expect(html).toContain("This month");
+    expect(html).toContain("Your next move");
+    expect(html).toContain("Confirmed progress");
+    expect(html).toContain("Your plan");
+    expect(html).toContain("Your debts");
+  });
+
+  it("keeps Next Move truthful and aligned with the active plan target", () => {
     const html = render(h(HomeCommandCenter, { ...baseProps, snapshot: activePlanSnapshot(), reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
     expect(html).not.toMatch(/Recommended payment/i);
-    expect(html).toContain("Focus on Chase Freedom next.");
+    expect(html).toContain("Nothing recorded yet this month.");
+    expect(html).toContain("Chase Freedom");
+    expect(html).toContain("Due day 21");
   });
-});
 
-describe("UX-2 fix 3: blocking-review is a real, honest Home trust state", () => {
-  it("does not render the normal command center (no Zero Day, no momentum claim, no payment recommendation) when a blocking review exists", () => {
+  it("renders confirmed progress visuals from starting debt vs confirmed remaining debt", () => {
+    const html = render(h(HomeCommandCenter, { ...baseProps, snapshot: activePlanSnapshot(), reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
+    expect(html).toContain("Knocked out");
+    expect(html).toContain("$500.00");
+    expect(html).toContain("50%");
+  });
+
+  it("shows projected $0 with an active plan and does not fake that projection without one", () => {
+    const activeHtml = render(h(HomeCommandCenter, { ...baseProps, snapshot: activePlanSnapshot(), reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
+    expect(activeHtml).toContain("Projected $0");
+    expect(activeHtml).toContain("Oct 2026");
+
+    const noPlanHtml = render(h(HomeCommandCenter, {
+      ...baseProps,
+      snapshot: {
+        workspace: { id: "w1", type: "personal" },
+        debts: [debt(), debt({ id: "d2", name: "SoFi", currentBalance: 2500 })],
+        includedDebts: [debt(), debt({ id: "d2", name: "SoFi", currentBalance: 2500 })],
+        balanceHistoryByDebt: {
+          d1: [{ balance: 1000, observedAt: "2026-07-01T00:00:00.000Z" }, { balance: 900, observedAt: "2026-08-01T00:00:00.000Z" }],
+          d2: [{ balance: 2500, observedAt: "2026-07-01T00:00:00.000Z" }, { balance: 2400, observedAt: "2026-08-01T00:00:00.000Z" }],
+        },
+        activeContext: { version: null },
+        portfolioSummary: { totalWorkspaceDebt: 3300, includedDebt: 3300, excludedDebt: 0 },
+      },
+      reviewSnapshot: { openCount: 0, blockingCount: 0 },
+    }));
+    expect(noPlanHtml).toContain("Choose a plan");
+    expect(noPlanHtml).toContain("2 active debts");
+    expect(noPlanHtml).toContain("Your debt trend");
+  });
+
+  it("routes blocking-review into a distinct trust state instead of the normal command center", () => {
     const html = render(h(HomeCommandCenter, {
       ...baseProps,
       snapshot: activePlanSnapshot(),
-      reviewSnapshot: { openCount: 1, blockingCount: 1 },
+      reviewSnapshot: { openCount: 2, actionableCount: 2, blockingCount: 1 },
     }));
-    expect(html).not.toMatch(/Recommended payment/i);
-    expect(html).not.toMatch(/ZERO DAY/i);
-    expect(html).not.toMatch(/YOUR MOMENTUM/i);
-    expect(html).toContain("Review them");
-    expect(html).toMatch(/fully trust your plan/i);
-    expect(html).toMatch(/momentum until these are resolved/i);
+    expect(html).toMatch(/can.*fully trust this plan yet/i);
+    expect(html).not.toContain("Debt freedom");
+    expect(html).not.toContain("Payoff progress");
   });
 
-  it("labels any still-shown current-truth figures as provisional, not authoritative", () => {
-    const html = render(h(HomeCommandCenter, {
-      ...baseProps,
-      snapshot: activePlanSnapshot(),
-      reviewSnapshot: { openCount: 1, blockingCount: 1 },
-    }));
-    expect(html).toContain("(provisional)");
+  it("treats the no-plan state as compare-strategies, not a fake target", () => {
+    const snapshot = {
+      workspace: { id: "w1", type: "personal" },
+      debts: [debt()],
+      includedDebts: [debt()],
+      activeContext: { version: null },
+      portfolioSummary: { totalWorkspaceDebt: 1000, includedDebt: 1000 },
+    };
+    const html = render(h(HomeCommandCenter, { ...baseProps, snapshot, reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
+    expect(html).toContain("No active payoff plan");
+    expect(html).toContain("Compare strategies");
+    expect(html).not.toContain("Current target");
   });
 
-  it("a non-blocking open review does not suppress the normal command center", () => {
-    const html = render(h(HomeCommandCenter, {
-      ...baseProps,
-      snapshot: activePlanSnapshot(),
-      reviewSnapshot: { openCount: 1, blockingCount: 0 },
-    }));
-    expect(html).toMatch(/ZERO DAY/i);
+  it("treats the no-debt state as focused onboarding, not an empty dashboard", () => {
+    const html = render(h(HomeCommandCenter, { ...baseProps, snapshot: { workspace: { type: "personal" }, debts: [], includedDebts: [] }, reviewSnapshot: null }));
+    expect(html).toContain("Start your path to $0");
+    expect(html).toContain("Add your debts");
   });
-});
 
-describe("UX-2 fix 4: all-paid-off uses included/core payoff truth", () => {
-  it("celebrates when included debts are confirmed zero, ignoring an excluded mortgage's real balance", () => {
+  it("celebrates paid-off included debt even if an excluded mortgage still has a balance", () => {
     const mortgage = debt({ id: "m1", name: "Mortgage", currentBalance: 250000, includedInCorePayoffPlan: false });
     const paidCard = debt({ id: "d1", currentBalance: 0 });
-    const snapshot = activePlanSnapshot({ debts: [paidCard, mortgage], includedDebts: [paidCard] });
+    const snapshot = activePlanSnapshot({
+      debts: [paidCard, mortgage],
+      includedDebts: [paidCard],
+      latestSnapshotsByDebt: { d1: { balance: 0, observedAt: "2026-08-01T00:00:00.000Z" } },
+      balanceHistoryByDebt: { d1: [{ balance: 200, observedAt: "2026-07-01T00:00:00.000Z" }, { balance: 0, observedAt: "2026-08-01T00:00:00.000Z" }] },
+      portfolioSummary: { totalWorkspaceDebt: 250000, includedDebt: 0, excludedDebt: 250000 },
+    });
     const html = render(h(HomeCommandCenter, { ...baseProps, snapshot, reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
-    expect(html).toContain("YOU HIT $0.");
+    expect(html).toContain("$0 remaining");
+    expect(html).toContain("included debts are paid off");
   });
-});
 
-describe("UX-2 fix 2: progress is hidden/falls back honestly when confirmed truth is insufficient", () => {
-  it("shows the honest fallback line, never a fabricated percent, when a starting debt has no latest snapshot", () => {
+  it("honestly shows 0% / no confirmed progress when the latest confirmed balance is missing", () => {
     const snapshot = activePlanSnapshot({ latestSnapshotsByDebt: {} });
     const html = render(h(HomeCommandCenter, { ...baseProps, snapshot, reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
-    expect(html).toContain("Progress starts after your next confirmed balance update.");
-    expect(html).not.toMatch(/You're moving/i);
+    expect(html).toContain("0%");
+    expect(html).toMatch(/starting point is set/i);
   });
 
-  it("shows real momentum copy once progress is genuinely confirmed and positive", () => {
-    const html = render(h(HomeCommandCenter, { ...baseProps, snapshot: activePlanSnapshot(), reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
-    expect(html).toMatch(/You.{0,6}re moving/i);
+  it("renders household owner breakdown without double-counting joint debt", () => {
+    const snapshot = activePlanSnapshot({
+      workspace: { id: "household-1", type: "household" },
+      portfolioSummary: {
+        totalWorkspaceDebt: 23000,
+        includedDebt: 23000,
+        memberDebt: [
+          { uid: "k", displayName: "Kristina", total: 10000, debtCount: 2 },
+          { uid: "b", displayName: "Babajide", total: 8000, debtCount: 1 },
+        ],
+        jointDebt: 5000,
+        unassignedDebt: 0,
+      },
+    });
+    const html = render(h(HomeCommandCenter, { ...baseProps, snapshot, reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
+    expect(html).toContain("Household snapshot");
+    expect(html).toContain("Kristina");
+    expect(html).toContain("Babajide");
+    expect(html).toContain("Joint");
+    expect(html).toContain("counted once");
   });
-});
 
-describe("UX-2 fix 5: data freshness and read-only What If", () => {
-  it("shows a freshness note only when the confirmed data is actually stale", () => {
-    const staleSnapshot = activePlanSnapshot({ latestSnapshotsByDebt: { d1: { balance: 500, observedAt: "2020-01-01T00:00:00.000Z" } } });
-    const html = render(h(HomeCommandCenter, { ...baseProps, snapshot: staleSnapshot, reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
-    expect(html).toMatch(/Last updated 45\+ days ago/i);
+  it("shows a purposeful all-unassigned household snapshot instead of a meaningless single bar", () => {
+    const snapshot = {
+      workspace: { id: "household-1", type: "household" },
+      debts: [debt({ id: "d1", ownerLabel: "Unassigned" })],
+      includedDebts: [debt({ id: "d1", ownerLabel: "Unassigned" })],
+      activeContext: { version: null },
+      portfolioSummary: {
+        totalWorkspaceDebt: 1000,
+        includedDebt: 1000,
+        excludedDebt: 0,
+        memberDebt: [],
+        jointDebt: 0,
+        unassignedDebt: 1000,
+      },
+      balanceHistoryByDebt: {
+        d1: [{ balance: 1000, observedAt: "2026-08-01T00:00:00.000Z" }],
+      },
+    };
+    const html = render(h(HomeCommandCenter, { ...baseProps, snapshot, reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
+    expect(html).toContain("is currently unassigned");
+    expect(html).toContain("Assign debt ownership");
+    expect(html).toContain("Review ownership");
   });
 
-  it("omits the freshness note when data is fresh", () => {
-    const html = render(h(HomeCommandCenter, { ...baseProps, snapshot: activePlanSnapshot(), reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
-    expect(html).not.toMatch(/Last updated/i);
+  it("keeps PaymentEvent separate from confirmed debt until a balance snapshot arrives", () => {
+    const paymentRecorded = activePlanSnapshot({
+      paymentEventsByDebt: {
+        d1: [{ amount: 180, paidAt: "2026-08-10T00:00:00.000Z" }],
+      },
+      latestSnapshotsByDebt: { d1: { balance: 500, observedAt: "2026-08-01T00:00:00.000Z" } },
+      portfolioSummary: { totalWorkspaceDebt: 500, includedDebt: 500, excludedDebt: 0 },
+    });
+    const recordedHtml = render(h(HomeCommandCenter, { ...baseProps, snapshot: paymentRecorded, reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
+    expect(recordedHtml).toContain("Payment recorded ✓");
+    expect(recordedHtml).toContain("Update balance");
+    expect(recordedHtml).toContain("$500.00");
+
+    const balanceUpdated = activePlanSnapshot({
+      paymentEventsByDebt: {
+        d1: [{ amount: 180, paidAt: "2026-08-10T00:00:00.000Z" }],
+      },
+      latestSnapshotsByDebt: { d1: { balance: 400, observedAt: "2026-08-20T00:00:00.000Z" } },
+      balanceHistoryByDebt: {
+        d1: [
+          { balance: 1000, observedAt: "2026-07-01T00:00:00.000Z" },
+          { balance: 700, observedAt: "2026-07-20T00:00:00.000Z" },
+          { balance: 400, observedAt: "2026-08-20T00:00:00.000Z" },
+        ],
+      },
+      portfolioSummary: { totalWorkspaceDebt: 400, includedDebt: 400, excludedDebt: 0 },
+    });
+    const updatedHtml = render(h(HomeCommandCenter, { ...baseProps, snapshot: balanceUpdated, reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
+    expect(updatedHtml).toContain("$400.00");
+    expect(updatedHtml).toContain("$600.00");
   });
 
-  it("What If renders nothing at all when no preview capability is wired up (never fakes availability)", () => {
-    const html = render(h(HomeCommandCenter, { ...baseProps, snapshot: activePlanSnapshot(), reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
-    expect(html).not.toMatch(/WHAT IF/i);
+  it("keeps critical plans from looking green or healthy", () => {
+    const snapshot = activePlanSnapshot({
+      warnings: [{ code: "negative_amortization", message: "Your current payment may not reduce one balance." }],
+      status: { code: "critical", label: "Plan needs attention", message: "Interest is growing faster than the current payment." },
+    });
+    const html = render(h(HomeCommandCenter, { ...baseProps, snapshot, reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
+    expect(html).toContain("Plan needs attention");
+    expect(html).toContain("Your current payment may not reduce one balance.");
+    expect(html).not.toContain("On track");
   });
 
-  it("shows a plain prompt (no numbers) when a preview capability exists but no scenario has been requested yet", () => {
-    const html = render(h(HomeCommandCenter, {
+  it("shows What If as preview-only until a scenario result exists", () => {
+    const promptHtml = render(h(HomeCommandCenter, {
       ...baseProps,
       snapshot: activePlanSnapshot(),
       reviewSnapshot: { openCount: 0, blockingCount: 0 },
       onPreviewScenario: noop,
     }));
-    expect(html).toMatch(/WHAT IF/i);
-    expect(html).toContain("Try it");
-    expect(html).not.toMatch(/Could move Zero Day/i);
-  });
+    expect(promptHtml).toContain("Preview a safe scenario without changing your active plan.");
 
-  it("shows the real outcome (never fabricated) once scenario truth is actually available", () => {
-    const html = render(h(HomeCommandCenter, {
+    const resultHtml = render(h(HomeCommandCenter, {
       ...baseProps,
       snapshot: activePlanSnapshot(),
       reviewSnapshot: { openCount: 0, blockingCount: 0 },
       scenario: { monthsSaved: 4, interestSaved: 120.5 },
       onPreviewScenario: noop,
     }));
-    expect(html).toMatch(/Could move Zero Day: 4 months sooner/i);
-  });
-});
-
-describe("UX-2 preserved behavior", () => {
-  it("no-debt activation state still renders", () => {
-    const html = render(h(HomeCommandCenter, { ...baseProps, snapshot: { workspace: { type: "personal" }, debts: [], includedDebts: [] }, reviewSnapshot: null }));
-    expect(html).toContain("LET&#x27;S GET YOUR DEBT IN HERE.");
-  });
-
-  it("debt/no-plan state still renders", () => {
-    const snapshot = { workspace: { type: "personal" }, debts: [debt()], includedDebts: [debt()], activeContext: { version: null }, portfolioSummary: { totalWorkspaceDebt: 1000 } };
-    const html = render(h(HomeCommandCenter, { ...baseProps, snapshot, reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
-    expect(html).toContain("YOUR DEBT IS IN. NOW LET&#x27;S BUILD THE WAY OUT.");
-  });
-
-  it("household breakdown still renders for household workspaces", () => {
-    const snapshot = activePlanSnapshot({
-      workspace: { type: "household" },
-      portfolioSummary: { totalWorkspaceDebt: 1000, includedDebt: 1000, memberDebt: [{ uid: "u1", displayName: "Jay", total: 600, debtCount: 1 }], jointDebt: 400, unassignedDebt: 0 },
-    });
-    const html = render(h(HomeCommandCenter, { ...baseProps, snapshot, reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
-    expect(html).toContain("Jay");
-    expect(html).toContain("Joint");
-  });
-
-  it("critical plan state still renders plan-health warning, not a green success state", () => {
-    const snapshot = activePlanSnapshot({ status: { code: "critical" } });
-    const html = render(h(HomeCommandCenter, { ...baseProps, snapshot, reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
-    expect(html).toMatch(/needs a tweak/i);
+    expect(resultHtml).toContain("4 months sooner");
+    expect(resultHtml).toContain("$120.50 less interest");
   });
 });

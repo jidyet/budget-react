@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveConfirmedProgress, deriveHomeContext } from "./homeViewModels.js";
+import { deriveConfirmedProgress, deriveHomeContext, deriveProjectedTrajectory } from "./homeViewModels.js";
 
 const debt = (overrides = {}) => ({
   id: "d1",
@@ -71,7 +71,7 @@ describe("UX-2 fix: deriveConfirmedProgress is confirmed-safe", () => {
 
   it("returns unconfirmed, zeroed progress when there is no active plan", () => {
     const progress = deriveConfirmedProgress({});
-    expect(progress).toEqual({ confirmed: false, openingBalance: 0, latestBalance: 0, eliminated: 0, percent: 0 });
+    expect(progress).toEqual({ confirmed: false, openingBalance: 0, latestBalance: 0, eliminated: 0, percent: 0, laterConfirmedHistory: false });
   });
 });
 
@@ -119,5 +119,86 @@ describe("UX-2 fix: blocking-review is a distinct Home state", () => {
   it("non-blocking open reviews do not trigger the blocking-review state", () => {
     const context = deriveHomeContext(baseSnapshot(), { openCount: 2, blockingCount: 0 }, null);
     expect(context.homeState).toBe("active-plan");
+  });
+});
+
+describe("UX-2.1 closeout: Home snapshot details", () => {
+  it("derives debt count and highest known APR from trusted debt data", () => {
+    const context = deriveHomeContext(baseSnapshot({
+      debts: [
+        debt({ id: "d1", aprStatus: "known", apr: 0.2099, currentBalance: 1000 }),
+        debt({ id: "d2", aprStatus: "unknown", apr: null, currentBalance: 500 }),
+      ],
+      includedDebts: [
+        debt({ id: "d1", aprStatus: "known", apr: 0.2099, currentBalance: 1000 }),
+        debt({ id: "d2", aprStatus: "unknown", apr: null, currentBalance: 500 }),
+      ],
+      portfolioSummary: { totalWorkspaceDebt: 1500, includedDebt: 1500, excludedDebt: 0 },
+    }), null, null);
+
+    expect(context.debtSnapshot.activeCount).toBe(2);
+    expect(context.debtSnapshot.highestKnownApr).toBe(0.2099);
+    expect(context.debtSnapshot.activeLabel).toBe("2 debts left");
+  });
+
+  it("derives a useful no-plan next move and keeps projected dates absent", () => {
+    const context = deriveHomeContext({
+      workspace: { type: "personal" },
+      debts: [debt()],
+      includedDebts: [debt()],
+      activeContext: { version: null },
+      portfolioSummary: { totalWorkspaceDebt: 1000, includedDebt: 1000, excludedDebt: 0 },
+      balanceHistoryByDebt: {
+        d1: [{ balance: 1000, observedAt: "2026-07-01T00:00:00.000Z" }, { balance: 900, observedAt: "2026-08-01T00:00:00.000Z" }],
+      },
+    }, null, null);
+
+    expect(context.homeState).toBe("no-plan");
+    expect(context.zeroDay).toBeNull();
+    expect(context.nextMove.label).toBe("Pick your payoff strategy");
+    expect(context.trajectory.observed.length).toBeGreaterThan(1);
+    expect(context.trajectory.projected).toEqual([]);
+  });
+});
+
+const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+// Matches payoffEngine.js's own toLocaleDateString("en-US", { month: "short",
+// year: "numeric" }) output - the real, only format ExpectedCheckpoint.period
+// is ever generated in (never "YYYY-MM").
+const monthLabelAt = (startIndex, offset) => {
+  const total = startIndex + offset;
+  return `${MONTH_LABELS[total % 12]} ${2026 + Math.floor(total / 12)}`;
+};
+
+describe("UX-2.1 fix: deriveProjectedTrajectory / sampleEvenly must terminate for any real plan length", () => {
+  it("REGRESSION: never hangs for a real plan's expectedCheckpoints (24+ months), and returns at most 8 sampled points with valid dates", () => {
+    const checkpoints = Array.from({ length: 24 }, (_, index) => ({
+      period: monthLabelAt(7, index),
+      expectedTotalBalance: Math.max(0, 5000 - index * 200),
+    }));
+    const trajectory = deriveProjectedTrajectory({ expectedCheckpoints: checkpoints });
+    expect(trajectory.length).toBeGreaterThan(0);
+    expect(trajectory.length).toBeLessThanOrEqual(8);
+    // Every point must carry a real, parseable date - never the NaN that
+    // used to flow into TrajectoryChart's SVG path/circle coordinates.
+    trajectory.forEach((point) => expect(Number.isNaN(new Date(point.at).getTime())).toBe(false));
+    // Always includes the first and last checkpoint so the chart never
+    // silently drops the plan's start or its $0 end.
+    expect(trajectory[0].period).toBe(checkpoints[0].period);
+    expect(trajectory[trajectory.length - 1].period).toBe(checkpoints[checkpoints.length - 1].period);
+  });
+
+  it("REGRESSION: also terminates for checkpoint counts that previously collided exactly on the last index (9, 36, 100)", () => {
+    for (const length of [9, 36, 100]) {
+      const checkpoints = Array.from({ length }, (_, index) => ({ period: monthLabelAt(0, index), expectedTotalBalance: 0 }));
+      const trajectory = deriveProjectedTrajectory({ expectedCheckpoints: checkpoints });
+      expect(trajectory.length).toBeGreaterThan(0);
+      expect(trajectory.length).toBeLessThanOrEqual(8);
+    }
+  });
+
+  it("REGRESSION: an unparseable period is dropped rather than producing a NaN point", () => {
+    const trajectory = deriveProjectedTrajectory({ expectedCheckpoints: [{ period: "not-a-month", expectedTotalBalance: 100 }] });
+    expect(trajectory).toEqual([]);
   });
 });

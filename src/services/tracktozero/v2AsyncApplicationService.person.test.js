@@ -49,7 +49,7 @@ describe("DATA-HH1: createImportedPerson", () => {
     const second = await service.createImportedPerson("household-seed", { displayName: "  BABAJIDE   YUSUF " });
     expect(second.id).toBe(first.id);
     const listed = await service.listWorkspacePersons("household-seed");
-    expect(listed.filter((p) => p.status !== "merged")).toHaveLength(1);
+    expect(listed.filter((p) => p.status !== "merged" && p.normalizedName === "babajide yusuf")).toHaveLength(1);
   });
 
   it("refuses to shadow an existing real workspace member with a competing person identity", async () => {

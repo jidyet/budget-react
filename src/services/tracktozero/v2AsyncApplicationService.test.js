@@ -19,11 +19,8 @@ describe("TrackToZero v2 async application service", () => {
     expect(snapshot.activeContext.version.id).toBe("personal-version-1");
     expect(snapshot.targetDebt).toBeTruthy();
     expect(snapshot.projectedZeroDate).toBeTruthy();
-    // The seed's only recorded balance for each debt IS its opening
-    // snapshot - no real observation has happened since plan activation, so
-    // insufficient_data is the truthful status (UX-0 Part 11), not a guess
-    // at ahead/on-track/behind from zero observed history.
-    expect(snapshot.status.code).toBe("insufficient_data");
+    expect(snapshot.balanceHistoryByDebt["personal-capital-one"]).toHaveLength(3);
+    expect(snapshot.status.code).toBe("needs_review");
   });
 
   it("keeps legacy preview mode read-only in async runtime", async () => {

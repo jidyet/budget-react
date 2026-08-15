@@ -112,6 +112,14 @@ const latestSnapshotsByDebtAsync = async (repository, workspaceId, debts) => {
   return Object.fromEntries(pairs);
 };
 
+const balanceHistoryByDebtAsync = async (repository, workspaceId, debts) => {
+  const pairs = await Promise.all(debts.map(async (debt) => [
+    debt.id,
+    [...(await repository.listBalanceSnapshots(workspaceId, debt.id))].reverse(),
+  ]));
+  return Object.fromEntries(pairs);
+};
+
 const paymentEventsByDebtAsync = async (repository, workspaceId, debts) => {
   if (typeof repository.listPaymentEvents !== "function") return {};
   const pairs = await Promise.all(debts.map(async (debt) => [
@@ -228,6 +236,7 @@ export const createTrackToZeroV2AsyncAppService = ({
     const activeContext = await getActivePlanContext(workspaceId);
     const expectedCheckpoints = await getExpectedCheckpoints(workspaceId, activeContext);
     const snapshotsByDebt = await latestSnapshotsByDebtAsync(repository, workspaceId, debts);
+    const balanceHistoryByDebt = await balanceHistoryByDebtAsync(repository, workspaceId, debts);
     const paymentEventsByDebt = await paymentEventsByDebtAsync(repository, workspaceId, debts);
     const { month, year } = parseAsOf(asOf);
     const projectionWithWarnings = activeContext?.version
@@ -280,6 +289,7 @@ export const createTrackToZeroV2AsyncAppService = ({
       activeContext,
       expectedCheckpoints,
       latestSnapshotsByDebt: snapshotsByDebt,
+      balanceHistoryByDebt,
       paymentEventsByDebt,
       projection: projectionWithWarnings.projection,
       warnings: projectionWithWarnings.warnings,

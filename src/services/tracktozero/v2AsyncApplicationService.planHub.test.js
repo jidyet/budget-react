@@ -69,12 +69,22 @@ describe("UX-4: compareStrategies", () => {
   it("orders Snowball by smallest balance first, Avalanche by highest known APR first (unknown APR never guessed at, sorts last)", async () => {
     const { service } = makeService();
     const result = await service.compareStrategies("household-seed");
-    // household-samsung ($517) < household-mystery ($930) < household-priceline ($4100)
-    expect(result.snowball.payoffOrder.map((d) => d.id)).toEqual(["household-samsung", "household-mystery", "household-priceline"]);
-    // household-priceline (27.99% known) outranks household-samsung (0% known);
-    // household-mystery's unknown APR is deliberately never assumed to be 0%
-    // OR highest - it's excluded from the APR race entirely and sorts last.
-    expect(result.avalanche.payoffOrder.map((d) => d.id)).toEqual(["household-priceline", "household-samsung", "household-mystery"]);
+    expect(result.snowball.payoffOrder.map((d) => d.id)).toEqual([
+      "household-samsung",
+      "household-mystery",
+      "household-medical",
+      "household-jordan-card",
+      "household-priceline",
+      "household-joint-loan",
+    ]);
+    expect(result.avalanche.payoffOrder.map((d) => d.id)).toEqual([
+      "household-priceline",
+      "household-jordan-card",
+      "household-joint-loan",
+      "household-samsung",
+      "household-medical",
+      "household-mystery",
+    ]);
   });
 
   it("surfaces the unknown-APR warning honestly rather than treating it as 0%", async () => {

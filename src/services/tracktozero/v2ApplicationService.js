@@ -42,6 +42,11 @@ const latestSnapshotsByDebt = (repository, workspaceId, debts) =>
     debts.map((debt) => [debt.id, repository.listBalanceSnapshots(workspaceId, debt.id)[0] || null])
   );
 
+const balanceHistoryByDebt = (repository, workspaceId, debts) =>
+  Object.fromEntries(
+    debts.map((debt) => [debt.id, [...repository.listBalanceSnapshots(workspaceId, debt.id)].reverse()])
+  );
+
 export const createTrackToZeroV2AppService = ({
   repository,
   actorId = "seed-owner",
@@ -90,6 +95,7 @@ export const createTrackToZeroV2AppService = ({
     const activeContext = getActivePlanContext(workspaceId);
     const expectedCheckpoints = getExpectedCheckpoints(workspaceId, activeContext);
     const snapshotsByDebt = latestSnapshotsByDebt(repository, workspaceId, debts);
+    const balanceHistory = balanceHistoryByDebt(repository, workspaceId, debts);
     const { month, year } = parseAsOf(asOf);
     const projectionWithWarnings = activeContext?.version
       ? buildProjectionWithWarnings({ debts, planVersion: activeContext.version, startMonth: month, startYear: year })
@@ -157,6 +163,7 @@ export const createTrackToZeroV2AppService = ({
       activeContext,
       expectedCheckpoints,
       latestSnapshotsByDebt: snapshotsByDebt,
+      balanceHistoryByDebt: balanceHistory,
       projection: projectionWithWarnings.projection,
       warnings: projectionWithWarnings.warnings,
       status,

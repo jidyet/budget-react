@@ -18,6 +18,7 @@ import StatusBadge from "./ui/StatusBadge.jsx";
 import ReviewCenter from "./review/ReviewCenter.jsx";
 import HomeCommandCenter from "./home/HomeCommandCenter.jsx";
 import PlanSection from "./plan/PlanSection.jsx";
+import { navigateToPlanDestination } from "./plan/planRouting.js";
 import { deriveDebtPortfolioView } from "./debtPortfolioView.js";
 import { formatMoney as money, formatPercent as percent } from "./formatting.js";
 const todayInputValue = () => new Date().toISOString().slice(0, 10);
@@ -378,7 +379,18 @@ function WorkspaceBar({
 // UX-2: HOME COMMAND CENTER + MOMENTUM EXPERIENCE
 // The heart of TrackToZero - users understand their debt situation and next move
 // within 5 seconds. Handled by dedicated HomeCommandCenter component.
-function Home({ snapshot, scenario, onGoToPlan, onGoToReview, reviewSnapshot, onScenario, onGoToDebts }) {
+function Home({
+  snapshot,
+  scenario,
+  onGoToPlan,
+  onGoToReview,
+  reviewSnapshot,
+  onScenario,
+  onViewMyPlan,
+  onCompareStrategies,
+  onTryWhatIf,
+  onGoToDebts,
+}) {
   return (
     <HomeCommandCenter
       snapshot={snapshot}
@@ -387,11 +399,15 @@ function Home({ snapshot, scenario, onGoToPlan, onGoToReview, reviewSnapshot, on
       onGoToPlan={onGoToPlan}
       onGoToReview={onGoToReview}
       onUploadBudget={onGoToDebts}
-      onAddDebt={onGoToPlan}       // TODO: wire to actual add debt flow
-      onRecordPayment={() => {}}   // TODO: wire to payment recording
-      onViewDetails={onGoToPlan}   // TODO: wire to debt details
-      onSeeOptions={onGoToPlan}    // TODO: wire to plan options
+      onAddDebt={onGoToDebts}
+      onRecordPayment={onGoToDebts}
+      onViewDetails={onGoToDebts}
+      onSeeOptions={onGoToPlan}
       onPreviewScenario={onScenario}
+      onViewMyPlan={onViewMyPlan}
+      onCompareStrategies={onCompareStrategies}
+      onTryWhatIf={onTryWhatIf}
+      onGoToDebts={onGoToDebts}
     />
   );
 }
@@ -1572,6 +1588,11 @@ export default function TrackToZeroV2App() {
     else if (nextTab !== "plan" && onPlanPath) window.history.pushState({}, "", "/");
   };
 
+  const goToPlanDestination = useCallback((destination) => {
+    navigateTab("plan");
+    navigateToPlanDestination(destination);
+  }, []);
+
   const snapshot = runtimeState.snapshot;
   const workspaces = runtimeState.workspaces;
   const productionReady = getFirebaseStatus().configured && getFirebaseConfig().projectId === "budgetapp-c9306";
@@ -1683,6 +1704,9 @@ export default function TrackToZeroV2App() {
           onGoToPlan={() => navigateTab("plan")}
           onGoToReview={() => navigateTab("review")}
           onGoToDebts={() => navigateTab("debts")}
+          onViewMyPlan={() => goToPlanDestination("my-plan")}
+          onCompareStrategies={() => goToPlanDestination("compare")}
+          onTryWhatIf={() => goToPlanDestination("what-if")}
           onScenario={(extra) => runAction("preview scenario", async () => {
             setScenario(await service.previewScenario(workspaceId, { extraMonthlyPayment: extra }));
           }, { write: false })}

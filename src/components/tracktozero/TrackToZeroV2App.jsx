@@ -17,6 +17,7 @@ import QaHarnessControls from "./layout/QaHarnessControls.jsx";
 import StatusBadge from "./ui/StatusBadge.jsx";
 import ReviewCenter from "./review/ReviewCenter.jsx";
 import HomeCommandCenter from "./home/HomeCommandCenter.jsx";
+import { deriveDebtPortfolioView } from "./debtPortfolioView.js";
 import { formatMoney as money, formatPercent as percent } from "./formatting.js";
 // A display-time safety net (UX-0 Part 7): a stored ownerLabel that looks
 // like statement noise (mail-handling boilerplate, a card product name) is
@@ -606,10 +607,11 @@ function Debts({ snapshot, service, refresh, refreshReview, runAction, writeStat
   const canManage = snapshot.permissions.manageDebts && snapshot.mode !== "legacy_preview";
   const canObserve = snapshot.permissions.recordObservations && snapshot.mode !== "legacy_preview";
   const isHousehold = snapshot.workspace.type === "household";
+  const portfolio = useMemo(() => deriveDebtPortfolioView(snapshot), [snapshot]);
 
   const visibleDebts = !isHousehold || ownerFilter === "all"
-    ? snapshot.debts
-    : snapshot.debts.filter((debt) => (
+    ? portfolio.activeDebts
+    : portfolio.activeDebts.filter((debt) => (
         ownerFilter === "joint" || ownerFilter === "unassigned"
           ? effectiveOwnerType(debt) === ownerFilter
           : debt.ownerId === ownerFilter
@@ -618,6 +620,15 @@ function Debts({ snapshot, service, refresh, refreshReview, runAction, writeStat
   return (
     <>
       <Section title="What you owe" eyebrow="Debts">
+        <div style={{ ...styles.grid, marginBottom: 16 }}>
+          {portfolio.summaryCards.map((card) => (
+            <div key={card.key} style={{ ...styles.card, boxShadow: "none", padding: 16, borderColor: card.tone === "warning" ? "#f7c46b" : card.tone === "success" ? "#9ae6b4" : card.tone === "primary" ? "#8dd1ff" : "#cfe6f9", background: card.tone === "warning" ? "#fffaf0" : card.tone === "success" ? "#f0fdf4" : card.tone === "primary" ? "#f0f9ff" : "#f8fbff" }}>
+              <div style={{ color: "#5b7c98", fontSize: 12, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 900 }}>{card.label}</div>
+              <div style={{ fontSize: 28, fontWeight: 900, marginTop: 8 }}>{card.key === "leftToGo" ? money(card.value) : card.value}</div>
+            </div>
+          ))}
+        </div>
+
         {isHousehold && (
           <div style={{ marginBottom: 12 }}>
             <Field label="Filter by owner">
@@ -632,6 +643,7 @@ function Debts({ snapshot, service, refresh, refreshReview, runAction, writeStat
             </Field>
           </div>
         )}
+
         {isHousehold && (
           <div style={{ ...styles.grid, marginBottom: 14 }}>
             <p><strong>Total household debt:</strong> {money(snapshot.portfolioSummary.includedDebt)} <span style={{ color: "#5b7c98" }}>(counted once)</span></p>
@@ -645,16 +657,52 @@ function Debts({ snapshot, service, refresh, refreshReview, runAction, writeStat
             )}
           </div>
         )}
-        <div style={styles.grid}>
+
+        <div style={{ ...styles.grid, marginBottom: 16 }}>
+          {visibleDebts.length === 0 && (
+            <div style={{ ...styles.card, boxShadow: "none", padding: 18, gridColumn: "1 / -1" }}>
+              <h3 style={{ margin: 0 }}>No active debts to show</h3>
+              <p style={{ marginBottom: 0, color: "#4d6a82" }}>This workspace is either fully paid off or everything is waiting for review.</p>
+            </div>
+          )}
           {visibleDebts.map((debt) => (
             <article key={debt.id} style={{ border: "1px solid #c7e3f8", borderRadius: 18, padding: 14, background: debt.status === "paid_off" ? "#f0fdf4" : "#fff" }}>
               <h3 style={{ margin: 0 }}>{debt.name}</h3>
-              <p>{money(snapshot.latestSnapshotsByDebt[debt.id]?.balance ?? debt.currentBalance)} · {debt.aprStatus === "unknown" ? "Unknown APR" : percent(debt.apr)}</p>
-              <p>Required payment: {money(debt.minimumRequiredPayment)} · Due day: {debt.dueDay || "not set"}</p>
+              <p style={{ margin: "8px 0 6px" }}><strong>{money(snapshot.latestSnapshotsByDebt[debt.id]?.balance ?? debt.currentBalance)}</strong> · {debt.aprStatus === "unknown" ? "APR unknown" : percent(debt.apr)}</p>
+              <p style={{ margin: "0 0 8px", color: "#3f5a71" }}>Required payment: {money(debt.minimumRequiredPayment)} · Due day: {debt.dueDay || "not set"}</p>
               <DebtBadges debt={debt} isTarget={snapshot.targetDebt?.id === debt.id} isHousehold={isHousehold} />
             </article>
           ))}
         </div>
+
+        {portfolio.reviewDebts.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <h3 style={{ marginBottom: 10 }}>Needs review</h3>
+            <div style={styles.grid}>
+              {portfolio.reviewDebts.map((debt) => (
+                <article key={debt.id} style={{ ...styles.card, boxShadow: "none", borderColor: "#f7c46b", background: "#fffaf0" }}>
+                  <h4 style={{ marginTop: 0 }}>{debt.name}</h4>
+                  <p style={{ margin: 0 }}>{money(snapshot.latestSnapshotsByDebt[debt.id]?.balance ?? debt.currentBalance)}</p>
+                  <p style={{ margin: "8px 0 0", color: "#4d6a82" }}>This debt is excluded from the plan until the missing or conflicting details are resolved in Review.</p>
+                </article>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {portfolio.paidOffDebts.length > 0 && (
+          <div style={{ marginTop: 18 }}>
+            <h3 style={{ marginBottom: 10 }}>Paid off</h3>
+            <div style={styles.grid}>
+              {portfolio.paidOffDebts.map((debt) => (
+                <article key={debt.id} style={{ ...styles.card, boxShadow: "none", borderColor: "#9ae6b4", background: "#f0fdf4" }}>
+                  <h4 style={{ marginTop: 0 }}>{debt.name}</h4>
+                  <p style={{ margin: 0 }}>{money(snapshot.latestSnapshotsByDebt[debt.id]?.balance ?? debt.currentBalance)} · Paid off</p>
+                </article>
+              ))}
+            </div>
+          </div>
+        )}
       </Section>
       <Section title="Record observed reality" eyebrow="Payments + balances">
         <div style={styles.grid}>

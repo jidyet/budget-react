@@ -154,6 +154,9 @@ export const buildProjectionWithWarnings = ({
   startMonth,
   startYear,
   maxMonths = MAX_SIMULATION_MONTHS,
+  // UX-4: only meaningful when planVersion.strategy === "custom" (a
+  // preview-only pseudo-strategy - see payoffEngine.js's orderPayoffTargets).
+  customTargetOrder = [],
 } = {}) => {
   const eligibleDebts = getEligiblePlanDebts(debts, planVersion);
   const accounts = eligibleDebts.map(debtToEngineAccount);
@@ -165,7 +168,8 @@ export const buildProjectionWithWarnings = ({
         {},
         startMonth,
         startYear,
-        maxMonths
+        maxMonths,
+        customTargetOrder
       )
     : [];
   return {

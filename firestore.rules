@@ -902,6 +902,25 @@ service cloud.firestore {
         }
       }
 
+      // UX-4: a Saved Scenario is deliberately never authoritative - it never
+      // enters the Workspace.activePlanId -> PayoffPlan.activeVersionId ->
+      // PlanVersion pointer chain on its own. Only applyScenario (managePlans
+      // tier, same as reforecast) can promote it, via the existing
+      // applyReforecast primitive. Gates identically to people/import_batches
+      // (no delete - archiving sets status "archived" via update so a
+      // scenario id, once shared/referenced, never dangles).
+      match /scenarios/{scenarioId} {
+        allow read: if v2ViewerPlus(workspaceId);
+        allow create: if v2AdminPlus(workspaceId)
+          && request.resource.data.workspaceId == workspaceId
+          && request.resource.data.id == scenarioId
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if v2AdminPlus(workspaceId)
+          && request.resource.data.workspaceId == workspaceId
+          && request.resource.data.id == scenarioId;
+        allow delete: if v2MigrationOperator(workspaceId);
+      }
+
       match /migration_runs/{runId} {
         allow read: if v2AdminPlus(workspaceId);
         allow create: if (v2MigrationOperator(workspaceId) || v2BootstrapMigrationRun(workspaceId))

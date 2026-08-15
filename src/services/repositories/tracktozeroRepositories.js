@@ -1,4 +1,4 @@
-import { createBalanceSnapshot, createDebt, createExpectedCheckpoint, createImportBatch, createPaymentEvent, createPayoffPlan, createPlanVersion, createWorkspace, createWorkspaceMembership, createWorkspacePerson } from "../../domain/tracktozero/models.js";
+import { createBalanceSnapshot, createDebt, createExpectedCheckpoint, createImportBatch, createPaymentEvent, createPayoffPlan, createPlanVersion, createSavedScenario, createWorkspace, createWorkspaceMembership, createWorkspacePerson } from "../../domain/tracktozero/models.js";
 import { activatePlanTransaction } from "../tracktozero/activePlanService.js";
 
 const clone = (value) => structuredClone(value);
@@ -17,6 +17,7 @@ export const v2Paths = {
   balanceSnapshot: (workspaceId, debtId, snapshotId) => `workspaces/${workspaceId}/debts/${debtId}/balance_snapshots/${snapshotId}`,
   migrationRun: (workspaceId, runId) => `workspaces/${workspaceId}/migration_runs/${runId}`,
   importBatch: (workspaceId, batchId) => `workspaces/${workspaceId}/import_batches/${batchId}`,
+  scenario: (workspaceId, scenarioId) => `workspaces/${workspaceId}/scenarios/${scenarioId}`,
 };
 
 const pathFromEntity = (entity) => {
@@ -46,6 +47,7 @@ export class InMemoryTrackToZeroRepository {
     this.expectedCheckpoints = new Map(Object.entries(seed.expectedCheckpoints || {}).map(([key, value]) => [key, clone(value)]));
     this.migrationRuns = new Map(Object.entries(seed.migrationRuns || {}).map(([key, value]) => [key, clone(value)]));
     this.importBatches = new Map(Object.entries(seed.importBatches || {}).map(([key, value]) => [key, clone(value)]));
+    this.scenarios = new Map(Object.entries(seed.scenarios || {}).map(([key, value]) => [key, clone(value)]));
   }
 
   key(workspaceId, id) { return `${workspaceId}/${id}`; }
@@ -313,6 +315,23 @@ export class InMemoryTrackToZeroRepository {
   listImportBatches(workspaceId) {
     return [...this.importBatches.values()]
       .filter((batch) => batch.workspaceId === workspaceId)
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || String(b.id).localeCompare(String(a.id)))
+      .map(clone);
+  }
+
+  // UX-4
+  saveScenario(input) {
+    const scenario = createSavedScenario(input);
+    this.scenarios.set(this.key(scenario.workspaceId, scenario.id), clone(scenario));
+    return scenario;
+  }
+  getScenario(workspaceId, scenarioId) {
+    const key = this.key(workspaceId, scenarioId);
+    return this.scenarios.has(key) ? clone(this.scenarios.get(key)) : null;
+  }
+  listScenarios(workspaceId) {
+    return [...this.scenarios.values()]
+      .filter((scenario) => scenario.workspaceId === workspaceId)
       .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || String(b.id).localeCompare(String(a.id)))
       .map(clone);
   }

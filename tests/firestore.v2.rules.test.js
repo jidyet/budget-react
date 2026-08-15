@@ -21,6 +21,12 @@ const person = (workspaceId = "w1", id = "person1", createdBy = "owner", display
   workspaceMembershipId: "", mergedIntoPersonId: "", source: "import_confirmed", createdAt: now(), createdBy,
 });
 
+const scenario = (workspaceId = "w1", id = "scenario1", createdBy = "owner", type = "recurring_extra") => ({
+  id, workspaceId, name: "Aggressive payoff", type, status: "active",
+  basePlanId: "plan1", basePlanVersionId: "v1", inputs: { extraMonthlyPayment: 50 },
+  createdAt: now(), createdBy,
+});
+
 async function seed(callback) {
   await testEnv.withSecurityRulesDisabled(async (context) => callback(context.firestore()));
 }
@@ -200,4 +206,45 @@ test("a person document from another workspace can never be forged into this one
   const owner = testEnv.authenticatedContext("owner").firestore();
   // The path's workspaceId (w1) must match the document's own workspaceId field.
   await assertFails(owner.doc("workspaces/w1/people/cross").set(person("w2", "cross", "owner")));
+});
+
+// UX-4
+test("owner and admin can save/archive scenarios (managePlans-tier); viewer can read but never write, and no one can delete outright", async () => {
+  await seedWorkspace();
+  const owner = testEnv.authenticatedContext("owner").firestore();
+  const admin = testEnv.authenticatedContext("admin").firestore();
+  const viewer = testEnv.authenticatedContext("viewer").firestore();
+
+  await assertSucceeds(owner.doc("workspaces/w1/scenarios/scenario1").set(scenario("w1", "scenario1", "owner")));
+  await assertSucceeds(admin.doc("workspaces/w1/scenarios/scenario2").set(scenario("w1", "scenario2", "admin", "goal_date")));
+  await assertSucceeds(admin.doc("workspaces/w1/scenarios/scenario1").update({ workspaceId: "w1", id: "scenario1", status: "archived" }));
+
+  await assertSucceeds(viewer.doc("workspaces/w1/scenarios/scenario1").get());
+  await assertFails(viewer.doc("workspaces/w1/scenarios/scenario3").set(scenario("w1", "scenario3", "viewer")));
+  await assertFails(viewer.doc("workspaces/w1/scenarios/scenario1").update({ workspaceId: "w1", id: "scenario1", status: "archived" }));
+
+  await assertFails(owner.doc("workspaces/w1/scenarios/scenario1").delete());
+});
+
+test("contributor can read but cannot save or archive scenarios (managePlans-tier only)", async () => {
+  await seedWorkspace();
+  await seed(async (db) => { await db.doc("workspaces/w1/scenarios/scenario1").set(scenario()); });
+  const contrib = testEnv.authenticatedContext("contrib").firestore();
+  await assertSucceeds(contrib.doc("workspaces/w1/scenarios/scenario1").get());
+  await assertFails(contrib.doc("workspaces/w1/scenarios/scenario4").set(scenario("w1", "scenario4", "contrib")));
+  await assertFails(contrib.doc("workspaces/w1/scenarios/scenario1").update({ workspaceId: "w1", id: "scenario1", status: "archived" }));
+});
+
+test("non-members and unauthenticated users cannot read or write scenarios", async () => {
+  await seed(async (db) => { await db.doc("workspaces/w1/scenarios/scenario1").set(scenario()); });
+  await assertFails(testEnv.unauthenticatedContext().firestore().doc("workspaces/w1/scenarios/scenario1").get());
+  const outsider = testEnv.authenticatedContext("outsider").firestore();
+  await assertFails(outsider.doc("workspaces/w1/scenarios/scenario1").get());
+  await assertFails(outsider.doc("workspaces/w1/scenarios/scenario5").set(scenario("w1", "scenario5", "outsider")));
+});
+
+test("a scenario document from another workspace can never be forged into this one", async () => {
+  await seedWorkspace();
+  const owner = testEnv.authenticatedContext("owner").firestore();
+  await assertFails(owner.doc("workspaces/w1/scenarios/cross").set(scenario("w2", "cross", "owner")));
 });

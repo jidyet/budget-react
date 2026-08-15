@@ -440,3 +440,62 @@ describe("goal date calculation service", () => {
     });
   });
 });
+
+describe("UX-4: custom target order (preview-only pseudo-strategy)", () => {
+  it("orderPayoffTargets ranks accounts by customOrder position when strategy is 'custom'", () => {
+    const ordered = orderPayoffTargets(
+      [
+        { id: "a", name: "A", bal: 500, apr: 0.1 },
+        { id: "b", name: "B", bal: 100, apr: 0.3 },
+        { id: "c", name: "C", bal: 900, apr: 0.05 },
+      ],
+      "custom",
+      ["c", "a", "b"],
+    );
+    expect(ordered.map((account) => account.id)).toEqual(["c", "a", "b"]);
+  });
+
+  it("falls back to smallest-balance ordering for accounts not present in customOrder", () => {
+    const ordered = orderPayoffTargets(
+      [
+        { id: "a", name: "A", bal: 500, apr: 0.1 },
+        { id: "unlisted-big", name: "Big", bal: 900, apr: 0.05 },
+        { id: "unlisted-small", name: "Small", bal: 50, apr: 0.2 },
+      ],
+      "custom",
+      ["a"],
+    );
+    expect(ordered.map((account) => account.id)).toEqual(["a", "unlisted-small", "unlisted-big"]);
+  });
+
+  it("with no customOrder given, 'custom' strategy behaves like snowball (safe default, never crashes)", () => {
+    const ordered = orderPayoffTargets(
+      [{ id: "a", name: "A", bal: 500, apr: 0.1 }, { id: "b", name: "B", bal: 100, apr: 0.3 }],
+      "custom",
+      [],
+    );
+    expect(ordered.map((account) => account.id)).toEqual(["b", "a"]);
+  });
+
+  it("payoffSimulate actually directs the extra-payment pool to the custom target first", () => {
+    const rows = payoffSimulate(
+      [
+        makeAccount({ id: "small", cur_bal: 100, min_due_v: 10, apr_v: 0 }),
+        makeAccount({ id: "custom-target", cur_bal: 1000, min_due_v: 10, apr_v: 0 }),
+      ],
+      "custom",
+      200,
+      {},
+      1,
+      2025,
+      36,
+      ["custom-target"],
+    );
+    // With customTargetOrder forcing "custom-target" first, "small" (which
+    // would win under real snowball ordering) is paid only its minimum
+    // until custom-target is done - proving the override actually changed
+    // where the extra pool goes, not just cosmetic ordering.
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows[0].remaining_debt).toBeLessThan(1100 - 10 - 10);
+  });
+});

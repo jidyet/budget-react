@@ -31,6 +31,7 @@ export const TIMESTAMP_FIELDS = {
   balanceSnapshot: ["observedAt", "createdAt", "voidedAt"],
   migrationRun: ["startedAt", "completedAt", "failedAt", "rolledBackAt", "updatedAt"],
   importBatch: ["createdAt", "updatedAt", "committedAt"],
+  scenario: ["createdAt", "updatedAt"],
 };
 
 // DATA-1 HOTFIX: a deliberate, single Firestore-write boundary that

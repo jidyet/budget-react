@@ -10,21 +10,16 @@ import {
 import { createTrackToZeroV2AsyncAppService, getUserSafeTrackToZeroError } from "../../services/tracktozero/v2AsyncApplicationService";
 import { V2_TEST_ACTOR_ID, V2_TEST_NOW } from "../../services/tracktozero/v2SeedData";
 import { getLaunchFlags } from "../../config/launchFlags";
-import { effectiveOwnerType, isConfirmedZero, isDebtNeedsReview, looksLikeJunkOwnerLabel } from "../../domain/tracktozero/ownership.js";
+import { effectiveOwnerType, isConfirmedZero, isDebtNeedsReview, looksLikeJunkOwnerLabel, presentedOwnerLabel } from "../../domain/tracktozero/ownership.js";
 import AppShell from "./layout/AppShell.jsx";
 import PageContainer from "./layout/PageContainer.jsx";
 import QaHarnessControls from "./layout/QaHarnessControls.jsx";
 import StatusBadge from "./ui/StatusBadge.jsx";
 import ReviewCenter from "./review/ReviewCenter.jsx";
 import HomeCommandCenter from "./home/HomeCommandCenter.jsx";
+import PlanHub from "./plan/PlanHub.jsx";
 import { deriveDebtPortfolioView } from "./debtPortfolioView.js";
 import { formatMoney as money, formatPercent as percent } from "./formatting.js";
-// A display-time safety net (UX-0 Part 7): a stored ownerLabel that looks
-// like statement noise (mail-handling boilerplate, a card product name) is
-// shown as "Unassigned" instead of as if it were a real person - for
-// records written before the parser-level fix existed, without ever
-// mutating the stored value or running a backfill.
-const presentedOwnerLabel = (debt) => (looksLikeJunkOwnerLabel(debt?.ownerLabel) ? "Unassigned" : (debt?.ownerLabel || "Unassigned"));
 const todayInputValue = () => new Date().toISOString().slice(0, 10);
 const dateInputToIso = (value) => value ? `${value}T00:00:00.000Z` : "";
 const newDebtDraft = () => ({
@@ -981,7 +976,6 @@ function FirstPlanBuilder({ snapshot, service, refresh, runAction, writeState, c
 }
 
 function Plan({ snapshot, service, refresh, runAction, writeState }) {
-  const [reforecast, setReforecast] = useState(null);
   const canPlan = snapshot.permissions.managePlans && snapshot.mode !== "legacy_preview";
   const active = snapshot.activeContext;
   return (
@@ -1010,30 +1004,7 @@ function Plan({ snapshot, service, refresh, runAction, writeState }) {
       {!active?.version ? (
         <FirstPlanBuilder snapshot={snapshot} service={service} refresh={refresh} runAction={runAction} writeState={writeState} canPlan={canPlan} />
       ) : (
-        <Section title="Reforecast" eyebrow="Preview before apply">
-          <div style={styles.grid}>
-            <div>
-              <button disabled={!canPlan || writeState.inProgress} style={canPlan && !writeState.inProgress ? styles.button : styles.disabledButton} onClick={() => {
-                runAction("preview reforecast", async () => {
-                  setReforecast(await service.previewReforecast(snapshot.workspace.id, { extraMonthlyPayment: Number(active.version.extraMonthlyPayment || 0) + 50 }));
-                }, { write: false });
-              }}>Preview reforecast +$50/mo</button>
-              {reforecast && (
-                <div>
-                  <p>Old estimate: {reforecast.oldProjectedZeroDate || "n/a"}</p>
-                  <p>Proposed estimate: {reforecast.proposedZeroDate || "n/a"}</p>
-                  <button style={writeState.inProgress ? styles.disabledButton : styles.primaryButton} disabled={writeState.inProgress} onClick={() => {
-                    runAction("apply reforecast", async () => {
-                      await service.applyReforecast(snapshot.workspace.id, { extraMonthlyPayment: Number(active.version.extraMonthlyPayment || 0) + 50 });
-                      setReforecast(null);
-                      await refresh();
-                    });
-                  }}>{writeState.action === "apply reforecast" ? "Applying..." : "Apply reforecast"}</button>
-                </div>
-              )}
-            </div>
-          </div>
-        </Section>
+        <PlanHub snapshot={snapshot} service={service} refresh={refresh} runAction={runAction} writeState={writeState} />
       )}
     </>
   );

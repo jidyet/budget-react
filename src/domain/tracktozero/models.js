@@ -11,6 +11,8 @@ import {
   PERSON_STATUSES,
   PLAN_STATUSES,
   PLAN_STRATEGIES,
+  SCENARIO_STATUSES,
+  SCENARIO_TYPES,
   VERSION_REASONS,
   WORKSPACE_STATUSES,
   WORKSPACE_TYPES,
@@ -184,6 +186,35 @@ export const createExpectedCheckpoint = (input = {}) => deepFreezeClone({
   expectedTargetDebtId: optionalString(input.expectedTargetDebtId),
   expectedPayment: requireMoney(input.expectedPayment || 0, "checkpoint.expectedPayment"),
   projectedZeroDate: optionalString(input.projectedZeroDate),
+});
+
+// UX-4: a persisted, non-authoritative "what if" the user chose to keep.
+// Never part of the Workspace.activePlanId -> PayoffPlan.activeVersionId ->
+// PlanVersion pointer chain - a SavedScenario only ever gets promoted into
+// that chain through the same explicit applyReforecast/activatePlan
+// primitives any other reforecast/activation already uses (see
+// v2AsyncApplicationService.js's applyScenario). basePlanVersionId anchors
+// the scenario to the PlanVersion it was computed against, so a reopened
+// scenario can honestly tell the user whether reality has since moved on
+// (Part 37 - staleness) instead of silently presenting stale numbers as current.
+export const createSavedScenario = (input = {}) => deepFreezeClone({
+  id: requireString(input.id, "scenario.id"),
+  workspaceId: requireString(input.workspaceId, "scenario.workspaceId"),
+  name: requireString(input.name, "scenario.name"),
+  type: requireEnum(input.type, SCENARIO_TYPES, "scenario.type"),
+  status: requireEnum(input.status || "active", SCENARIO_STATUSES, "scenario.status"),
+  basePlanId: optionalString(input.basePlanId),
+  basePlanVersionId: optionalString(input.basePlanVersionId),
+  // Free-form, type-specific inputs (e.g. {extraMonthlyPayment} for
+  // recurring_extra, {amount, targetDebtId} for one_time,
+  // {targetDebtId} for custom_target, {targetMonth} for goal_date) - not
+  // simulation OUTPUT, which is cheap enough to always recompute fresh
+  // rather than trust a persisted, potentially-stale projection.
+  inputs: input.inputs && typeof input.inputs === "object" ? structuredClone(input.inputs) : {},
+  createdAt: nowOr(input.createdAt),
+  createdBy: requireString(input.createdBy, "scenario.createdBy"),
+  updatedAt: optionalTimestamp(input.updatedAt),
+  updatedBy: optionalString(input.updatedBy),
 });
 
 export const createPaymentEvent = (input = {}) => deepFreezeClone({

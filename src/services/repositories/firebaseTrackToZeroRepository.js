@@ -18,6 +18,7 @@ import {
   createPaymentEvent,
   createPayoffPlan,
   createPlanVersion,
+  createSavedScenario,
   createWorkspace,
   createWorkspaceMembership,
   createWorkspacePerson,
@@ -34,6 +35,7 @@ const entityKindForPath = (path) => {
   if (parts[2] === "members") return "member";
   if (parts[2] === "member_invites") return "memberInvite";
   if (parts[2] === "people") return "person";
+  if (parts[2] === "scenarios") return "scenario";
   if (parts[2] === "debts" && parts.length === 4) return "debt";
   if (parts[2] === "debts" && parts[4] === "payment_events") return "paymentEvent";
   if (parts[2] === "debts" && parts[4] === "balance_snapshots") return "balanceSnapshot";
@@ -358,6 +360,22 @@ export class FirebaseTrackToZeroRepository {
     const colRef = collection(this.db, "workspaces", workspaceId, "import_batches");
     const snap = await getDocs(query(colRef, orderBy("createdAt", "desc")));
     return snap.docs.map((d) => fromFirestoreDoc("importBatch", d.data()));
+  }
+
+  // ── Saved Scenario (UX-4) ──────────────────────────────────────────────
+  async saveScenario(input) {
+    const scenario = createSavedScenario(input);
+    await setDoc(doc(this.db, v2Paths.scenario(scenario.workspaceId, scenario.id)), toFirestoreDoc("scenario", scenario));
+    return scenario;
+  }
+  async getScenario(workspaceId, scenarioId) {
+    const snap = await getDoc(doc(this.db, v2Paths.scenario(workspaceId, scenarioId)));
+    return snap.exists() ? fromFirestoreDoc("scenario", snap.data()) : null;
+  }
+  async listScenarios(workspaceId) {
+    const colRef = collection(this.db, "workspaces", workspaceId, "scenarios");
+    const snap = await getDocs(query(colRef, orderBy("createdAt", "desc")));
+    return snap.docs.map((d) => fromFirestoreDoc("scenario", d.data()));
   }
 
   // ── Active-plan switching ──────────────────────────────────────────────

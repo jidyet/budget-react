@@ -65,6 +65,28 @@ describe("TrackToZero v2 projection trust layer", () => {
     expect(result.warnings.map((warning) => warning.code)).toContain("unknown_apr");
   });
 
+  it("UX-4: threads customTargetOrder through to the engine when strategy is 'custom'", () => {
+    const small = debt({ id: "small", currentBalance: 100, minimumRequiredPayment: 10, apr: 0 });
+    const target = debt({ id: "custom-target", currentBalance: 1000, minimumRequiredPayment: 10, apr: 0 });
+    const customVersion = {
+      ...version,
+      strategy: "custom",
+      extraMonthlyPayment: 200,
+      startingDebtSnapshot: [{ debtId: "small", includedInCorePayoffPlan: true }, { debtId: "custom-target", includedInCorePayoffPlan: true }],
+    };
+    const result = buildProjectionWithWarnings({
+      debts: [small, target],
+      planVersion: customVersion,
+      startMonth: 8,
+      startYear: 2026,
+      customTargetOrder: ["custom-target"],
+    });
+    // The extra $200/mo went to custom-target (forced first), not small
+    // (which snowball ordering would have picked) - remaining balance after
+    // month 1 must reflect 100 (small, minimum only) + (1000 - 10 - 200).
+    expect(result.projection[0].remaining_debt).toBeCloseTo(100 - 10 + (1000 - 10 - 200), 2);
+  });
+
   it("detects missing minimums and projection caps in wrapper warnings", () => {
     const result = buildProjectionWithWarnings({
       debts: [debt({ minimumRequiredPayment: 0, apr: 0.6 })],

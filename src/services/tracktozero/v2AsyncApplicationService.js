@@ -33,7 +33,7 @@ import {
   getReviewCountsByType,
   sortOpenReviewItems,
 } from "./reviewDomain.js";
-import { OWNER_TYPES } from "../../domain/tracktozero/constants.js";
+import { OWNER_TYPES, SCENARIO_TYPES } from "../../domain/tracktozero/constants.js";
 import { FRIENDLY_SAVE_FAILURE, FRIENDLY_STALE_MESSAGE } from "./reviewCopy.js";
 
 const id = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1305,6 +1305,309 @@ export const createTrackToZeroV2AsyncAppService = ({
     return context;
   };
 
+  // ── UX-4: Plan Hub preview helpers ────────────────────────────────────
+  // Every preview below is read-only (Part 20/28) - none of them touch
+  // Workspace.activePlanId, PayoffPlan.activeVersionId, write a
+  // PlanVersion, mutate a Debt, or create a PaymentEvent/BalanceSnapshot.
+  // They all funnel through this ONE internal helper so My Plan/Snowball/
+  // Avalanche/What If/Finish By can never silently drift from each other
+  // or from buildProjectionWithWarnings, the one trusted simulation
+  // wrapper (Part 46/62 - no financial math in JSX). Not persisting
+  // startingDebtSnapshot on planVersionLike is deliberate: with none given,
+  // getEligiblePlanDebts/getIncludedDebts fall back to "active AND
+  // includedInCorePayoffPlan" - exactly the live inclusion rule these
+  // ad-hoc previews want, without fabricating a frozen snapshot no draft/
+  // active plan actually owns.
+  const buildPlanPreviewFromDebts = ({ debts, planVersionLike, startMonth, startYear, customTargetOrder = [], maxMonths }) => {
+    const { projection, warnings } = buildProjectionWithWarnings({ debts, planVersion: planVersionLike, startMonth, startYear, customTargetOrder, ...(maxMonths ? { maxMonths } : {}) });
+    const debtBalance = (debt) => Number(debt.currentBalance || 0);
+    const eligibleForDisplay = getEligiblePlanDebts(debts, planVersionLike).filter((debt) => debtBalance(debt) > 0);
+    const payoffOrder = planVersionLike.strategy === "custom"
+      ? [...eligibleForDisplay].sort((a, b) => {
+          const rankA = customTargetOrder.indexOf(a.id);
+          const rankB = customTargetOrder.indexOf(b.id);
+          const ra = rankA === -1 ? Infinity : rankA;
+          const rb = rankB === -1 ? Infinity : rankB;
+          return ra !== rb ? ra - rb : debtBalance(a) - debtBalance(b);
+        })
+      : sortDebtsForStrategy(eligibleForDisplay, planVersionLike.strategy);
+    const startingTotalBalance = eligibleForDisplay.reduce((sum, debt) => sum + debtBalance(debt), 0);
+    return {
+      strategy: planVersionLike.strategy,
+      extraMonthlyPayment: Number(planVersionLike.extraMonthlyPayment || 0),
+      payoffOrder,
+      startingTotalBalance,
+      monthsToZero: projection.length,
+      projectedZeroDate: projection.at(-1)?.month || "",
+      estimatedInterest: projection.reduce((sum, row) => sum + Number(row.total_interest || 0), 0),
+      warnings,
+      projection,
+    };
+  };
+
+  // Snowball vs Avalanche side-by-side (Part 15/16/18) - both previews run
+  // against the SAME live debts/extra-payment baseline as the active plan
+  // (or a $0-extra baseline when there's no active plan yet), so the
+  // comparison is apples-to-apples and never independently recalculated by
+  // the UI.
+  const compareStrategies = async (workspaceId) => {
+    const snapshot = await getWorkspaceSnapshot(workspaceId);
+    const { month, year } = parseAsOf(asOf);
+    const baseVersion = snapshot.activeContext?.version || null;
+    const extraMonthlyPayment = Number(baseVersion?.extraMonthlyPayment || 0);
+    const buildFor = (strategy) => buildPlanPreviewFromDebts({
+      debts: snapshot.debts,
+      planVersionLike: { strategy, extraMonthlyPayment },
+      startMonth: month,
+      startYear: year,
+    });
+    return {
+      activeStrategy: baseVersion?.strategy || null,
+      snowball: buildFor("snowball"),
+      avalanche: buildFor("avalanche"),
+    };
+  };
+
+  // What If - one-time lump sum (Part 25). A hypothetical payment is never
+  // a PaymentEvent - it only ever reduces the SIMULATED starting balance of
+  // the chosen debt for this one preview, never the live Debt record.
+  const previewOneTimePayment = async (workspaceId, { amount = 0, targetDebtId = "" } = {}) => {
+    const snapshot = await getWorkspaceSnapshot(workspaceId);
+    const { month, year } = parseAsOf(asOf);
+    const lump = Math.max(0, Number(amount) || 0);
+    const target = targetDebtId ? snapshot.debts.find((debt) => debt.id === targetDebtId) : snapshot.targetDebt;
+    if (!lump || !target) return null;
+    const baseVersion = snapshot.activeContext?.version || null;
+    const strategy = baseVersion?.strategy || "avalanche";
+    const extraMonthlyPayment = Number(baseVersion?.extraMonthlyPayment || 0);
+    const adjustedDebts = snapshot.debts.map((debt) =>
+      debt.id === target.id ? { ...debt, currentBalance: Math.max(0, Number(debt.currentBalance || 0) - lump) } : debt);
+    const baseline = buildPlanPreviewFromDebts({ debts: snapshot.debts, planVersionLike: { strategy, extraMonthlyPayment }, startMonth: month, startYear: year });
+    const withLumpSum = buildPlanPreviewFromDebts({ debts: adjustedDebts, planVersionLike: { strategy, extraMonthlyPayment }, startMonth: month, startYear: year });
+    return { amount: lump, targetDebtId: target.id, targetDebtName: target.name, baseline, withLumpSum };
+  };
+
+  // What If - custom target debt (Part 26). Never presented as Snowball or
+  // Avalanche - "custom" is a preview-only pseudo-strategy payoffEngine.js
+  // understands (see orderPayoffTargets) but PLAN_STRATEGIES never accepts,
+  // so it structurally can never be persisted as an activatable strategy.
+  const previewCustomTarget = async (workspaceId, { targetDebtId } = {}) => {
+    const snapshot = await getWorkspaceSnapshot(workspaceId);
+    const { month, year } = parseAsOf(asOf);
+    const target = snapshot.debts.find((debt) => debt.id === targetDebtId);
+    if (!target) return null;
+    const baseVersion = snapshot.activeContext?.version || null;
+    const extraMonthlyPayment = Number(baseVersion?.extraMonthlyPayment || 0);
+    const baseline = buildPlanPreviewFromDebts({ debts: snapshot.debts, planVersionLike: { strategy: baseVersion?.strategy || "avalanche", extraMonthlyPayment }, startMonth: month, startYear: year });
+    const custom = buildPlanPreviewFromDebts({ debts: snapshot.debts, planVersionLike: { strategy: "custom", extraMonthlyPayment }, startMonth: month, startYear: year, customTargetOrder: [target.id] });
+    return { targetDebtId: target.id, targetDebtName: target.name, baseline, custom };
+  };
+
+  const monthDiff = (fromMonthKey, toMonthKey) => {
+    const [fromYear, fromMonth] = String(fromMonthKey).split("-").map(Number);
+    const [toYear, toMonth] = String(toMonthKey).split("-").map(Number);
+    if (!Number.isFinite(fromYear) || !Number.isFinite(toYear)) return NaN;
+    return (toYear - fromYear) * 12 + (toMonth - fromMonth);
+  };
+
+  // Finish By (Part 29-31). Binary-searches the smallest additional
+  // monthly extra that reaches $0 by targetMonth, reusing the exact same
+  // buildProjectionWithWarnings/payoffSimulate primitives every other
+  // preview uses - a new SEARCH on top of the trusted engine, not new
+  // payoff math (Part 32/46). Never shames an infeasible target: reports
+  // the nearest feasible date at the current payment level instead.
+  const previewGoalDate = async (workspaceId, { targetMonth, targetDebtId = "" } = {}) => {
+    const snapshot = await getWorkspaceSnapshot(workspaceId);
+    const { month, year } = parseAsOf(asOf);
+    const baseVersion = snapshot.activeContext?.version || null;
+    const strategy = baseVersion?.strategy || "avalanche";
+    const currentExtra = Number(baseVersion?.extraMonthlyPayment || 0);
+    const scopedDebts = targetDebtId ? snapshot.debts.filter((debt) => debt.id === targetDebtId) : snapshot.debts;
+    const targetLabel = targetDebtId ? (scopedDebts[0]?.name || "That debt") : "Your included debts";
+    if (targetDebtId && !scopedDebts.length) {
+      return { valid: false, reason: "That debt could not be found in this workspace.", targetMonth, targetLabel };
+    }
+    const monthsAvailable = monthDiff(monthKeyFromDate(asOf), targetMonth);
+    if (!Number.isFinite(monthsAvailable) || monthsAvailable <= 0) {
+      return { valid: false, reason: "Choose a target date in the future.", targetMonth, targetLabel };
+    }
+    const searchCapMonths = Math.min(monthsAvailable, 240);
+    // payoffSimulate pushes one row per simulated month regardless of
+    // whether the debt actually reached $0 - it only stops early once every
+    // account is paid off, otherwise it runs out the clock at maxMonths. So
+    // a preview capped at searchCapMonths always reports
+    // monthsToZero === searchCapMonths when the target ISN'T reached, which
+    // would otherwise look identical to "reached zero exactly on time."
+    // Disambiguate by checking whether the last simulated month's remaining
+    // balance is actually ~0; only then is monthsToZero real, else Infinity
+    // (never reached within the window) so callers can't mistake a
+    // truncated simulation for a feasible payoff.
+    const monthsToZeroAt = (extra) => {
+      const preview = buildPlanPreviewFromDebts({
+        debts: scopedDebts,
+        planVersionLike: { strategy, extraMonthlyPayment: extra },
+        startMonth: month,
+        startYear: year,
+        maxMonths: searchCapMonths,
+      });
+      if (!preview.projection.length) return 0;
+      const reachedZero = Number(preview.projection.at(-1)?.remaining_debt || 0) <= 0.01;
+      return reachedZero ? preview.monthsToZero : Infinity;
+    };
+    const projectedZeroDateAt = (extra) => buildPlanPreviewFromDebts({
+      debts: scopedDebts,
+      planVersionLike: { strategy, extraMonthlyPayment: extra },
+      startMonth: month,
+      startYear: year,
+    }).projectedZeroDate;
+
+    const baselineMonths = monthsToZeroAt(currentExtra);
+    if (baselineMonths <= monthsAvailable) {
+      return {
+        valid: true, feasible: true, targetMonth, targetLabel,
+        currentMonthlyExtra: currentExtra, requiredMonthlyExtra: currentExtra, additionalNeeded: 0,
+        projectedZeroDate: projectedZeroDateAt(currentExtra),
+      };
+    }
+
+    let lo = currentExtra;
+    let hi = Math.max(currentExtra, 100);
+    let hiMonths = monthsToZeroAt(hi);
+    let guard = 0;
+    while (hiMonths > monthsAvailable && guard < 40 && hi < 5_000_000) {
+      hi *= 2;
+      hiMonths = monthsToZeroAt(hi);
+      guard += 1;
+    }
+    if (hiMonths > monthsAvailable) {
+      return {
+        valid: true, feasible: false, targetMonth, targetLabel,
+        currentMonthlyExtra: currentExtra,
+        nearestFeasibleZeroDate: projectedZeroDateAt(currentExtra),
+        reason: "That date isn't projected to be achievable with a reasonable payment increase.",
+      };
+    }
+    for (let iteration = 0; iteration < 30 && hi - lo > 1; iteration++) {
+      const mid = Math.round((lo + hi) / 2);
+      const midMonths = monthsToZeroAt(mid);
+      if (midMonths <= monthsAvailable) hi = mid; else lo = mid;
+    }
+    return {
+      valid: true, feasible: true, targetMonth, targetLabel,
+      currentMonthlyExtra: currentExtra, requiredMonthlyExtra: hi,
+      additionalNeeded: Math.max(0, hi - currentExtra),
+      projectedZeroDate: projectedZeroDateAt(hi),
+    };
+  };
+
+  // UX-4 Part 39: a lightweight, consumer-facing Plan History - NOT the
+  // full UX-7 milestone/retention/celebration engine (explicitly deferred).
+  // Just the immutable PlanVersion record already created by
+  // createDraftPlan/applyReforecast/applyScenario, newest first, so a user
+  // can see that N was preserved when N+1 was activated.
+  const listPlanHistory = async (workspaceId) => {
+    await getWorkspaceContext(workspaceId);
+    const activeContext = await getActivePlanContext(workspaceId);
+    if (!activeContext?.plan) return [];
+    const versions = await repository.listPlanVersions(workspaceId, activeContext.plan.id);
+    return [...versions].sort((a, b) => Number(b.versionNumber || 0) - Number(a.versionNumber || 0));
+  };
+
+  // ── UX-4: Saved Scenarios ─────────────────────────────────────────────
+  // A SavedScenario never enters the Workspace.activePlanId ->
+  // PayoffPlan.activeVersionId -> PlanVersion pointer chain on its own
+  // (Part 5/39) - only applyScenario, via the exact same applyReforecast
+  // primitive any other reforecast already uses, can promote it, and only
+  // on the user's explicit confirmation.
+  const listWorkspaceScenarios = async (workspaceId) => {
+    await getWorkspaceContext(workspaceId);
+    const scenarios = await repository.listScenarios?.(workspaceId) || [];
+    return scenarios.filter((scenario) => scenario.status !== "archived");
+  };
+
+  const saveScenario = async (workspaceId, { name, type, inputs = {} } = {}) => {
+    assertInteractive();
+    const { membership } = await getWorkspaceContext(workspaceId);
+    if (!hasPermission(membership, "managePlans")) throw new Error("Your role cannot save payoff scenarios.");
+    if (!SCENARIO_TYPES.includes(type)) throw new Error("Unsupported scenario type.");
+    const trimmedName = String(name || "").trim();
+    if (!trimmedName) throw new Error("A name is required to save a scenario.");
+    const snapshot = await getWorkspaceSnapshot(workspaceId);
+    return repository.saveScenario({
+      id: id("scenario"),
+      workspaceId,
+      name: trimmedName,
+      type,
+      status: "active",
+      basePlanId: snapshot.activeContext?.plan?.id || "",
+      basePlanVersionId: snapshot.activeContext?.version?.id || "",
+      inputs,
+      createdAt: asOf,
+      createdBy: actorId,
+    });
+  };
+
+  const archiveScenario = async (workspaceId, scenarioId) => {
+    assertInteractive();
+    const { membership } = await getWorkspaceContext(workspaceId);
+    if (!hasPermission(membership, "managePlans")) throw new Error("Your role cannot delete payoff scenarios.");
+    const existing = await repository.getScenario(workspaceId, scenarioId);
+    if (!existing) throw new Error("Scenario not found in this workspace.");
+    return repository.saveScenario({ ...existing, status: "archived", updatedAt: asOf, updatedBy: actorId });
+  };
+
+  // Recomputes the scenario's preview fresh every time (Part 34 - cheap to
+  // recompute, never trust a persisted-and-possibly-stale projection) and
+  // reports whether the workspace's active PlanVersion has moved on since
+  // the scenario was saved (Part 37) - never silently presents an old
+  // scenario's numbers as if they reflected current reality.
+  const getScenarioPreview = async (workspaceId, scenarioId) => {
+    await getWorkspaceContext(workspaceId);
+    const scenario = await repository.getScenario(workspaceId, scenarioId);
+    if (!scenario) throw new Error("Scenario not found in this workspace.");
+    const snapshot = await getWorkspaceSnapshot(workspaceId);
+    const currentVersionId = snapshot.activeContext?.version?.id || "";
+    const isStale = !!scenario.basePlanVersionId && scenario.basePlanVersionId !== currentVersionId;
+    let preview = null;
+    if (scenario.type === "recurring_extra") preview = await previewReforecast(workspaceId, { extraMonthlyPayment: Number(scenario.inputs.extraMonthlyPayment || 0) });
+    else if (scenario.type === "one_time") preview = await previewOneTimePayment(workspaceId, scenario.inputs);
+    else if (scenario.type === "custom_target") preview = await previewCustomTarget(workspaceId, scenario.inputs);
+    else if (scenario.type === "goal_date") preview = await previewGoalDate(workspaceId, scenario.inputs);
+    else if (scenario.type === "strategy_comparison") preview = await compareStrategies(workspaceId);
+    return { scenario, isStale, preview };
+  };
+
+  // Applying is always an explicit, separate action from saving/previewing
+  // (Part 21/38) and only ever mutates the active plan through the
+  // existing applyReforecast primitive - reforecastActivePlan's own
+  // priorVersionId check (fetched fresh here, not from scenario-save time)
+  // already refuses to apply over a plan that has since moved on
+  // (Part 42/66), so no separate staleness gate is needed at write time.
+  // one_time/custom_target scenarios are preview-only by design (Part 17 -
+  // "custom" is never a valid PLAN_STRATEGIES value, and a lump sum is
+  // never a PaymentEvent just because it was previewed) and are refused
+  // here with a clear, honest reason rather than silently doing nothing.
+  const applyScenario = async (workspaceId, scenarioId) => {
+    assertInteractive();
+    const { membership } = await getWorkspaceContext(workspaceId);
+    if (!hasPermission(membership, "managePlans")) throw new Error("Your role cannot apply payoff scenarios.");
+    const scenario = await repository.getScenario(workspaceId, scenarioId);
+    if (!scenario) throw new Error("Scenario not found in this workspace.");
+    if (scenario.type === "recurring_extra") {
+      return applyReforecast(workspaceId, { extraMonthlyPayment: Number(scenario.inputs.extraMonthlyPayment || 0) });
+    }
+    if (scenario.type === "strategy_comparison") {
+      if (!scenario.inputs.strategy) throw new Error("This scenario doesn't specify which strategy to apply.");
+      return applyReforecast(workspaceId, { strategy: scenario.inputs.strategy });
+    }
+    if (scenario.type === "goal_date") {
+      const fresh = await previewGoalDate(workspaceId, scenario.inputs);
+      if (!fresh?.feasible) throw new Error("This date is no longer projected to be achievable - open it again to see current options.");
+      return applyReforecast(workspaceId, { extraMonthlyPayment: fresh.requiredMonthlyExtra });
+    }
+    throw new Error("This kind of scenario is a preview only and can't be applied directly - it doesn't change your active plan.");
+  };
+
   return {
     mode,
     actorId,
@@ -1348,6 +1651,16 @@ export const createTrackToZeroV2AsyncAppService = ({
     previewScenario,
     previewReforecast,
     applyReforecast,
+    compareStrategies,
+    previewOneTimePayment,
+    previewCustomTarget,
+    previewGoalDate,
+    listPlanHistory,
+    listWorkspaceScenarios,
+    saveScenario,
+    archiveScenario,
+    getScenarioPreview,
+    applyScenario,
     getCurrentPeriod: () => monthKeyFromDate(asOf),
   };
 };

@@ -33,6 +33,14 @@ export const PERSON_STATUSES = Object.freeze(["active", "merged"]);
 // or partial import) - a value of 0 here means "unknown", NOT "paid off",
 // and must never be presented or calculated as if it were confirmed.
 export const BALANCE_STATUSES = Object.freeze(["confirmed", "unresolved"]);
+// UX-4: a SavedScenario is a persisted, non-authoritative "what if" a user
+// chose to keep - it never controls execution on its own (see
+// resolveActivePlanContextAsync's pointer chain, which a scenario is never
+// part of). "custom_target" previews a specific debt prioritized first
+// without pretending it's Snowball/Avalanche (payoffEngine.js's "custom"
+// pseudo-strategy is preview-only and is never a PLAN_STRATEGIES value).
+export const SCENARIO_TYPES = Object.freeze(["recurring_extra", "one_time", "custom_target", "goal_date", "strategy_comparison"]);
+export const SCENARIO_STATUSES = Object.freeze(["active", "archived"]);
 
 export const ROLE_PERMISSIONS = Object.freeze({
   owner: Object.freeze({

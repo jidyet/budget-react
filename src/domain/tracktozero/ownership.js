@@ -112,6 +112,16 @@ export const isBalanceUnresolved = (debt) => effectiveBalanceStatus(debt) === "u
 // or missing import) must never be treated as "paid off" - see isDebtNeedsReview.
 export const isConfirmedZero = (debt) => Number(debt?.currentBalance || 0) <= 0 && !isBalanceUnresolved(debt);
 
+// UX-4: promoted out of TrackToZeroV2App.jsx so the Plan Hub (a separate
+// component tree) can share the exact same "how do we show this debt's
+// owner" logic instead of re-deriving it - one canonical owner-display path
+// (Part 33's own requirement, carried over from DATA-HH1). A stored
+// ownerLabel that looks like statement noise (mail-handling boilerplate, a
+// card product name) is shown as "Unassigned" instead of as if it were a
+// real person - for records written before the parser-level fix existed,
+// without ever mutating the stored value or running a backfill.
+export const presentedOwnerLabel = (debt) => (looksLikeJunkOwnerLabel(debt?.ownerLabel) ? "Unassigned" : (debt?.ownerLabel || "Unassigned"));
+
 // A minimum/required payment that suspiciously equals the debt's own APR
 // percentage (e.g. minimumRequiredPayment: 6.74 when apr is stored as 0.0674,
 // i.e. 6.74%) is very likely the exact "APR became minimum payment" data

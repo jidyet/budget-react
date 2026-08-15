@@ -27,8 +27,23 @@ export const normalizeLegacyAccountForPayoff = (account, month, year) => ({
   bal: Math.max(0, Number(account.cur_bal || 0)),
 });
 
-export const orderPayoffTargets = (accounts, strategy) =>
-  [...accounts].sort((a, b) => strategy === "snowball" ? a.bal - b.bal : b.apr - a.apr);
+// UX-4: "custom" is a preview-only pseudo-strategy (never a persisted
+// PlanVersion.strategy - PLAN_STRATEGIES stays exactly ["snowball",
+// "avalanche"]) that lets a What-If preview force a specific debt to the
+// front of the extra-payment queue without pretending it's really Snowball
+// or Avalanche. customOrder ranks by array position; any account not in it
+// falls back to snowball (smallest-balance) ordering among itself.
+export const orderPayoffTargets = (accounts, strategy, customOrder = []) => {
+  if (strategy === "custom" && customOrder.length) {
+    const rank = new Map(customOrder.map((debtId, index) => [debtId, index]));
+    return [...accounts].sort((a, b) => {
+      const rankA = rank.has(a.id) ? rank.get(a.id) : Infinity;
+      const rankB = rank.has(b.id) ? rank.get(b.id) : Infinity;
+      return rankA !== rankB ? rankA - rankB : a.bal - b.bal;
+    });
+  }
+  return [...accounts].sort((a, b) => strategy === "snowball" ? a.bal - b.bal : b.apr - a.apr);
+};
 
 /**
  * Simulate debt payoff month-by-month.
@@ -44,6 +59,7 @@ export const payoffSimulate = (
   startMonth,
   startYear,
   maxMonths = MAX_SIMULATION_MONTHS,
+  customTargetOrder = [],
 ) => {
   const today = new Date();
   const safeStartMonth = Number.isFinite(Number(startMonth))
@@ -96,6 +112,7 @@ export const payoffSimulate = (
     const targetOrder = orderPayoffTargets(
       active.filter((a) => a.bal > 0.01),
       strategy,
+      customTargetOrder,
     );
     for (const t of targetOrder) {
       if (extraPool <= 0) break;

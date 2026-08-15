@@ -1,39 +1,90 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import PageHeader from "../layout/PageHeader.jsx";
 import SectionHeader from "../layout/SectionHeader.jsx";
 import EmptyState from "../ui/EmptyState.jsx";
 import LoadingState from "../ui/LoadingState.jsx";
 import InfoCallout from "../ui/InfoCallout.jsx";
+import WarningCallout from "../ui/WarningCallout.jsx";
 import ConfirmationDialog from "../ui/ConfirmationDialog.jsx";
 import ReviewSessionCard from "./ReviewSessionCard.jsx";
-import ReviewDetail from "./ReviewDetail.jsx";
 import ResolvedHistory from "./ResolvedHistory.jsx";
 import Button from "../ui/Button.jsx";
+import Badge from "../ui/Badge.jsx";
+import Field from "../ui/Field.jsx";
+import Select from "../ui/Select.jsx";
 import { ttzPalette, TYPE_SCALE } from "../theme.js";
+import { formatMoney } from "../formatting.js";
 import {
   FRIENDLY_SAVE_FAILURE,
+  REVIEW_TAB_LABEL,
+  confirmSaveLabel,
+  confirmedBalanceLine,
+  duplicatesLine,
+  excludedLine,
   getReviewCenterSummary,
+  itemCountLabel,
+  itemPositionLabel,
+  jumpToItemLabel,
   laterItemBlockingNote,
-  laterSectionHint,
-  laterSectionTitle,
-  reviewProgressLabel,
+  missingFieldLine,
+  newDebtsLine,
+  nextItemLabel,
+  preSaveSummaryIntro,
+  preSaveSummaryTitle,
+  previousItemLabel,
+  readyStatLabel,
   saveResultSummary,
   saveWhatIKnowLabel,
   skipAllConfirmBody,
   skipAllConfirmTitle,
   skipAllForNowLabel,
   skipAllResultSummary,
+  skippedStatLabel,
+  stillNeedsDecisionLine,
+  stillNeedsDecisionStatLabel,
+  updatedDebtsLine,
 } from "../../../services/tracktozero/reviewCopy.js";
 import { isDeferred, sortOpenReviewItems } from "../../../services/tracktozero/reviewDomain.js";
+import { buildPreSaveSummary, getTerminalEntry } from "./reviewSessionSummary.js";
 
-// REVIEW-1C: a session-oriented Needs Review experience. The default view
-// shows every actionable open item inline with its own staged form
-// sections (Part 2) instead of requiring a modal per item. Nothing here
-// computes match scores, writes Firestore, or decides idempotency/staleness
-// itself (Part 40/42) - staged answers are just plain local state until
-// "Save what I know" calls service.saveReviewSession, which is the one
-// place that walks REVIEW-1A's already-safe, already-atomic resolution
-// primitives one item at a time.
+// REVIEW-1C: an item-by-item review session. Every item still renders its
+// staged (non-authoritative) form via ReviewSessionCard (Part 5/40) - what
+// changed is navigation: the user works through one item at a time
+// (Previous/Next/jump), not a long scroll of every card at once, and staged
+// answers survive moving back and forth (Part 5 - "go back to Item A and
+// change it again"). Nothing here writes Firestore directly; the only
+// authoritative action is the single explicit "Save reviewed changes",
+// gated behind a pre-save summary so the user knows exactly what will (and
+// will not) be committed before it happens (Part 15).
+
+function JumpList({ items, onJump }) {
+  const palette = ttzPalette;
+  if (!items.length) return <p style={{ ...TYPE_SCALE.body, color: palette.tx2 }}>Nothing here.</p>;
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      {items.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          onClick={() => onJump(item.id)}
+          style={{
+            textAlign: "left",
+            padding: "10px 14px",
+            borderRadius: "var(--ttz-radius-md, 12px)",
+            border: `1px solid ${palette.border}`,
+            background: palette.surf,
+            cursor: "pointer",
+            ...TYPE_SCALE.body,
+            color: palette.tx,
+          }}
+        >
+          {item.candidate.accountName || item.candidate.creditorName || "Debt statement"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function ReviewCenter({ snapshot, service, workspaceId, reviewSnapshot, loadingReview, onRefreshReview }) {
   const palette = ttzPalette;
   const [staged, setStaged] = useState({}); // { [itemId]: { [subtype]: {action,args,label} } }
@@ -41,8 +92,11 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
   const [saving, setSaving] = useState(false);
   const [summary, setSummary] = useState("");
   const [confirmSkipAll, setConfirmSkipAll] = useState(false);
-  const [finishItemId, setFinishItemId] = useState(null);
-  const [showResolved, setShowResolved] = useState(false);
+  const [confirmSave, setConfirmSave] = useState(false);
+  const [showResolved, setShowResolved] = useState(true);
+  const [tab, setTab] = useState("needsReview");
+  const [cursorId, setCursorId] = useState(null);
+  const isHousehold = snapshot.workspace.type === "household";
 
   const openItems = sortOpenReviewItems(reviewSnapshot?.openItems || []);
   const resolvedItems = reviewSnapshot?.resolvedItems || [];
@@ -50,10 +104,31 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
   const laterItems = openItems.filter(isDeferred);
   const openCount = reviewSnapshot?.openCount ?? openItems.length;
   const blockingCount = reviewSnapshot?.blockingCount ?? 0;
-  const isHousehold = snapshot.workspace.type === "household";
-  const finishItem = laterItems.find((item) => item.id === finishItemId) || null;
 
-  const answeredCount = needsAttentionItems.filter((item) => Object.keys(staged[item.id] || {}).length > 0).length;
+  const readyCount = needsAttentionItems.filter((item) => !!getTerminalEntry(staged[item.id])).length;
+  const stillNeedsDecisionCount = needsAttentionItems.length - readyCount;
+  const hasAnyWork = needsAttentionItems.length + laterItems.length > 0;
+
+  // REVIEW-1C Part 19: warn before an accidental refresh/close throws away
+  // an in-progress review session - staged answers are plain local state
+  // until an explicit Save, so losing the tab loses the work.
+  useEffect(() => {
+    if (!Object.keys(staged).length) return undefined;
+    const handler = (event) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [staged]);
+
+  const queue = tab === "needsReview" ? needsAttentionItems : tab === "skipped" ? laterItems : [];
+  const queueIds = queue.map((item) => item.id).join(",");
+  const currentIndex = Math.max(0, queue.findIndex((item) => item.id === cursorId));
+  const currentItem = queue[currentIndex] || null;
+
+  useEffect(() => {
+    if (queue.length && !queue.some((item) => item.id === cursorId)) setCursorId(queue[0].id);
+    else if (!queue.length) setCursorId(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, queueIds]);
 
   const handleStage = (item, subtype, entry) => {
     setStaged((state) => {
@@ -82,7 +157,7 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
     }
   };
 
-  const handleSaveWhatIKnow = async () => {
+  const runSaveReviewedChanges = async () => {
     const flat = [];
     for (const item of needsAttentionItems) {
       const forItem = staged[item.id];
@@ -91,6 +166,7 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
         flat.push({ itemId: item.id, importBatchId: item.importBatchId, importCandidateId: item.importCandidateId, action: entry.action, args: entry.args });
       }
     }
+    setConfirmSave(false);
     if (!flat.length) return;
     setSaving(true);
     try {
@@ -128,7 +204,23 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
     }
   };
 
+  const preSaveSummary = useMemo(() => buildPreSaveSummary(needsAttentionItems, staged), [needsAttentionItems, staged]);
   const overallSummary = getReviewCenterSummary({ openCount, blockingCount });
+  const goPrev = () => { if (currentIndex > 0) setCursorId(queue[currentIndex - 1].id); };
+  const goNext = () => { if (currentIndex < queue.length - 1) setCursorId(queue[currentIndex + 1].id); };
+
+  const summaryLines = [
+    newDebtsLine(preSaveSummary.newDebtCount),
+    updatedDebtsLine(preSaveSummary.updateCount),
+    (preSaveSummary.newDebtCount + preSaveSummary.updateCount) ? confirmedBalanceLine(formatMoney(preSaveSummary.confirmedBalanceTotal)) : "",
+    duplicatesLine(preSaveSummary.duplicateCount),
+    excludedLine(preSaveSummary.excludedCount),
+    stillNeedsDecisionLine(preSaveSummary.stillNeedsDecision),
+    missingFieldLine("APR", preSaveSummary.missingAprCount),
+    missingFieldLine("Minimum payment", preSaveSummary.missingMinimumCount),
+    missingFieldLine("Due date", preSaveSummary.missingDueDateCount),
+    missingFieldLine("Owner", preSaveSummary.missingOwnerCount),
+  ].filter(Boolean);
 
   return (
     <>
@@ -141,89 +233,123 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
         <>
           <SectionHeader title={Array.isArray(overallSummary) ? overallSummary[0] : overallSummary} description={Array.isArray(overallSummary) ? overallSummary.slice(1).join(" · ") : undefined} />
 
-          {needsAttentionItems.length ? (
-            <>
-              <p style={{ ...TYPE_SCALE.supporting, color: palette.tx2, marginBottom: 16 }} aria-live="polite">
-                {reviewProgressLabel(answeredCount, needsAttentionItems.length)}
-              </p>
-              <div style={{ display: "grid", gap: 16, marginBottom: 24 }}>
-                {needsAttentionItems.map((item) => (
+          <div role="tablist" aria-label="Review filter" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 20 }}>
+            {["needsReview", "skipped", "resolved", "all"].map((key) => {
+              const count = key === "needsReview" ? needsAttentionItems.length : key === "skipped" ? laterItems.length : key === "resolved" ? resolvedItems.length : openItems.length + resolvedItems.length;
+              return (
+                <Button key={key} role="tab" aria-selected={tab === key} size="sm" variant={tab === key ? "primary" : "secondary"} onClick={() => setTab(key)}>
+                  {REVIEW_TAB_LABEL[key]} ({count})
+                </Button>
+              );
+            })}
+          </div>
+
+          {tab === "needsReview" || tab === "skipped" ? (
+            queue.length ? (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+                  <span style={{ ...TYPE_SCALE.supporting, color: palette.tx2 }} aria-live="polite">
+                    {itemPositionLabel(currentIndex + 1, queue.length)}
+                  </span>
+                  <div style={{ display: "flex", alignItems: "flex-end", gap: 8, flexWrap: "wrap" }}>
+                    <Field label={jumpToItemLabel()}>
+                      <Select value={currentItem?.id || ""} onChange={(event) => setCursorId(event.target.value)} aria-label={jumpToItemLabel()}>
+                        {queue.map((item, index) => (
+                          <option key={item.id} value={item.id}>
+                            {index + 1}. {item.candidate.accountName || item.candidate.creditorName || "Debt statement"}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                    <Button size="sm" variant="secondary" disabled={currentIndex <= 0} onClick={goPrev}>{previousItemLabel()}</Button>
+                    <Button size="sm" variant="secondary" disabled={currentIndex >= queue.length - 1} onClick={goNext}>{nextItemLabel()}</Button>
+                  </div>
+                </div>
+
+                {tab === "skipped" && currentItem?.blocking ? (
+                  <WarningCallout style={{ marginBottom: 12 }} title={laterItemBlockingNote()} />
+                ) : null}
+
+                {currentItem ? (
                   <ReviewSessionCard
-                    key={item.id}
-                    item={item}
+                    key={currentItem.id}
+                    item={currentItem}
                     isHousehold={isHousehold}
                     members={snapshot.members}
                     debts={snapshot.debts}
                     latestSnapshotsByDebt={snapshot.latestSnapshotsByDebt}
-                    stagedForItem={staged[item.id] || {}}
-                    onStage={(subtype, entry) => handleStage(item, subtype, entry)}
-                    onLeaveForLater={() => handleLeaveForLater(item)}
+                    stagedForItem={staged[currentItem.id] || {}}
+                    onStage={(subtype, entry) => handleStage(currentItem, subtype, entry)}
+                    onLeaveForLater={() => handleLeaveForLater(currentItem)}
                     busy={saving}
-                    resultMessage={itemResults[item.id]?.message}
-                    resultTone={itemResults[item.id]?.tone}
+                    resultMessage={itemResults[currentItem.id]?.message}
+                    resultTone={itemResults[currentItem.id]?.tone}
                   />
-                ))}
-              </div>
+                ) : null}
+              </>
+            ) : (
+              <EmptyState
+                title={tab === "needsReview" ? "You're all caught up." : "Nothing saved for later."}
+                description={tab === "needsReview" ? "Nothing needs a second look right now." : "Items you skip will show up here."}
+              />
+            )
+          ) : null}
 
-              {/* Sticky primary action bar (Part 29/35) - stays reachable
-                  while scrolling through several staged items, without
-                  overlapping the sticky TopBar (that one pins to `top`,
-                  this one pins to `bottom`). */}
-              <div
-                style={{
-                  position: "sticky",
-                  bottom: 0,
-                  background: palette.surf,
-                  borderTop: `1px solid ${palette.border}`,
-                  padding: "12px 16px",
-                  marginLeft: -16,
-                  marginRight: -16,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  flexWrap: "wrap",
-                  zIndex: 20,
-                }}
-              >
-                <span style={{ ...TYPE_SCALE.supporting, color: palette.tx2 }}>{reviewProgressLabel(answeredCount, needsAttentionItems.length)}</span>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <Button variant="ghost" disabled={saving} onClick={() => setConfirmSkipAll(true)}>{skipAllForNowLabel()}</Button>
-                  <Button variant="primary" disabled={saving || !answeredCount} onClick={handleSaveWhatIKnow}>
-                    {saving ? "Saving..." : saveWhatIKnowLabel()}
-                  </Button>
-                </div>
-              </div>
-            </>
-          ) : (
-            <EmptyState title="You're all caught up." description="Nothing needs a second look right now." />
-          )}
+          {tab === "resolved" ? <ResolvedHistory items={resolvedItems} /> : null}
 
-          {laterItems.length ? (
-            <div style={{ marginTop: 32 }}>
-              <SectionHeader eyebrow={laterSectionTitle()} title={`${laterItems.length} saved for later`} description={laterSectionHint()} />
-              <div style={{ display: "grid", gap: 12 }}>
-                {laterItems.map((item) => (
-                  <div key={item.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 16px", borderRadius: "var(--ttz-radius-md, 12px)", border: `1px solid ${palette.border}`, background: palette.surf }}>
-                    <div>
-                      <div style={{ ...TYPE_SCALE.body, color: palette.tx, fontWeight: 700 }}>{item.candidate.accountName || "Debt statement"}</div>
-                      {item.blocking ? <div style={{ ...TYPE_SCALE.caption, color: palette.wa }}>{laterItemBlockingNote()}</div> : null}
-                    </div>
-                    <Button size="sm" variant="secondary" onClick={() => setFinishItemId(item.id)}>Finish this</Button>
-                  </div>
-                ))}
+          {tab === "all" ? (
+            <div style={{ display: "grid", gap: 24 }}>
+              <div>
+                <SectionHeader eyebrow={REVIEW_TAB_LABEL.needsReview} title={itemCountLabel(needsAttentionItems.length)} />
+                <JumpList items={needsAttentionItems} onJump={(id) => { setTab("needsReview"); setCursorId(id); }} />
+              </div>
+              <div>
+                <SectionHeader eyebrow={REVIEW_TAB_LABEL.skipped} title={itemCountLabel(laterItems.length)} />
+                <JumpList items={laterItems} onJump={(id) => { setTab("skipped"); setCursorId(id); }} />
+              </div>
+              <div>
+                <SectionHeader
+                  eyebrow={REVIEW_TAB_LABEL.resolved}
+                  title={itemCountLabel(resolvedItems.length)}
+                  actions={<Button size="sm" variant="ghost" onClick={() => setShowResolved((value) => !value)}>{showResolved ? "Hide" : "Show"}</Button>}
+                />
+                {showResolved ? <ResolvedHistory items={resolvedItems} /> : null}
               </div>
             </div>
           ) : null}
 
-          <div style={{ marginTop: 32 }}>
-            <SectionHeader
-              eyebrow="History"
-              title="Resolved"
-              actions={<Button size="sm" variant="ghost" onClick={() => setShowResolved((value) => !value)}>{showResolved ? "Hide" : "Show"}</Button>}
-            />
-            {showResolved ? <ResolvedHistory items={resolvedItems} /> : null}
-          </div>
+          {hasAnyWork ? (
+            <div
+              style={{
+                position: "sticky",
+                bottom: 0,
+                background: palette.surf,
+                borderTop: `1px solid ${palette.border}`,
+                padding: "12px 16px",
+                marginTop: 24,
+                marginLeft: -16,
+                marginRight: -16,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
+                zIndex: 20,
+              }}
+            >
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                <Badge tone="success">{readyStatLabel(readyCount)}</Badge>
+                <Badge tone="neutral">{skippedStatLabel(laterItems.length)}</Badge>
+                <Badge tone={stillNeedsDecisionCount ? "warning" : "neutral"}>{stillNeedsDecisionStatLabel(stillNeedsDecisionCount)}</Badge>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Button variant="ghost" disabled={saving} onClick={() => setConfirmSkipAll(true)}>{skipAllForNowLabel()}</Button>
+                <Button variant="primary" disabled={saving || !readyCount} onClick={() => setConfirmSave(true)}>
+                  {saving ? "Saving..." : saveWhatIKnowLabel()}
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </>
       )}
 
@@ -238,19 +364,21 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
         {skipAllConfirmBody()}
       </ConfirmationDialog>
 
-      <ReviewDetail
-        item={finishItem}
-        open={!!finishItem}
-        onClose={() => setFinishItemId(null)}
-        workspaceId={workspaceId}
-        workspace={snapshot.workspace}
-        members={snapshot.members}
-        service={service}
-        onResolved={async () => {
-          setFinishItemId(null);
-          await onRefreshReview();
-        }}
-      />
+      <ConfirmationDialog
+        open={confirmSave}
+        title={preSaveSummaryTitle()}
+        confirmLabel={confirmSaveLabel()}
+        cancelLabel="Cancel"
+        onConfirm={runSaveReviewedChanges}
+        onCancel={() => setConfirmSave(false)}
+      >
+        <div style={{ display: "grid", gap: 6 }}>
+          <p style={{ ...TYPE_SCALE.body, color: palette.tx, fontWeight: 700, margin: 0 }}>{preSaveSummaryIntro(readyCount)}</p>
+          {summaryLines.map((line) => (
+            <p key={line} style={{ ...TYPE_SCALE.body, color: palette.tx2, margin: 0 }}>{line}</p>
+          ))}
+        </div>
+      </ConfirmationDialog>
     </>
   );
 }

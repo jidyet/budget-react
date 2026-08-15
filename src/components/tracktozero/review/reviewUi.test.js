@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import ReviewCard from "./ReviewCard.jsx";
 import ReviewCenter from "./ReviewCenter.jsx";
 import ReviewDetail from "./ReviewDetail.jsx";
+import { buildPreSaveSummary } from "./reviewSessionSummary.js";
 import ResolvedHistory from "./ResolvedHistory.jsx";
 import HomeQuickCheck from "./HomeQuickCheck.jsx";
 import { toReviewItem } from "../../../services/tracktozero/reviewDomain.js";
@@ -137,7 +138,9 @@ describe("REVIEW-1C: ReviewCenter (batch session)", () => {
     }));
     expect(html).toContain("1 thing needs a quick check");
     expect(html).toContain("Firstmark Services");
-    expect(html).toContain("0 of 1 answered");
+    expect(html).toContain("Item 1 of 1");
+    expect(html).toContain("0 ready");
+    expect(html).toContain("1 still needs a decision");
     expect(html).toContain("Save what I know");
     expect(html).toContain("Skip all for now");
   });
@@ -293,5 +296,149 @@ describe("REVIEW-1B: ReviewDetail resolution surface", () => {
     const source = readFileSync(fileURLToPath(new URL("./ReviewDetail.jsx", import.meta.url)), "utf8");
     expect(source).toContain("FRIENDLY_STALE_MESSAGE");
     expect(source).not.toMatch(/["'`]This debt changed since/);
+  });
+});
+
+describe("REVIEW-1C: ReviewCenter wizard navigation", () => {
+  const snapshot = {
+    workspace: { type: "personal" },
+    members: [],
+    debts: [{ id: "debt-1", name: "Firstmark Services", currentBalance: 34233.67 }],
+    latestSnapshotsByDebt: {},
+  };
+
+  it("shows Item 1 of N with Previous disabled and Next enabled when more than one item is open", () => {
+    const itemA = item({ candidateId: "cand-a" });
+    const itemB = item({ candidateId: "cand-b", accountName: "Capital One" }, { id: "batch-2" });
+    const html = render(h(ReviewCenter, {
+      snapshot, service: {}, workspaceId: "personal-seed",
+      reviewSnapshot: { openItems: [itemA, itemB], resolvedItems: [], openCount: 2, blockingCount: 2 },
+      loadingReview: false, onRefreshReview: async () => {},
+    }));
+    expect(html).toContain("Item 1 of 2");
+    expect(html).toMatch(/Previous<\/button>/);
+    expect(html).toContain("Capital One");
+    // Previous is disabled on the first item; Next is not.
+    const previousButton = html.match(/<button[^>]*>Previous<\/button>/)[0];
+    const nextButton = html.match(/<button[^>]*>Next<\/button>/)[0];
+    expect(previousButton).toContain('disabled=""');
+    expect(nextButton).not.toContain('disabled=""');
+  });
+
+  it("shows all four filter tabs with truthful counts", () => {
+    const openItem = item();
+    const html = render(h(ReviewCenter, {
+      snapshot, service: {}, workspaceId: "personal-seed",
+      reviewSnapshot: { openItems: [openItem], resolvedItems: [], openCount: 1, blockingCount: 1 },
+      loadingReview: false, onRefreshReview: async () => {},
+    }));
+    expect(html).toContain("Needs review (1)");
+    expect(html).toContain("Skipped for later (0)");
+    expect(html).toContain("Resolved (0)");
+    expect(html).toContain("All (1)");
+  });
+});
+
+describe("REVIEW-1C: buildPreSaveSummary - truthful pre-save categorization", () => {
+  const existingDebtItem = () => item({ candidateId: "existing-1" });
+  const newDebtItem = () =>
+    toReviewItem({
+      batch: batch({ id: "batch-new" }),
+      candidate: matchCandidate({ candidateId: "new-1", evidence: {} }),
+    });
+
+  it("counts a staged existing-debt update as ready, and adds its confirmed balance to the total", () => {
+    const target = existingDebtItem();
+    const summary = buildPreSaveSummary([target], {
+      [target.id]: { match: { action: "resolveAsExistingDebt", args: { targetDebtId: "debt-1" } } },
+    });
+    expect(summary.updateCount).toBe(1);
+    expect(summary.newDebtCount).toBe(0);
+    expect(summary.confirmedBalanceTotal).toBe(target.candidate.currentBalance);
+    expect(summary.stillNeedsDecision).toBe(0);
+  });
+
+  it("a staged new-debt decision counts as ready and uses the item's known balance", () => {
+    const target = newDebtItem();
+    const summary = buildPreSaveSummary([target], {
+      [target.id]: { match: { action: "resolveAsNewDebt", args: {} } },
+    });
+    expect(summary.newDebtCount).toBe(1);
+    expect(summary.confirmedBalanceTotal).toBe(target.candidate.currentBalance);
+  });
+
+  it("a staged balance answer overrides the candidate's raw balance in the confirmed total", () => {
+    const target = newDebtItem();
+    const summary = buildPreSaveSummary([target], {
+      [target.id]: {
+        match: { action: "resolveAsNewDebt", args: {} },
+        balance: { action: "resolveBalance", args: { currentBalance: 500 } },
+      },
+    });
+    expect(summary.confirmedBalanceTotal).toBe(500);
+  });
+
+  it("an unresolved balance is never folded into the confirmed total", () => {
+    const target = toReviewItem({
+      batch: batch({ id: "batch-unresolved" }),
+      candidate: matchCandidate({ candidateId: "missing-bal", evidence: {}, currentBalance: 0, balanceStatus: "unresolved" }),
+    });
+    const summary = buildPreSaveSummary([target], {
+      [target.id]: { match: { action: "resolveAsNewDebt", args: {} } },
+    });
+    expect(summary.newDebtCount).toBe(1);
+    expect(summary.confirmedBalanceTotal).toBe(0);
+  });
+
+  it("dismissDuplicate counts as a resolved duplicate, not an update or new debt", () => {
+    const target = existingDebtItem();
+    const summary = buildPreSaveSummary([target], {
+      [target.id]: { duplicate: { action: "dismissDuplicate", args: {} } },
+    });
+    expect(summary.duplicateCount).toBe(1);
+    expect(summary.updateCount).toBe(0);
+    expect(summary.confirmedBalanceTotal).toBe(0);
+  });
+
+  it("excluding via business scope counts as excluded, not ready-to-update", () => {
+    const target = existingDebtItem();
+    const summary = buildPreSaveSummary([target], {
+      [target.id]: { scope: { action: "resolveBusinessScope", args: { decision: "exclude" } } },
+    });
+    expect(summary.excludedCount).toBe(1);
+    expect(summary.stillNeedsDecision).toBe(0);
+  });
+
+  it("including via business scope alone is NOT terminal - the item still needs a separate new/existing decision", () => {
+    const target = existingDebtItem();
+    const summary = buildPreSaveSummary([target], {
+      [target.id]: { scope: { action: "resolveBusinessScope", args: { decision: "include" } } },
+    });
+    expect(summary.excludedCount).toBe(0);
+    expect(summary.updateCount).toBe(0);
+    expect(summary.stillNeedsDecision).toBe(1);
+  });
+
+  it("an item with no staged answer at all is 'still needs a decision', never silently ready", () => {
+    const target = existingDebtItem();
+    const summary = buildPreSaveSummary([target], {});
+    expect(summary.stillNeedsDecision).toBe(1);
+    expect(summary.updateCount).toBe(0);
+    expect(summary.newDebtCount).toBe(0);
+  });
+
+  it("tallies remaining-missing APR/minimum/due date/owner only for items that stay open after this save", () => {
+    const missingApr = toReviewItem({
+      batch: batch({ id: "batch-apr" }),
+      candidate: matchCandidate({ candidateId: "apr-1", evidence: {}, aprStatus: "unknown" }),
+    });
+    const summary = buildPreSaveSummary([missingApr], {});
+    expect(summary.missingAprCount).toBe(1);
+
+    // Once staged (even without a terminal decision), it no longer counts
+    // as "still missing" for this save's summary purposes.
+    const staged = { [missingApr.id]: { apr: { action: "resolveApr", args: { apr: 0.05 } } } };
+    const summaryAfterStaging = buildPreSaveSummary([missingApr], staged);
+    expect(summaryAfterStaging.missingAprCount).toBe(0);
   });
 });

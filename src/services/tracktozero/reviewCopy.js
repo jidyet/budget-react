@@ -171,3 +171,52 @@ export const historicalStatementQuestion = () => "This statement is older than y
 export const historicalStatementNote = () => "Adding it won't replace your current balance.";
 export const addOlderBalanceLabel = () => "Add older balance";
 export const ignoreStatementLabel = () => "Ignore this statement";
+
+// ── REVIEW-1C wizard: item-by-item navigation + pre-save summary ────────
+
+export const itemPositionLabel = (index, total) => `Item ${index} of ${total}`;
+export const previousItemLabel = () => "Previous";
+export const nextItemLabel = () => "Next";
+export const jumpToItemLabel = () => "Jump to item";
+
+export const REVIEW_TAB_LABEL = Object.freeze({
+  needsReview: "Needs review",
+  skipped: "Skipped for later",
+  resolved: "Resolved",
+  all: "All",
+});
+
+export const itemCountLabel = (count) => `${count} item${count === 1 ? "" : "s"}`;
+export const readyStatLabel = (count) => `${count} ready`;
+export const skippedStatLabel = (count) => `${count} skipped for later`;
+export const stillNeedsDecisionStatLabel = (count) => `${count} still need${count === 1 ? "s" : ""} a decision`;
+
+export const reviewedItemStatusLabel = (status) => ({
+  ready: "Ready to save",
+  skipped: "Skipped for later",
+  needsAttention: "Needs attention",
+  saved: "Saved",
+})[status] || "Needs attention";
+
+// Pre-save confirmation summary (Part 15) - shown once, before the single
+// explicit Save action actually calls saveReviewSession. Every line here
+// must be honest about what will and will not happen - no unresolved/
+// skipped value is ever folded into a "confirmed" total.
+export const preSaveSummaryTitle = () => "Ready to save?";
+export const preSaveSummaryIntro = (readyCount) =>
+  readyCount === 1 ? "1 reviewed item is ready to save." : `${readyCount} reviewed items are ready to save.`;
+export const newDebtsLine = (count) => (count ? `${count} new debt${count === 1 ? "" : "s"} will be added.` : "");
+export const updatedDebtsLine = (count) => (count ? `${count} existing debt${count === 1 ? "" : "s"} will be updated.` : "");
+export const confirmedBalanceLine = (formattedAmount) => `Confirmed balances recorded: ${formattedAmount}`;
+export const excludedLine = (count) => (count ? `${count} item${count === 1 ? "" : "s"} will be excluded.` : "");
+export const duplicatesLine = (count) => (count ? `${count} duplicate${count === 1 ? "" : "s"} resolved.` : "");
+// Deliberately does not claim "won't be saved" - an item counted here may
+// still have a non-terminal field answer staged (e.g. a confirmed balance)
+// that WILL be saved this round even though the item itself stays open
+// until a new/existing decision is also made.
+export const stillNeedsDecisionLine = (count) =>
+  count ? `${count} item${count === 1 ? "" : "s"} still need${count === 1 ? "s" : ""} one more decision before they're fully resolved.` : "";
+export const missingFieldLine = (label, count) => (count ? `${label}: still unknown on ${count} item${count === 1 ? "" : "s"}.` : "");
+export const confirmSaveLabel = () => "Confirm and save";
+
+export const unsavedSessionWarning = () => "You have review changes that haven't been saved yet. Leaving now won't save them.";

@@ -158,6 +158,19 @@ describe("REVIEW-1A resolution status (Part 4, 32) - resolved requires the mutat
     });
     expect(getReviewItemStatus(failedAttempt)).not.toBe(REVIEW_STATUS.resolved);
   });
+
+  it("UX-5: a plain quick-confirm candidate (no reviewResolution) becomes RESOLVED once committedOutcome is stamped, so Review reconciles with the real Debt it created", () => {
+    const quickConfirmed = candidate({
+      decision: "confirmed",
+      committedOutcome: { type: REVIEW_RESOLUTION_TYPES.createdNewDebt, debtId: "d1", at: "2026-08-11T00:05:00.000Z" },
+    });
+    expect(getReviewItemStatus(quickConfirmed)).toBe(REVIEW_STATUS.resolved);
+  });
+
+  it("UX-5: a plain Exclude (no reviewResolution) is DISMISSED, not stuck open forever", () => {
+    const quickExcluded = candidate({ decision: "excluded" });
+    expect(getReviewItemStatus(quickExcluded)).toBe(REVIEW_STATUS.dismissed);
+  });
 });
 
 describe("REVIEW-1A shared selectors (Part 9) - ONE source of review truth", () => {

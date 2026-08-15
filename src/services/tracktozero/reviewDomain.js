@@ -174,6 +174,20 @@ const DISMISSING_RESOLUTION_TYPES = new Set([
 ]);
 
 export const getReviewItemStatus = (candidate = {}) => {
+  // UX-5: a candidate confirmed through the plain quick-confirm path (Import's
+  // own bulk Confirm, not a reconciliation resolveAsExistingDebt/resolveAsNewDebt
+  // decision) never gets a `reviewResolution` stamped - only `committedOutcome`,
+  // once commitImportBatch actually creates/updates the Debt. Without this,
+  // such a candidate would stay OPEN forever even after becoming a real,
+  // authoritative Debt (Part 25/86 - Review must reconcile with Debts/Home,
+  // not lag behind them). committedOutcome is only ever set after a genuine
+  // successful mutation, so this can never mark a failed/pending item resolved.
+  if (candidate.committedOutcome) return REVIEW_STATUS.resolved;
+  // Same gap as above: a plain Exclude via Import's quick-confirm path never
+  // gets a reviewResolution stamped either. Excluding is a deliberate final
+  // decision (never becomes a Debt) - it must read as DISMISSED, not linger
+  // as an open, actionable review item forever.
+  if (candidate.decision === "excluded") return REVIEW_STATUS.dismissed;
   const resolution = candidate.reviewResolution || null;
   if (!resolution || resolution.type === REVIEW_RESOLUTION_TYPES.deferred) return REVIEW_STATUS.open;
   if (DISMISSING_RESOLUTION_TYPES.has(resolution.type)) return REVIEW_STATUS.dismissed;

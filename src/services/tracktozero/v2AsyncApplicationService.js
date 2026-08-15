@@ -1639,6 +1639,16 @@ export const createTrackToZeroV2AsyncAppService = ({
     recordPayment,
     recordBalanceSnapshot,
     createImportBatch,
+    // Read-only resume support (UX-5 Part 51): lets the UI reload an
+    // already-created, still-open ImportBatch (e.g. after navigating away
+    // mid-review) without re-deriving it from getReviewSnapshot's flattened
+    // items. Never mutates anything. Workspace membership is verified the
+    // same way every other read here is (Part 59 - no forged workspaceId
+    // can read another workspace's batch).
+    getImportBatch: async (workspaceId, batchId) => {
+      await getWorkspaceContext(workspaceId);
+      return repository.getImportBatch(workspaceId, batchId);
+    },
     decideImportCandidate,
     resolveImportCandidateMatch,
     commitImportBatch,

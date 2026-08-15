@@ -144,6 +144,32 @@ describe("DATA-1A workbook debt discovery", () => {
     expect(candidates[0]).toMatchObject({ creditorName: "Chase", currentBalance: 1200, aprStatus: "known", minimumPayment: 35 });
   });
 
+  it("recognizes the household budget monthly layout and prefers the newest month for balance, minimum due, due date, and as-of date", () => {
+    const wb = XLSX.utils.book_new();
+    addSheet(wb, "January", [
+      ["Expense", "Amount", "Due Date", "Adj Due Date", "Paid?", "Amt Paid", "Interest Rate", "Balance", "Est. Next Pmt"],
+      ["CAPITAL ONE (Credit Card) (Kristina)", 100, "2026-01-03", "2026-01-03", "", 0, "26.40%", 2046.12, 143.82],
+    ]);
+    addSheet(wb, "December", [
+      ["Expense", "Amount", "Due Date", "Adj Due Date", "Paid?", "Amt Paid", "Interest Rate", "Balance", "Est. Next Pmt"],
+      ["CAPITAL ONE (Credit Card) (Kristina)", 100, "2026-12-03", "2026-12-03", "", 0, "26.40%", 2476.25, 154.48],
+      ["CREDIT CARDS SUBTOTAL", 100, "", "", "", 0, "", 2476.25, 154.48],
+    ]);
+    const { candidates } = discoverWorkbookDebtCandidates({ workbook: wb, XLSX, fileName: "household-budget.xlsx", importBatchId: "batch" });
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({
+      accountName: "CAPITAL ONE (Credit Card)",
+      debtType: "credit_card",
+      currentBalance: 2476.25,
+      balanceStatus: "confirmed",
+      aprStatus: "known",
+      minimumPayment: 154.48,
+      dueDate: "2026-12-03",
+      statementDate: "2026-12-31",
+    });
+    expect(candidates[0].evidence.fieldEvidence.minimumPayment[0].provenance.header).toBe("Est. Next Pmt");
+  });
+
   it("DATA-1 HOTFIX regression: classification/bill-signal evidence never contains a literal undefined value (Firestore setDoc rejects it)", () => {
     const { candidates } = discoverWorkbookDebtCandidates({ workbook: buildSyntheticHouseholdBudget(), XLSX, fileName: "synthetic.xlsx", importBatchId: "batch" });
     expect(candidates.length).toBeGreaterThan(0);

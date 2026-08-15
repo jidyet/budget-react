@@ -33,14 +33,14 @@ const MONTH_NAMES = [
 const HEADER_ALIASES = {
   identity: [
     "creditor", "account", "account name", "account/cardholder", "account / cardholder",
-    "debt", "lender", "card", "card name", "loan", "account holder", "cardholder",
+    "debt", "lender", "card", "card name", "loan", "account holder", "cardholder", "expense",
   ],
   creditorName: ["creditor", "lender", "bank", "issuer"],
   accountName: ["account", "account name", "debt", "debt name", "name", "account/cardholder", "account / cardholder"],
   debtType: ["type", "debt type", "account type", "category"],
   currentBalance: ["balance", "current balance", "remaining balance", "amount owed", "debt balance", "outstanding", "payoff amount", "new balance"],
   startingBalance: ["starting balance", "opening balance", "original balance"],
-  minimumPayment: ["minimum payment", "minimum", "minimum due", "monthly payment", "payment", "required payment", "min payment", "min due"],
+  minimumPayment: ["est next pmt", "estimated next payment", "minimum payment", "minimum", "minimum due", "monthly payment", "payment", "required payment", "min payment", "min due", "amount"],
   apr: ["apr", "interest rate", "rate", "annual percentage rate", "interest %"],
   dueDate: ["due date", "payment due", "due day", "due"],
   owner: ["owner", "cardholder", "borrower", "account holder", "member"],
@@ -67,6 +67,23 @@ const decodeRange = (XLSX, sheet) => {
 const normalizeHeader = (value) => normalizeText(value).replace(/\s*\/\s*/g, " / ");
 const isMonthName = (value) => MONTH_NAMES.includes(normalizeText(value));
 const columnLetter = (XLSX, colIndex) => XLSX.utils.encode_col(colIndex);
+const minimumPaymentPriority = (header) => {
+  const normalized = normalizeHeader(header);
+  if (/^(est|estimated) next (pmt|payment)$/.test(normalized)) return 3;
+  if (/^(minimum|min) (payment|due)$/.test(normalized)) return 2;
+  return 1;
+};
+const monthEndStatementDate = ({ sheetName, dueDate }) => {
+  const monthIndex = MONTH_NAMES.indexOf(normalizeText(sheetName));
+  const year = Number(String(dueDate || "").slice(0, 4));
+  if (monthIndex < 0 || !Number.isInteger(year)) return "";
+  return new Date(Date.UTC(year, monthIndex + 1, 0)).toISOString().slice(0, 10);
+};
+const isAggregateOrSectionLabel = (value) => {
+  const normalized = normalizeText(value);
+  if (/\b(subtotal|grand total|total)\b/.test(normalized)) return true;
+  return ["credit cards", "student loans", "personal loans", "line of credit", "business"].includes(normalized);
+};
 
 export const getSafeAccountReference = (text = "") => {
   const source = safeString(text);
@@ -242,9 +259,17 @@ const buildColumnMap = (headerCells = []) => {
   headerCells.forEach((cell, index) => {
     const field = headerFieldFor(cell?.text);
     if (!field) return;
-    if (field === "identity" && map.accountName == null) map.accountName = index;
+    if (field === "minimumPayment") {
+      map.minimumPaymentColumns = [...(map.minimumPaymentColumns || []), index];
+    } else if (field === "identity" && map.accountName == null) map.accountName = index;
     else if (map[field] == null) map[field] = index;
   });
+  if (map.minimumPaymentColumns?.length) {
+    map.minimumPaymentColumns.sort((left, right) => (
+      minimumPaymentPriority(headerCells[right]?.text) - minimumPaymentPriority(headerCells[left]?.text)
+    ));
+    [map.minimumPayment] = map.minimumPaymentColumns;
+  }
   return map;
 };
 
@@ -290,10 +315,26 @@ const chooseBestBalanceEvidence = (balances = []) => {
       if (item.truth === EVIDENCE_TRUTH.projected) return 0;
       return -1;
     };
-    return rank(b) - rank(a);
+    const rankDifference = rank(b) - rank(a);
+    if (rankDifference) return rankDifference;
+    const timestamp = (value) => {
+      const parsed = Date.parse(`${value || ""}T00:00:00Z`);
+      return Number.isNaN(parsed) ? 0 : parsed;
+    };
+    return timestamp(b.statementDate) - timestamp(a.statementDate);
   });
   return sorted[0] || null;
 };
+
+const chooseLatestDatedEvidence = (items = []) => [...items]
+  .filter((item) => item.value != null && item.value !== "")
+  .sort((left, right) => {
+    const timestamp = (value) => {
+      const parsed = Date.parse(`${value || ""}T00:00:00Z`);
+      return Number.isNaN(parsed) ? 0 : parsed;
+    };
+    return timestamp(right.statementDate) - timestamp(left.statementDate);
+  })[0] || null;
 
 const entityKeyFor = ({ label, ownerSuggestion, accountReferenceSafe }) => {
   if (accountReferenceSafe) return `acct:${accountReferenceSafe}|${ownerSuggestion || ""}`;
@@ -308,12 +349,13 @@ const pushFieldEvidence = ({ fieldEvidence, field, item }) => {
 const candidateFromGroup = ({ group, importBatchId, source, sourceFilename }) => {
   const fieldEvidence = group.fieldEvidence;
   const bestBalance = chooseBestBalanceEvidence(fieldEvidence.balance || []);
+  const latestBalance = chooseLatestDatedEvidence(fieldEvidence.balance);
   const aprCandidates = fieldEvidence.apr || [];
   const knownAprs = aprCandidates.filter((item) => item.aprStatus !== "unknown");
   const aprUnique = [...new Set(knownAprs.map((item) => `${item.aprStatus}:${item.apr}`))];
   const aprChoice = knownAprs[0] || { apr: null, aprStatus: "unknown" };
-  const minimum = (fieldEvidence.minimumPayment || []).find((item) => item.value != null);
-  const due = (fieldEvidence.dueDate || []).find((item) => item.value);
+  const minimum = chooseLatestDatedEvidence(fieldEvidence.minimumPayment);
+  const due = chooseLatestDatedEvidence(fieldEvidence.dueDate);
   const debtType = group.debtType || "other";
   const classification = group.classifications.includes(CLASSIFICATIONS.likelyDebt)
     ? CLASSIFICATIONS.likelyDebt
@@ -352,7 +394,7 @@ const candidateFromGroup = ({ group, importBatchId, source, sourceFilename }) =>
     debtType,
     currentBalance,
     balanceStatus,
-    statementDate: bestBalance?.statementDate || "",
+    statementDate: bestBalance?.statementDate || latestBalance?.statementDate || "",
     apr: aprChoice.apr,
     aprStatus: aprChoice.aprStatus,
     minimumPayment: minimum?.value ?? null,
@@ -404,6 +446,9 @@ const extractRowsFromSheet = ({ topologySheet, sheet, XLSX, fileName }) => {
       const ownerSuggestion = parseOwnerSuggestion(accountText) || (columnMap.owner != null ? parseOwnerSuggestion(row[columnMap.owner]?.text) || safeString(row[columnMap.owner]?.text) : "");
       const strippedLabel = stripOwnerSuffix(accountText);
       const debtType = normalizeDebtType(categoryText, `${accountText} ${topologySheet.sheetName}`);
+      if (isAggregateOrSectionLabel(strippedLabel)) continue;
+      const dueCell = columnMap.dueDate != null ? sheet[cellRef(XLSX, r, columnMap.dueDate)] : null;
+      const dueDate = dueCell ? normalizeDateField(dueCell.w ?? dueCell.v) || (Number.isInteger(Number(dueCell.v)) ? `day:${Number(dueCell.v)}` : null) : null;
       const balanceCells = [columnMap.currentBalance, columnMap.startingBalance]
         .filter((col) => col != null)
         .map((col) => ({ col, cell: sheet[cellRef(XLSX, r, col)], header: headerCells[col]?.text || "" }))
@@ -415,15 +460,25 @@ const extractRowsFromSheet = ({ topologySheet, sheet, XLSX, fileName }) => {
           header,
           truth: cellTruth({ cell, header, sheetName: topologySheet.sheetName, formulaRefMonths: formulaMonths }),
           provenance: provenanceForCell({ fileName, sheetName: topologySheet.sheetName, sheetIndex: topologySheet.sheetIndex, rowIndex: r, colIndex: col, header, cell, XLSX }),
-          statementDate: isMonthName(header) ? header : (isMonthName(topologySheet.sheetName) ? topologySheet.sheetName : ""),
+          statementDate: isMonthName(header)
+            ? monthEndStatementDate({ sheetName: header, dueDate })
+            : monthEndStatementDate({ sheetName: topologySheet.sheetName, dueDate }),
         };
       });
       const aprCell = columnMap.apr != null ? sheet[cellRef(XLSX, r, columnMap.apr)] : null;
       const apr = normalizeAprField(aprCell?.w ?? aprCell?.v);
-      const minCell = columnMap.minimumPayment != null ? sheet[cellRef(XLSX, r, columnMap.minimumPayment)] : null;
-      const minimumPayment = minCell ? normalizeCurrency(minCell.w ?? minCell.v) : null;
-      const dueCell = columnMap.dueDate != null ? sheet[cellRef(XLSX, r, columnMap.dueDate)] : null;
-      const dueDate = dueCell ? normalizeDateField(dueCell.w ?? dueCell.v) || (Number.isInteger(Number(dueCell.v)) ? `day:${Number(dueCell.v)}` : null) : null;
+      const minimumCells = (columnMap.minimumPaymentColumns || [columnMap.minimumPayment])
+        .filter((col) => col != null)
+        .map((col) => ({ col, cell: sheet[cellRef(XLSX, r, col)] }))
+        .filter((item) => item.cell);
+      const minimumEvidence = minimumCells.map(({ col, cell }) => ({
+        value: normalizeCurrency(cell.w ?? cell.v),
+        raw: cell.w ?? cell.v,
+        statementDate: monthEndStatementDate({ sheetName: topologySheet.sheetName, dueDate }),
+        provenance: provenanceForCell({ fileName, sheetName: topologySheet.sheetName, sheetIndex: topologySheet.sheetIndex, rowIndex: r, colIndex: col, header: headerCells[col]?.text || "", cell, XLSX }),
+        truth: cellTruth({ cell, header: headerCells[col]?.text || "", sheetName: topologySheet.sheetName }),
+      }));
+      const minimumPayment = minimumEvidence.find((item) => item.value != null)?.value ?? null;
       const classification = classifyRow({
         accountText,
         categoryText,
@@ -457,8 +512,8 @@ const extractRowsFromSheet = ({ topologySheet, sheet, XLSX, fileName }) => {
         }] : [],
         balanceEvidence,
         aprEvidence: aprCell ? [{ ...apr, raw: aprCell.w ?? aprCell.v, provenance: provenanceForCell({ fileName, sheetName: topologySheet.sheetName, sheetIndex: topologySheet.sheetIndex, rowIndex: r, colIndex: columnMap.apr, header: headerCells[columnMap.apr]?.text || "", cell: aprCell, XLSX }), truth: cellTruth({ cell: aprCell, header: headerCells[columnMap.apr]?.text || "", sheetName: topologySheet.sheetName }) }] : [],
-        minimumEvidence: minCell ? [{ value: minimumPayment, raw: minCell.w ?? minCell.v, provenance: provenanceForCell({ fileName, sheetName: topologySheet.sheetName, sheetIndex: topologySheet.sheetIndex, rowIndex: r, colIndex: columnMap.minimumPayment, header: headerCells[columnMap.minimumPayment]?.text || "", cell: minCell, XLSX }), truth: cellTruth({ cell: minCell, header: headerCells[columnMap.minimumPayment]?.text || "", sheetName: topologySheet.sheetName }) }] : [],
-        dueEvidence: dueCell ? [{ value: dueDate, raw: dueCell.w ?? dueCell.v, provenance: provenanceForCell({ fileName, sheetName: topologySheet.sheetName, sheetIndex: topologySheet.sheetIndex, rowIndex: r, colIndex: columnMap.dueDate, header: headerCells[columnMap.dueDate]?.text || "", cell: dueCell, XLSX }), truth: cellTruth({ cell: dueCell, header: headerCells[columnMap.dueDate]?.text || "", sheetName: topologySheet.sheetName }) }] : [],
+        minimumEvidence,
+        dueEvidence: dueCell ? [{ value: dueDate, raw: dueCell.w ?? dueCell.v, statementDate: monthEndStatementDate({ sheetName: topologySheet.sheetName, dueDate }), provenance: provenanceForCell({ fileName, sheetName: topologySheet.sheetName, sheetIndex: topologySheet.sheetIndex, rowIndex: r, colIndex: columnMap.dueDate, header: headerCells[columnMap.dueDate]?.text || "", cell: dueCell, XLSX }), truth: cellTruth({ cell: dueCell, header: headerCells[columnMap.dueDate]?.text || "", sheetName: topologySheet.sheetName }) }] : [],
         source: { sheetName: topologySheet.sheetName, sheetIndex: topologySheet.sheetIndex, row: r + 1 },
         businessSignal: BUSINESS_RE.test(`${accountText} ${categoryText} ${topologySheet.sheetName}`) ? `${accountText} ${categoryText}` : "",
       });

@@ -378,7 +378,7 @@ function WorkspaceBar({
 // UX-2: HOME COMMAND CENTER + MOMENTUM EXPERIENCE
 // The heart of TrackToZero - users understand their debt situation and next move
 // within 5 seconds. Handled by dedicated HomeCommandCenter component.
-function Home({ snapshot, scenario, onGoToPlan, onGoToReview, reviewSnapshot, onScenario }) {
+function Home({ snapshot, scenario, onGoToPlan, onGoToReview, reviewSnapshot, onScenario, onGoToDebts }) {
   return (
     <HomeCommandCenter
       snapshot={snapshot}
@@ -386,7 +386,7 @@ function Home({ snapshot, scenario, onGoToPlan, onGoToReview, reviewSnapshot, on
       scenario={scenario}
       onGoToPlan={onGoToPlan}
       onGoToReview={onGoToReview}
-      onUploadBudget={onGoToPlan}  // TODO: wire to actual upload flow
+      onUploadBudget={onGoToDebts}
       onAddDebt={onGoToPlan}       // TODO: wire to actual add debt flow
       onRecordPayment={() => {}}   // TODO: wire to payment recording
       onViewDetails={onGoToPlan}   // TODO: wire to debt details
@@ -411,10 +411,130 @@ const DEBT_TYPE_OPTIONS = [
   ["other", "Other"],
 ];
 
-function ImportReviewCandidate({ candidate, canManage, busy, onUpdate, onDecide, workspace, members, people, onCreatePerson }) {
-  const decisionLabel = { pending_review: "Needs your review", confirmed: "Will be added", excluded: "Excluded", needs_information: "Needs information" }[candidate.decision] || candidate.decision;
+function ReconciliationSection({ candidate, canManage, busy, onResolveMatch, onResolveNew }) {
+  const reconciliation = candidate.evidence?.reconciliation;
+  const matches = reconciliation?.matches || [];
+  const resolved = !!reconciliation?.resolution;
+  const [selectedDebtId, setSelectedDebtId] = useState(matches.length === 1 ? matches[0].debtId : "");
+  const [acceptedFields, setAcceptedFields] = useState({ apr: true, minimumPayment: true, dueDay: true });
+  if (!matches.length || resolved) return null;
+  const selectedMatch = matches.find((match) => match.debtId === selectedDebtId) || null;
+
+  const formatDiffValue = (field, value) => {
+    if (value == null || value === "") return "unknown";
+    if (field === "apr") return percent(value);
+    if (field === "balance" || field === "minimumPayment") return money(value);
+    return String(value);
+  };
+
+  const buildMetadataUpdates = (match, fields) => {
+    const updates = {};
+    if (fields.apr && match.diff?.apr?.state === "changed" && match.diff.apr.newValue != null) updates.apr = match.diff.apr.newValue;
+    if (fields.minimumPayment && match.diff?.minimumPayment?.state === "changed" && match.diff.minimumPayment.newValue != null) updates.minimumRequiredPayment = match.diff.minimumPayment.newValue;
+    if (fields.dueDay && match.diff?.dueDay?.state === "changed" && match.diff.dueDay.newValue != null) updates.dueDay = match.diff.dueDay.newValue;
+    return updates;
+  };
+
+  return (
+    <div style={{ ...styles.card, boxShadow: "none", padding: 14, background: "#fff7ed", border: "1px solid #fbbf24", marginBottom: 12 }}>
+      <p style={{ margin: "0 0 4px", fontWeight: 900, color: "#92400e" }}>This may already be in TrackToZero</p>
+      <p style={{ margin: "0 0 10px", color: "#92400e", fontSize: 13 }}>
+        {matches.length > 1 ? "More than one existing debt could match this import. Choose the right one, or keep it separate." : "We found an existing debt that looks like this one. Choose what to do before adding it."}
+      </p>
+      <div style={{ display: "grid", gap: 8, marginBottom: 10 }}>
+        {matches.map((match) => (
+          <label
+            key={match.debtId}
+            style={{ display: "grid", gap: 6, padding: 10, borderRadius: 12, border: selectedDebtId === match.debtId ? "2px solid #f59e0b" : "1px solid #fde68a", background: "#fff", cursor: "pointer" }}
+          >
+            <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input type="radio" name={`match-${candidate.candidateId}`} checked={selectedDebtId === match.debtId} onChange={() => setSelectedDebtId(match.debtId)} disabled={!canManage} />
+              <strong>{match.debtName}</strong>
+            </span>
+            <span style={{ fontSize: 13, color: "#78350f" }}>
+              Existing balance {formatDiffValue("balance", match.diff?.balance?.existingValue)} · Imported balance {formatDiffValue("balance", match.diff?.balance?.newValue)}
+            </span>
+          </label>
+        ))}
+      </div>
+      {selectedMatch ? (
+        <div style={{ display: "grid", gap: 6, marginBottom: 10 }}>
+          {["apr", "minimumPayment", "dueDay"].filter((field) => selectedMatch.diff?.[field]?.state === "changed").map((field) => (
+            <label key={field} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#78350f" }}>
+              <input type="checkbox" checked={!!acceptedFields[field]} disabled={!canManage} onChange={() => setAcceptedFields((state) => ({ ...state, [field]: !state[field] }))} />
+              Update {field === "apr" ? "APR" : field === "minimumPayment" ? "minimum payment" : "due day"}: {formatDiffValue(field, selectedMatch.diff[field].existingValue)} → {formatDiffValue(field, selectedMatch.diff[field].newValue)}
+            </label>
+          ))}
+        </div>
+      ) : null}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button
+          type="button"
+          disabled={!canManage || busy || !selectedMatch}
+          style={canManage && !busy && selectedMatch ? styles.primaryButton : styles.disabledButton}
+          onClick={() => onResolveMatch(candidate.candidateId, selectedMatch.debtId, buildMetadataUpdates(selectedMatch, acceptedFields))}
+        >
+          Update this debt
+        </button>
+        <button type="button" disabled={!canManage || busy} style={styles.button} onClick={() => onResolveNew(candidate.candidateId)}>
+          It&apos;s a different debt
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AprCandidatesField({ candidate, canManage, onUpdate }) {
+  const aprEvidence = candidate.evidence?.fieldEvidence?.apr || candidate.evidence?.aprCandidates || [];
+  const knownCandidates = [...new Map(
+    aprEvidence
+      .map((entry) => (typeof entry === "number" ? { apr: entry, aprStatus: "known" } : entry))
+      .filter((entry) => entry?.aprStatus === "known" && entry.apr != null)
+      .map((entry) => [`${entry.apr}`, entry])
+  ).values()];
+  if (knownCandidates.length < 2) return null;
+  return (
+    <div style={{ gridColumn: "1 / -1", padding: 12, borderRadius: 12, border: "1px solid #fde68a", background: "#fffbeb" }}>
+      <p style={{ margin: "0 0 8px", fontWeight: 900, color: "#92400e" }}>We found more than one APR. Which one applies?</p>
+      <div role="radiogroup" aria-label="Possible APR values" style={{ display: "grid", gap: 6 }}>
+        {knownCandidates.map((entry, index) => (
+          <label key={entry.apr} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              type="radio"
+              name={`apr-candidates-${candidate.candidateId}`}
+              disabled={!canManage}
+              checked={candidate.aprStatus === "known" && Number(candidate.apr) === Number(entry.apr)}
+              onChange={() => onUpdate({ apr: entry.apr, aprStatus: "known" })}
+            />
+            {percent(entry.apr)}
+            {index === 0 ? <span style={styles.badgeTarget}>Most likely</span> : null}
+          </label>
+        ))}
+        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="radio"
+            name={`apr-candidates-${candidate.candidateId}`}
+            disabled={!canManage}
+            checked={candidate.aprStatus === "unknown"}
+            onChange={() => onUpdate({ apr: null, aprStatus: "unknown" })}
+          />
+          I don&apos;t know yet
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function ImportReviewCandidate({ candidate, canManage, busy, onUpdate, onDecide, onResolveMatch, onResolveNew, workspace, members, people, onCreatePerson }) {
+  const reconciliation = candidate.evidence?.reconciliation;
+  const hasUnresolvedMatch = !!(reconciliation?.matches?.length) && !reconciliation?.resolution;
+  const resolvedAsUpdate = reconciliation?.resolution?.decision === "updateExisting";
+  const decisionLabel = resolvedAsUpdate
+    ? "Will update existing debt"
+    : ({ pending_review: "Needs your review", confirmed: "Will be added", excluded: "Excluded", needs_information: "Needs information" }[candidate.decision] || candidate.decision);
   return (
     <article style={{ border: "1px solid #c7e3f8", borderRadius: 18, padding: 14, background: candidate.decision === "confirmed" ? "#f0fdf4" : candidate.decision === "excluded" ? "#fef2f2" : "#fff" }}>
+      <ReconciliationSection candidate={candidate} canManage={canManage} busy={busy} onResolveMatch={onResolveMatch} onResolveNew={onResolveNew} />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <Field label="Creditor / debt name"><input style={styles.input} disabled={!canManage} value={candidate.accountName} onChange={(event) => onUpdate({ accountName: event.target.value })} /></Field>
         <Field label="Debt type">
@@ -422,8 +542,8 @@ function ImportReviewCandidate({ candidate, canManage, busy, onUpdate, onDecide,
             {DEBT_TYPE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
         </Field>
-        <Field label="Balance"><input style={styles.input} type="number" min="0" step="0.01" disabled={!canManage} value={candidate.currentBalance} onChange={(event) => onUpdate({ currentBalance: Number(event.target.value) })} /></Field>
-        <Field label="Statement date"><input style={styles.input} type="date" disabled={!canManage} value={candidate.statementDate || ""} onChange={(event) => onUpdate({ statementDate: event.target.value })} /></Field>
+        <Field label="Current balance"><input style={styles.input} type="number" min="0" step="0.01" disabled={!canManage} value={candidate.currentBalance} onChange={(event) => onUpdate({ currentBalance: Number(event.target.value) })} /></Field>
+        <Field label="Balance as-of date"><input style={styles.input} type="date" disabled={!canManage} value={candidate.statementDate || ""} onChange={(event) => onUpdate({ statementDate: event.target.value })} /></Field>
         <Field label="APR status">
           <select style={styles.input} disabled={!canManage} value={candidate.aprStatus} onChange={(event) => onUpdate({ aprStatus: event.target.value, apr: event.target.value === "unknown" ? null : event.target.value === "no_interest" ? 0 : candidate.apr })}>
             <option value="unknown">Unknown</option>
@@ -435,18 +555,21 @@ function ImportReviewCandidate({ candidate, canManage, busy, onUpdate, onDecide,
         {candidate.aprStatus !== "unknown" && candidate.aprStatus !== "no_interest" && (
           <Field label="APR (%)"><input style={styles.input} type="number" min="0" step="0.01" disabled={!canManage} value={candidate.apr == null ? "" : Number(candidate.apr * 100).toFixed(2)} onChange={(event) => onUpdate({ apr: Number(event.target.value) / 100 })} /></Field>
         )}
-        <Field label="Minimum payment"><input style={styles.input} type="number" min="0" step="0.01" disabled={!canManage} value={candidate.minimumPayment ?? ""} onChange={(event) => onUpdate({ minimumPayment: event.target.value === "" ? null : Number(event.target.value) })} /></Field>
+        <AprCandidatesField candidate={candidate} canManage={canManage} onUpdate={onUpdate} />
+        <Field label="Minimum due"><input style={styles.input} type="number" min="0" step="0.01" disabled={!canManage} value={candidate.minimumPayment ?? ""} onChange={(event) => onUpdate({ minimumPayment: event.target.value === "" ? null : Number(event.target.value) })} /></Field>
         <Field label="Due date"><input style={styles.input} type="date" disabled={!canManage} value={candidate.dueDate || ""} onChange={(event) => onUpdate({ dueDate: event.target.value })} /></Field>
-        <OwnerField
-          workspace={workspace}
-          members={members}
-          people={people}
-          ownerType={candidate.ownerType}
-          ownerId={candidate.ownerId}
-          disabled={!canManage}
-          onChange={(next) => onUpdate(next)}
-          onCreatePerson={onCreatePerson}
-        />
+        <div style={{ gridColumn: "1 / -1" }}>
+          <OwnerField
+            workspace={workspace}
+            members={members}
+            people={people}
+            ownerType={candidate.ownerType}
+            ownerId={candidate.ownerId}
+            disabled={!canManage}
+            onChange={(next) => onUpdate(next)}
+            onCreatePerson={onCreatePerson}
+          />
+        </div>
       </div>
       {workspace?.type === "household" && !!candidate.ownerSuggestion && (
         <p style={{ color: "#5b7c98", fontSize: 13 }}>
@@ -460,7 +583,15 @@ function ImportReviewCandidate({ candidate, canManage, busy, onUpdate, onDecide,
       {!!candidate.warnings?.length && <ul style={{ color: "#92400e" }}>{candidate.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <span style={styles.pill}>{decisionLabel}</span>
-        <button type="button" disabled={!canManage || busy} style={candidate.decision === "confirmed" ? styles.primaryButton : styles.button} onClick={() => onDecide("confirmed")}>Confirm</button>
+        <button
+          type="button"
+          disabled={!canManage || busy || hasUnresolvedMatch}
+          title={hasUnresolvedMatch ? "Resolve the possible match above first" : undefined}
+          style={candidate.decision === "confirmed" ? styles.primaryButton : hasUnresolvedMatch ? styles.disabledButton : styles.button}
+          onClick={() => onDecide("confirmed")}
+        >
+          Confirm
+        </button>
         <button type="button" disabled={!canManage || busy} style={styles.button} onClick={() => onDecide("excluded")}>Exclude</button>
         <button type="button" disabled={!canManage || busy} style={styles.button} onClick={() => onDecide("needs_information")}>Needs information</button>
       </div>
@@ -468,8 +599,18 @@ function ImportReviewCandidate({ candidate, canManage, busy, onUpdate, onDecide,
   );
 }
 
-function ImportPanel({ snapshot, service, refresh, refreshReview, canManage }) {
+const formatFileSize = (file) => {
+  if (!file || !file.size) return "0 KB";
+  const kb = file.size / 1024;
+  if (kb < 1024) return `${Math.max(1, Math.round(kb))} KB`;
+  return `${(kb / 1024).toFixed(1)} MB`;
+};
+
+function ImportPanel({ snapshot, service, refresh, refreshReview, canManage, reviewSnapshot, onGoToReview }) {
   const [importState, setImportState] = useState({ status: "idle", batch: null, error: "" });
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [dismissedResumeBatchId, setDismissedResumeBatchId] = useState(null);
+  const [resuming, setResuming] = useState(false);
   // DATA-HH1: merged with snapshot.people locally, mirroring Debts' and
   // ReviewCenter's identical pattern - calling the full refresh() here
   // would null out `snapshot` while in flight (see the top-level refresh
@@ -477,6 +618,37 @@ function ImportPanel({ snapshot, service, refresh, refreshReview, canManage }) {
   // whatever candidate edits/decisions the reviewer already made.
   const [newlyCreatedPeople, setNewlyCreatedPeople] = useState([]);
   const people = [...(snapshot.people || []), ...newlyCreatedPeople.filter((person) => !(snapshot.people || []).some((existing) => existing.id === person.id))];
+
+  // UX-5 Part 51/79: a batch created earlier (e.g. before the user
+  // navigated away) still lives in Firestore as review_required - without
+  // this, that batch becomes permanently unreachable from this screen once
+  // local state resets. We only ever surface it; we never auto-load it
+  // into memory or mutate it.
+  const resumableBatchId = importState.status === "idle" && !!reviewSnapshot?.openItems?.length
+    ? reviewSnapshot.openItems.find((item) => item.importBatchId !== dismissedResumeBatchId)?.importBatchId
+    : null;
+  const resumableCandidateCount = resumableBatchId
+    ? reviewSnapshot.openItems.filter((item) => item.importBatchId === resumableBatchId).length
+    : 0;
+  const resumableSourceName = resumableBatchId
+    ? reviewSnapshot.openItems.find((item) => item.importBatchId === resumableBatchId)?.sourceReference
+    : "";
+
+  const resumeImport = async () => {
+    if (!resumableBatchId || typeof service.getImportBatch !== "function") return;
+    setResuming(true);
+    try {
+      const batch = await service.getImportBatch(snapshot.workspace.id, resumableBatchId);
+      if (batch && batch.status === "review_required") {
+        setImportState({ status: "review", batch, error: "" });
+      }
+    } catch {
+      // Resuming is a convenience, not a requirement - if it fails, the
+      // user can still reach these candidates from Review.
+    } finally {
+      setResuming(false);
+    }
+  };
 
   // DATA-HH1: never touches Debt/BalanceSnapshot/PaymentEvent/PlanVersion -
   // safe to run immediately.
@@ -486,8 +658,20 @@ function ImportPanel({ snapshot, service, refresh, refreshReview, canManage }) {
     return person;
   };
 
+  const handleFileSelection = (file) => {
+    if (!file) return;
+    setSelectedFile(file);
+    setImportState({ status: "ready", batch: null, error: "" });
+  };
+
+  const analyzeSelectedFile = async () => {
+    if (!selectedFile) return;
+    await handleFile(selectedFile);
+  };
+
   const handleFile = async (file) => {
     if (!file) return;
+    setSelectedFile(file);
     setImportState({ status: "parsing", batch: null, error: "" });
     try {
       const name = String(file.name || "").toLowerCase();
@@ -504,7 +688,7 @@ function ImportPanel({ snapshot, service, refresh, refreshReview, canManage }) {
           ? await (await import("../../services/adapters/pdfImportReader.js")).readPdfFileToCandidate(file, { importBatchId: "upload", source: "pdf" })
           : await (await import("../../services/adapters/imageImportReader.js")).readImageFileToCandidate(file, { importBatchId: "upload", source: "image" });
         if (result.status !== "parsed" || !result.candidate) {
-          setImportState({ status: "idle", batch: null, error: result.message || "This file could not be read." });
+          setImportState({ status: "ready", batch: null, error: result.message || "This file could not be read." });
           return;
         }
         const batch = await service.createImportBatch(snapshot.workspace.id, {
@@ -525,7 +709,7 @@ function ImportPanel({ snapshot, service, refresh, refreshReview, canManage }) {
         ? await (await import("../../services/adapters/csvImportReader.js")).readCsvFileToCandidates(file, { importBatchId: "upload", source: "csv" })
         : await (await import("../../services/adapters/excelImportReader.js")).readExcelFileToCandidates(file, { importBatchId: "upload", source: "excel" });
       if (!parsed.confident || !parsed.candidates.length) {
-        setImportState({ status: "idle", batch: null, error: parsed.batchWarnings.join(" ") || "This file could not be read as a debt list." });
+        setImportState({ status: "ready", batch: null, error: parsed.batchWarnings.join(" ") || "This file could not be read as a debt list." });
         return;
       }
       const batch = await service.createImportBatch(snapshot.workspace.id, {
@@ -540,7 +724,7 @@ function ImportPanel({ snapshot, service, refresh, refreshReview, canManage }) {
       // Never show a raw Firestore/Firebase error as the primary message -
       // getUserSafeTrackToZeroError translates it into friendly TrackToZero
       // copy (DATA-1 HOTFIX Part 24).
-      setImportState({ status: "idle", batch: null, error: getUserSafeTrackToZeroError(error).message });
+      setImportState({ status: "ready", batch: null, error: getUserSafeTrackToZeroError(error).message });
     }
   };
 
@@ -561,6 +745,26 @@ function ImportPanel({ snapshot, service, refresh, refreshReview, canManage }) {
     setImportState({ status: "review", batch: updated, error: "" });
   };
 
+  const resolveMatch = async (candidateId, targetDebtId, metadataUpdates) => {
+    setImportState((state) => ({ ...state, status: "saving-decision" }));
+    try {
+      const updated = await service.resolveAsExistingDebt(snapshot.workspace.id, importState.batch.id, candidateId, { targetDebtId, metadataUpdates });
+      setImportState({ status: "review", batch: updated, error: "" });
+    } catch (error) {
+      setImportState((state) => ({ ...state, status: "review", error: getUserSafeTrackToZeroError(error).message }));
+    }
+  };
+
+  const resolveNew = async (candidateId) => {
+    setImportState((state) => ({ ...state, status: "saving-decision" }));
+    try {
+      const updated = await service.resolveAsNewDebt(snapshot.workspace.id, importState.batch.id, candidateId);
+      setImportState({ status: "review", batch: updated, error: "" });
+    } catch (error) {
+      setImportState((state) => ({ ...state, status: "review", error: getUserSafeTrackToZeroError(error).message }));
+    }
+  };
+
   const commit = async () => {
     setImportState((state) => ({ ...state, status: "committing" }));
     try {
@@ -573,21 +777,72 @@ function ImportPanel({ snapshot, service, refresh, refreshReview, canManage }) {
     }
   };
 
-  if (importState.status === "idle" || importState.status === "parsing") {
+  if (importState.status === "idle" || importState.status === "ready" || importState.status === "parsing") {
     return (
-      <Section title="Import statements" eyebrow="Excel, CSV, PDF, or a photo">
-        <p>Upload a spreadsheet (.xlsx, .xls, .csv), a statement PDF, or a photo/screenshot of a statement (PNG, JPG, WEBP). Nothing is added until you review and confirm it.</p>
-        <p style={{ color: "#5b7c98", fontSize: 13 }}>Anything we're not sure about shows up in Needs Review too - you can always come back to it later.</p>
-        <input
-          type="file"
-          accept=".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp"
-          aria-label="Upload a spreadsheet, PDF, or photo of your debts"
-          disabled={!canManage || importState.status === "parsing"}
-          onChange={(event) => handleFile(event.target.files?.[0])}
-        />
-        {importState.status === "parsing" && <p aria-live="polite">Reading your file...</p>}
-        {importState.error && <p role="alert" style={{ color: "#991b1b", fontWeight: 800 }}>{importState.error}</p>}
-        {!canManage && <p>Your role is read-only for imports.</p>}
+      <Section title="Import debts" eyebrow="Excel, CSV, PDF, or a photo">
+        {resumableBatchId ? (
+          <div style={{ ...styles.card, boxShadow: "none", padding: 16, background: "#eff8ff", border: "1px solid #9bd0f7", marginBottom: 14, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+            <div>
+              <p style={{ margin: "0 0 2px", fontWeight: 900, color: "#2f6289" }}>You have an import waiting for review</p>
+              <p style={{ margin: 0, color: "#5b7c98", fontSize: 13 }}>
+                {resumableSourceName ? `${resumableSourceName} · ` : ""}{resumableCandidateCount} debt{resumableCandidateCount === 1 ? "" : "s"} still need{resumableCandidateCount === 1 ? "s" : ""} a decision.
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" disabled={resuming} style={resuming ? styles.disabledButton : styles.primaryButton} onClick={resumeImport}>{resuming ? "Loading..." : "Continue review"}</button>
+              {onGoToReview ? <button type="button" style={styles.button} onClick={onGoToReview}>Open in Review</button> : null}
+              <button type="button" style={styles.button} onClick={() => setDismissedResumeBatchId(resumableBatchId)}>Dismiss</button>
+            </div>
+          </div>
+        ) : null}
+        <p>Upload a spreadsheet (.xlsx, .xls, .csv), a statement PDF, or a photo/screenshot of a statement (PNG, JPG, WEBP).</p>
+        <p style={{ color: "#5b7c98", fontSize: 14, marginTop: 0 }}><strong>We analyze the file and show you what we found.</strong> Nothing becomes part of your debt data until you approve it.</p>
+
+        <div style={{ ...styles.card, boxShadow: "none", padding: 20, borderStyle: "dashed", background: "#f8fbff", marginTop: 12 }}>
+          <div style={{ display: "grid", gap: 12 }}>
+            {selectedFile ? (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                  <div>
+                    <div style={{ ...styles.label, color: "#2f6289" }}>Selected file</div>
+                    <div style={{ fontWeight: 800 }}>{selectedFile.name}</div>
+                    <div style={{ color: "#5b7c98", fontSize: 13 }}>{formatFileSize(selectedFile)}</div>
+                  </div>
+                  <span style={{ ...styles.pill, background: "#ecfdf5", color: "#166534" }}>Ready to analyze</span>
+                </div>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <button type="button" disabled={!canManage || importState.status === "parsing"} style={canManage && importState.status !== "parsing" ? styles.primaryButton : styles.disabledButton} onClick={analyzeSelectedFile}>
+                    {importState.status === "parsing" ? "Analyzing..." : "Analyze file"}
+                  </button>
+                  <button type="button" style={styles.button} onClick={() => { setSelectedFile(null); setImportState({ status: "idle", batch: null, error: "" }); }}>
+                    Choose another file
+                  </button>
+                </div>
+              </>
+            ) : (
+              <label style={{ display: "grid", gap: 10, cursor: "pointer" }}>
+                <div style={{ ...styles.label, color: "#2f6289" }}>Choose a file</div>
+                <input
+                  type="file"
+                  accept=".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.webp"
+                  aria-label="Upload a spreadsheet, PDF, or photo of your debts"
+                  disabled={!canManage || importState.status === "parsing"}
+                  onChange={(event) => handleFileSelection(event.target.files?.[0])}
+                  style={{ width: "100%" }}
+                />
+              </label>
+            )}
+
+            {importState.status === "parsing" && (
+              <div aria-live="polite" style={{ color: "#2f6289", fontWeight: 800 }}>
+                Reading your file… Finding debt details… Checking for duplicates… Preparing your review…
+              </div>
+            )}
+
+            {importState.error && <p role="alert" style={{ color: "#991b1b", fontWeight: 800 }}>{importState.error}</p>}
+            {!canManage && <p>Your role is read-only for imports.</p>}
+          </div>
+        </div>
       </Section>
     );
   }
@@ -598,10 +853,13 @@ function ImportPanel({ snapshot, service, refresh, refreshReview, canManage }) {
   const excluded = candidates.filter((c) => c.decision === "excluded");
   const needsReview = candidates.filter((c) => c.decision === "pending_review" || c.decision === "needs_information");
   const totalConfirmedBalance = confirmed.reduce((sum, c) => sum + Number(c.currentBalance || 0), 0);
+  const totalFoundBalance = candidates.filter((c) => c.decision !== "excluded").reduce((sum, c) => sum + Number(c.currentBalance || 0), 0);
   const unknownAprCount = confirmed.filter((c) => c.aprStatus === "unknown").length;
   const missingMinimumCount = confirmed.filter((c) => c.minimumPayment == null).length;
   const mortgageExcludedCount = confirmed.filter((c) => c.debtType === "mortgage" && !c.includedInCorePayoffPlan).length;
   const busy = importState.status === "committing" || importState.status === "saving-decision";
+  const readyCount = candidates.filter((c) => c.decision === "pending_review" && !c.warnings?.length).length;
+  const uncertainCount = candidates.filter((c) => c.decision === "pending_review" && (c.warnings?.length || c.duplicateStatus !== "new")).length;
 
   // Visual triage so the human reviewer sees the riskiest candidates first:
   // decided items are already sorted out (shown last, dimmed by decision
@@ -622,6 +880,23 @@ function ImportPanel({ snapshot, service, refresh, refreshReview, canManage }) {
 
   return (
     <Section title={`Review import: ${batch.sourceFilename}`} eyebrow="Excel · review before anything is saved">
+      <div style={{ ...styles.grid, marginBottom: 18 }}>
+        <div style={{ ...styles.card, boxShadow: "none", padding: 16 }}>
+          <div style={{ ...styles.label, color: "#2f6289" }}>We found</div>
+          <div style={{ fontSize: 28, fontWeight: 900 }}>{candidates.length} possible debt{candidates.length === 1 ? "" : "s"}</div>
+          <div style={{ color: "#5b7c98", fontSize: 13 }}>{readyCount} look ready and {uncertainCount} need a quick review.</div>
+        </div>
+        <div style={{ ...styles.card, boxShadow: "none", padding: 16 }}>
+          <div style={{ ...styles.label, color: "#2f6289" }}>Found in your file</div>
+          <div style={{ fontSize: 28, fontWeight: 900 }}>{money(totalFoundBalance)}</div>
+          <div style={{ color: "#5b7c98", fontSize: 13 }}>This is not saved yet. It becomes official only after you approve it.</div>
+        </div>
+        <div style={{ ...styles.card, boxShadow: "none", padding: 16 }}>
+          <div style={{ ...styles.label, color: "#2f6289" }}>What needs attention</div>
+          <div style={{ fontSize: 28, fontWeight: 900 }}>{needsReview.length}</div>
+          <div style={{ color: "#5b7c98", fontSize: 13 }}>{unknownAprCount} unknown APR · {missingMinimumCount} missing minimum · {excluded.length} excluded</div>
+        </div>
+      </div>
       {!!batch.warnings?.length && <ul style={{ color: "#92400e" }}>{batch.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
       {groups.map((group) => (
         <div key={group.key} style={{ marginBottom: 16 }}>
@@ -639,6 +914,8 @@ function ImportPanel({ snapshot, service, refresh, refreshReview, canManage }) {
                 people={people}
                 onUpdate={(patch) => updateCandidate(candidate.candidateId, patch)}
                 onDecide={(decision) => decideCandidate(candidate.candidateId, decision)}
+                onResolveMatch={(candidateId, targetDebtId, metadataUpdates) => resolveMatch(candidateId, targetDebtId, metadataUpdates)}
+                onResolveNew={(candidateId) => resolveNew(candidateId)}
                 onCreatePerson={canManage ? handleCreatePerson : undefined}
               />
             ))}
@@ -672,7 +949,7 @@ function ImportPanel({ snapshot, service, refresh, refreshReview, canManage }) {
   );
 }
 
-function Debts({ snapshot, service, refresh, refreshReview, runAction, writeState }) {
+function Debts({ snapshot, service, refresh, refreshReview, runAction, writeState, reviewSnapshot, onGoToReview }) {
   const [payment, setPayment] = useState({ debtId: snapshot.debts[0]?.id || "", amount: "" });
   const [balance, setBalance] = useState({ debtId: snapshot.debts[0]?.id || "", amount: "" });
   const [newDebt, setNewDebt] = useState(newDebtDraft);
@@ -912,7 +1189,7 @@ function Debts({ snapshot, service, refresh, refreshReview, runAction, writeStat
           </form>
         </div>
       </Section>
-      <ImportPanel snapshot={snapshot} service={service} refresh={refresh} refreshReview={refreshReview} canManage={canManage} />
+      <ImportPanel snapshot={snapshot} service={service} refresh={refresh} refreshReview={refreshReview} canManage={canManage} reviewSnapshot={reviewSnapshot} onGoToReview={onGoToReview} />
     </>
   );
 }
@@ -1399,9 +1676,17 @@ export default function TrackToZeroV2App() {
             {writeState.error || writeState.success}
           </div>
         )}
-        {tab === "home" && <Home snapshot={snapshot} scenario={scenario} reviewSnapshot={reviewState.snapshot} onGoToPlan={() => navigateTab("plan")} onGoToReview={() => navigateTab("review")} onScenario={(extra) => runAction("preview scenario", async () => {
-          setScenario(await service.previewScenario(workspaceId, { extraMonthlyPayment: extra }));
-        }, { write: false })} />}
+        {tab === "home" && <Home
+          snapshot={snapshot}
+          scenario={scenario}
+          reviewSnapshot={reviewState.snapshot}
+          onGoToPlan={() => navigateTab("plan")}
+          onGoToReview={() => navigateTab("review")}
+          onGoToDebts={() => navigateTab("debts")}
+          onScenario={(extra) => runAction("preview scenario", async () => {
+            setScenario(await service.previewScenario(workspaceId, { extraMonthlyPayment: extra }));
+          }, { write: false })}
+        />}
         {tab === "review" && (
           <ReviewCenter
             snapshot={snapshot}
@@ -1412,7 +1697,7 @@ export default function TrackToZeroV2App() {
             onRefreshReview={() => refreshReview(workspaceId)}
           />
         )}
-        {tab === "debts" && <Debts snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} refreshReview={() => refreshReview(workspaceId)} runAction={runAction} writeState={writeState} />}
+        {tab === "debts" && <Debts snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} refreshReview={() => refreshReview(workspaceId)} runAction={runAction} writeState={writeState} reviewSnapshot={reviewState.snapshot} onGoToReview={() => navigateTab("review")} />}
         {tab === "plan" && <Plan snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} />}
         {tab === "settings" && <Settings snapshot={snapshot} repositoryMode={runtime.mode} />}
       </PageContainer>

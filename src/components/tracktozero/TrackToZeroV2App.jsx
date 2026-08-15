@@ -325,7 +325,7 @@ function WorkspaceBar({
 // UX-2: HOME COMMAND CENTER + MOMENTUM EXPERIENCE
 // The heart of TrackToZero - users understand their debt situation and next move
 // within 5 seconds. Handled by dedicated HomeCommandCenter component.
-function Home({ snapshot, scenario, onGoToPlan, onGoToReview, reviewSnapshot }) {
+function Home({ snapshot, scenario, onGoToPlan, onGoToReview, reviewSnapshot, onScenario }) {
   return (
     <HomeCommandCenter
       snapshot={snapshot}
@@ -338,6 +338,7 @@ function Home({ snapshot, scenario, onGoToPlan, onGoToReview, reviewSnapshot }) 
       onRecordPayment={() => {}}   // TODO: wire to payment recording
       onViewDetails={onGoToPlan}   // TODO: wire to debt details
       onSeeOptions={onGoToPlan}    // TODO: wire to plan options
+      onPreviewScenario={onScenario}
     />
   );
 }

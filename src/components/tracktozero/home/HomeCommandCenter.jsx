@@ -42,7 +42,7 @@ function NoDebtState({ onUploadBudget, onAddDebt }) {
   return (
     <div style={{ display: "grid", gap: GAP_LARGE }}>
       <Card variant="elevated" style={{ textAlign: "center" }}>
-        <div style={{ ...TYPE_SCALE.headline, marginBottom: SPACING, color: ttzPalette.tx }}>
+        <div style={{ ...TYPE_SCALE.pageTitle, marginBottom: SPACING, color: ttzPalette.tx }}>
           {lang.noDebtHeadline()}
         </div>
         <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginBottom: GAP_LARGE }}>
@@ -74,7 +74,7 @@ function NoActivePlanState({ homeContext, onBuildPlan }) {
   return (
     <div style={{ display: "grid", gap: GAP_LARGE }}>
       <Card variant="elevated">
-        <div style={{ ...TYPE_SCALE.headline, marginBottom: SPACING, color: ttzPalette.tx }}>
+        <div style={{ ...TYPE_SCALE.pageTitle, marginBottom: SPACING, color: ttzPalette.tx }}>
           {lang.noActivePlanHeadline()}
         </div>
         <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginBottom: GAP_LARGE }}>
@@ -140,7 +140,7 @@ function DebtFreedomHero({ homeContext }) {
             />
           </div>
           <p style={{ ...TYPE_SCALE.body, color: "rgba(255,255,255,0.85)", marginTop: 8, marginBottom: 0 }}>
-            {percentCleared > 0 ? `You're moving. ${lang.clearedLabel(percentCleared)}` : "Progress starts after your next confirmed balance update."}
+            {progress?.confirmed && percentCleared > 0 ? `You're moving. ${lang.clearedLabel(percentCleared)}` : "Progress starts after your next confirmed balance update."}
           </p>
         </div>
 
@@ -187,23 +187,22 @@ function DebtFreedomHero({ homeContext }) {
 // ─────────────────────────────────────────────────────────────────────────
 
 function YourNextMoveCard({ homeContext, onRecordPayment, onViewDetails }) {
-  const { currentTarget, strategy, extraMonthlyPayment } = homeContext;
+  const { currentTarget, strategy } = homeContext;
   const isHousehold = homeContext.isHousehold;
   const palette = ttzPalette;
 
   if (!currentTarget) return null;
 
-  const minimumPayment = Number(currentTarget.minimumRequiredPayment || 0);
-  const extraPayment = Number(extraMonthlyPayment || 0);
-  const totalPayment = minimumPayment + extraPayment;
-
-  // Determine tone
-  let tone = "accent";
+  // Determine tone. "info" (not a made-up "accent" tone - toneColors only
+  // defines success/warning/danger/info/neutral) is the neutral default:
+  // this card is a focus/informational callout, not a good/bad judgment,
+  // unless plan health genuinely earns a success or danger tone.
+  let tone = "info";
   if (homeContext.planHealth?.code === "critical") tone = "danger";
   if (homeContext.planHealth?.code === "ahead") tone = "success";
 
   const tones = toneColors(palette);
-  const toneStyle = tones[tone] || tones.accent;
+  const toneStyle = tones[tone] || tones.info;
 
   return (
     <Card
@@ -245,20 +244,15 @@ function YourNextMoveCard({ homeContext, onRecordPayment, onViewDetails }) {
           </div>
         </div>
 
-        {/* Payment recommendation (if available) */}
-        {totalPayment > 0 && (
-          <div style={{ background: palette.surf2, padding: "12px 16px", borderRadius: "var(--ttz-radius-md, 12px)", border: `1px solid ${palette.border}` }}>
-            <div style={{ ...TYPE_SCALE.caption, color: palette.muted, fontWeight: 600, letterSpacing: "0.3px" }}>Recommended payment</div>
-            <div style={{ ...TYPE_SCALE.metric, color: palette.tx, marginTop: 8, fontWeight: 700 }}>
-              {formatMoney(totalPayment)}
-            </div>
-            {minimumPayment > 0 && extraPayment > 0 && (
-              <p style={{ ...TYPE_SCALE.caption, color: palette.muted, marginTop: 6, marginBottom: 0, fontSize: "0.9em" }}>
-                {formatMoney(minimumPayment)} minimum + {formatMoney(extraPayment)} extra
-              </p>
-            )}
+        {/* Truthful action language - TrackToZero doesn't fabricate a
+            "recommended payment" by naively summing minimum + plan extra;
+            the payoff engine doesn't expose a single authoritative
+            per-debt payment figure, so we say what's actually true instead. */}
+        <div style={{ background: palette.surf2, padding: "12px 16px", borderRadius: "var(--ttz-radius-md, 12px)", border: `1px solid ${palette.border}` }}>
+          <div style={{ ...TYPE_SCALE.body, color: palette.tx, fontWeight: 700 }}>
+            {lang.focusHeadline(currentTarget.name)}
           </div>
-        )}
+        </div>
 
         {/* Strategy explanation */}
         {strategy && (
@@ -474,13 +468,135 @@ function QuickCheckCard({ homeContext, onGoToReview }) {
 function AllPaidOffState() {
   return (
     <Card variant="elevated" style={{ textAlign: "center", background: toneColors(ttzPalette).success.bg }}>
-      <div style={{ ...TYPE_SCALE.headline, color: toneColors(ttzPalette).success.fg, marginBottom: SPACING }}>
+      <div style={{ ...TYPE_SCALE.pageTitle, color: toneColors(ttzPalette).success.fg, marginBottom: SPACING }}>
         {lang.allPaidOffHeadline()}
       </div>
       <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>
         {lang.allPaidOffSupporting()}
       </p>
     </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// DATA FRESHNESS NOTE — only shown when existing authoritative freshness
+// truth says the confirmed data is actually stale.
+// ─────────────────────────────────────────────────────────────────────────
+
+function DataFreshnessNote({ homeContext }) {
+  const { dataFreshness } = homeContext;
+  const palette = ttzPalette;
+
+  if (!dataFreshness?.isStale) return null;
+
+  return (
+    <p style={{ ...TYPE_SCALE.caption, color: palette.muted, textAlign: "center", margin: 0 }}>
+      {lang.dataFreshnessLabel(dataFreshness.daysOld)}
+    </p>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// WHAT IF TEASER — read-only. Never mutates the plan, never creates a
+// PlanVersion, never fabricates savings: the prompt invites a real preview,
+// and outcome numbers only render once existing scenario truth (a real
+// previewScenario result) is actually available.
+// ─────────────────────────────────────────────────────────────────────────
+
+function WhatIfCard({ homeContext, onPreviewScenario }) {
+  const { whatIf } = homeContext;
+  const palette = ttzPalette;
+
+  if (!onPreviewScenario) return null;
+
+  return (
+    <Card variant="default">
+      <div style={{ ...TYPE_SCALE.overline, color: palette.muted, marginBottom: SPACING }}>
+        {lang.whatIfLabel()}
+      </div>
+      {whatIf ? (
+        <p style={{ ...TYPE_SCALE.body, color: palette.tx, margin: 0 }}>
+          {lang.whatIfOutcome(whatIf.monthsSaved, formatMoney(whatIf.interestSaved))}
+        </p>
+      ) : (
+        <>
+          <p style={{ ...TYPE_SCALE.body, color: palette.tx2, marginBottom: SPACING }}>
+            {lang.whatIfPrompt(100)}
+          </p>
+          <Button variant="secondary" onClick={() => onPreviewScenario(100)}>
+            {lang.whatIfCta()}
+          </Button>
+        </>
+      )}
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// BLOCKING REVIEW STATE — a genuinely distinct Home trust state, not the
+// normal command center with a warning color slapped on. When open Review
+// items block trusting the plan, Home must not present false confidence:
+// no Zero Day, no momentum claim, no fabricated payment recommendation.
+// Anything still shown from current truth (total debt, current target) is
+// explicitly labeled provisional. Resolution itself lives in Review
+// Center - this only summarizes, reusing the same shared review counts.
+// ─────────────────────────────────────────────────────────────────────────
+
+function BlockingReviewState({ homeContext, onGoToReview, onViewDetails }) {
+  const { currentTarget, totalDebt, openReviewCount, blockingReviewCount, isHousehold } = homeContext;
+  const palette = ttzPalette;
+  const tones = toneColors(palette);
+
+  return (
+    <div style={{ display: "grid", gap: GAP_LARGE }}>
+      <Card variant="warning" style={{ borderLeft: `4px solid ${tones.warning.fg}` }}>
+        <div style={{ ...TYPE_SCALE.overline, color: tones.warning.fg, marginBottom: SPACING }}>
+          {lang.quickCheckLabel()}
+        </div>
+        <div style={{ ...TYPE_SCALE.pageTitle, color: palette.tx, marginBottom: SPACING }}>
+          {lang.quickCheckHeadline(openReviewCount, blockingReviewCount)}
+        </div>
+        <p style={{ ...TYPE_SCALE.body, color: palette.tx2, marginBottom: GAP_LARGE }}>
+          {lang.blockingReviewTrustNote()}
+        </p>
+        <Button variant="primary" onClick={onGoToReview} style={{ width: "100%" }}>
+          {lang.quickCheckCta()}
+        </Button>
+      </Card>
+
+      {/* Provisional context only - no Zero Day, no momentum, no
+          recommended payment while the plan can't be fully trusted. */}
+      <Card variant="default">
+        <div style={{ ...TYPE_SCALE.overline, color: palette.muted, marginBottom: SPACING }}>
+          {lang.provisionalLabel(lang.leftToGoLabel())}
+        </div>
+        <div style={{ ...TYPE_SCALE.metric, color: palette.tx }}>
+          {formatMoney(totalDebt)}
+        </div>
+        <p style={{ ...TYPE_SCALE.caption, color: palette.muted, marginTop: 8, marginBottom: 0 }}>
+          {lang.provisionalDebtNote()}
+        </p>
+      </Card>
+
+      {currentTarget && (
+        <Card variant="default">
+          <div style={{ ...TYPE_SCALE.overline, color: palette.muted, marginBottom: SPACING }}>
+            {lang.provisionalLabel(lang.upNextLabel())}
+          </div>
+          <h3 style={{ ...TYPE_SCALE.cardTitle, color: palette.tx, margin: 0 }}>{currentTarget.name}</h3>
+          {isHousehold && (
+            <p style={{ ...TYPE_SCALE.body, color: palette.muted, marginTop: 6, fontSize: "0.95em" }}>
+              {currentTarget.ownerLabel || "Unassigned"}
+            </p>
+          )}
+          <Button variant="secondary" onClick={onViewDetails} style={{ marginTop: SPACING }}>
+            Details
+          </Button>
+        </Card>
+      )}
+
+      <DataFreshnessNote homeContext={homeContext} />
+    </div>
   );
 }
 
@@ -499,6 +615,7 @@ export default function HomeCommandCenter({
   onRecordPayment,
   onViewDetails,
   onSeeOptions,
+  onPreviewScenario,
 }) {
 
   // Derive all presentation context
@@ -534,8 +651,16 @@ export default function HomeCommandCenter({
     );
   }
 
+  if (homeState === "blocking-review") {
+    return (
+      <main style={{ display: "grid", gap: GAP_LARGE, padding: `0 ${MAIN_PADDING}` }}>
+        <BlockingReviewState homeContext={homeContext} onGoToReview={onGoToReview} onViewDetails={onViewDetails} />
+      </main>
+    );
+  }
+
   // ─────────────────────────────────────────────────────────────────────
-  // ACTIVE PLAN STATES (healthy, critical, or with blocking review)
+  // ACTIVE PLAN STATES (healthy or critical - blocking review handled above)
   // ─────────────────────────────────────────────────────────────────────
 
   return (
@@ -557,6 +682,12 @@ export default function HomeCommandCenter({
         <UpNextCard homeContext={homeContext} onSeePlan={onGoToPlan} />
         {homeContext.isHousehold && <HouseholdBreakdownCard homeContext={homeContext} />}
       </div>
+
+      {/* WHAT IF: read-only scenario teaser, only if a preview is wired up */}
+      <WhatIfCard homeContext={homeContext} onPreviewScenario={onPreviewScenario} />
+
+      {/* DATA FRESHNESS: only rendered when confirmed data is actually stale */}
+      <DataFreshnessNote homeContext={homeContext} />
     </main>
   );
 }

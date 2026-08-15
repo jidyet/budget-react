@@ -91,6 +91,11 @@ export const nextMoveCtaLabel = (action) => {
   return map[action] || "Take action";
 };
 
+// Truthful fallback when no authoritative payment recommendation exists -
+// the payoff engine doesn't expose a single "pay this now" figure, so
+// Home never invents one from minimum + extra in isolation.
+export const focusHeadline = (targetDebtName) => `Focus on ${targetDebtName} next.`;
+
 // Strategy explanation
 export const strategyExplanation = (strategy, targetDebtName) => {
   const map = {
@@ -117,6 +122,13 @@ export const quickCheckHeadline = (openCount, blockingCount) => {
   return `${openCount} thing${openCount === 1 ? "" : "s"} can use a quick check.`;
 };
 export const quickCheckCta = () => "Review them";
+
+// Blocking-review Home trust state - a genuinely distinct treatment, not
+// the normal active-plan command center wearing a warning color.
+export const blockingReviewTrustNote = () =>
+  "We can't fully trust your plan's momentum until these are resolved.";
+export const provisionalLabel = (label) => `${label} (provisional)`;
+export const provisionalDebtNote = () => "This may change once open reviews are resolved.";
 
 // Data freshness
 export const dataFreshnessLabel = (daysOld) => {

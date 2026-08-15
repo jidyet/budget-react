@@ -8,34 +8,53 @@
  * Contract: uses only immutable truth from snapshot, never modifies anything.
  */
 
-import { isConfirmedZero } from "../../../domain/tracktozero/ownership.js";
+import { isBalanceUnresolved, isConfirmedZero } from "../../../domain/tracktozero/ownership.js";
 
 /**
  * Derive confirmed progress from opening and latest snapshots.
  *
  * Contract:
- * - Only uses CONFIRMED snapshots (never unresolved/imported balances)
- * - eliminated = null if unable to calculate
- * - percentage = eliminated / openingBalance * 100
- * - Never claims progress from unresolved data
+ * - Compares the SAME frozen set of debts on both sides (the plan's
+ *   startingDebtSnapshot) - a debt added to/dropped from core inclusion
+ *   after activation must never silently shift either side of the
+ *   comparison, or elimination looks bigger/smaller than it really is.
+ * - confirmed = false (never eliminated/percent > 0) unless EVERY one of
+ *   those debts has both a real latest observation AND a currently
+ *   CONFIRMED (not unresolved) balance status - a missing snapshot must
+ *   never be silently treated as "no balance" (which would inflate
+ *   elimination), and an unresolved/imported-but-unverified balance must
+ *   never be treated as confirmed truth.
+ * - Never claims progress from unresolved or missing data.
  */
 export const deriveConfirmedProgress = (snapshot) => {
-  if (!snapshot?.activeContext?.version?.startingDebtSnapshot) {
+  const startingDebtSnapshot = snapshot?.activeContext?.version?.startingDebtSnapshot;
+  if (!startingDebtSnapshot?.length) {
     return { confirmed: false, openingBalance: 0, latestBalance: 0, eliminated: 0, percent: 0 };
   }
 
-  // Sum confirmed opening balances from the frozen starting snapshot
-  const openingBalance = snapshot.activeContext.version.startingDebtSnapshot.reduce(
+  // Sum confirmed opening balances from the frozen starting snapshot.
+  const openingBalance = startingDebtSnapshot.reduce(
     (sum, snap) => sum + Math.max(0, Number(snap.balance) || 0),
     0
   );
 
-  // Sum latest confirmed balances from current snapshots
-  const latestBalance = snapshot.includedDebts.reduce((sum, debt) => {
-    const latestSnapshot = snapshot.latestSnapshotsByDebt?.[debt.id];
-    if (!latestSnapshot) return sum;
+  // Sum latest balances over the EXACT same debt set the opening balance
+  // came from - and refuse to call the total "confirmed" the moment any
+  // one of those debts lacks a safe, confirmed latest balance.
+  let allSafe = true;
+  const latestBalance = startingDebtSnapshot.reduce((sum, startingItem) => {
+    const debt = snapshot.debts?.find((candidate) => candidate.id === startingItem.debtId);
+    const latestSnapshot = snapshot.latestSnapshotsByDebt?.[startingItem.debtId];
+    if (!debt || !latestSnapshot || isBalanceUnresolved(debt)) {
+      allSafe = false;
+      return sum;
+    }
     return sum + Math.max(0, Number(latestSnapshot.balance) || 0);
   }, 0);
+
+  if (!allSafe) {
+    return { confirmed: false, openingBalance, latestBalance: 0, eliminated: 0, percent: 0 };
+  }
 
   const eliminated = Math.max(0, openingBalance - latestBalance);
   const percent = openingBalance > 0 ? (eliminated / openingBalance) * 100 : 0;
@@ -203,7 +222,13 @@ export const deriveHomeContext = (snapshot, reviewSnapshot, scenario) => {
   // Determine overall Home state
   const hasDebts = snapshot.debts?.length > 0;
   const hasActivePlan = !!snapshot.activeContext?.version;
-  const allDebtsArePaidOff = hasDebts && snapshot.debts.every((d) => isConfirmedZero(d));
+  // The "you hit $0" celebration reflects included/core payoff truth, not
+  // every debt in the workspace - a debt intentionally excluded from the
+  // core payoff plan (e.g. a mortgage) must never block it, and a
+  // workspace with zero included debts (nothing was ever a core payoff
+  // target) must never trigger it either.
+  const includedDebts = snapshot.includedDebts || [];
+  const allDebtsArePaidOff = includedDebts.length > 0 && includedDebts.every((d) => isConfirmedZero(d));
 
   // Compute progress (only if active plan exists)
   const progress = hasActivePlan ? deriveConfirmedProgress(snapshot) : null;

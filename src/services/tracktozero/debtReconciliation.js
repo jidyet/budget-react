@@ -91,7 +91,15 @@ const fieldValue = (field, entity, latestSnapshot) => {
   if (field === "apr") return entity.apr;
   if (field === "aprStatus") return entity.aprStatus || "";
   if (field === "minimumPayment") return entity.minimumPayment ?? entity.minimumRequiredPayment;
-  if (field === "dueDay") return entity.dueDay ?? "";
+  if (field === "dueDay") {
+    // dueDay can come as plain number, or we extract from dueDate ISO string
+    if (entity.dueDay != null && entity.dueDay !== "") return entity.dueDay;
+    if (entity.dueDate) {
+      const parsed = new Date(`${entity.dueDate}T00:00:00Z`);
+      if (!Number.isNaN(parsed.getTime())) return parsed.getUTCDate();
+    }
+    return "";
+  }
   if (field === "includedInCorePayoffPlan") return entity.includedInCorePayoffPlan;
   return entity[field];
 };

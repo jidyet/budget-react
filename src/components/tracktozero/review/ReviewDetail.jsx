@@ -28,14 +28,14 @@ const FIELD_LABEL = { apr: "APR", minimumRequiredPayment: "Minimum", dueDay: "Du
 function DiffRow({ label, existing, next }) {
   const palette = ttzPalette;
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, padding: "8px 0", borderTop: `1px solid ${palette.border}` }}>
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, padding: "12px 0", borderTop: `1px solid ${palette.border}`, alignItems: "start" }}>
       <div>
-        <div style={{ ...TYPE_SCALE.caption, color: palette.muted }}>{label} · TrackToZero</div>
-        <div style={{ ...TYPE_SCALE.body, color: palette.tx }}>{existing}</div>
+        <div style={{ ...TYPE_SCALE.caption, color: palette.muted, fontWeight: 600, letterSpacing: "0.3px", marginBottom: 6 }}>TrackToZero</div>
+        <div style={{ ...TYPE_SCALE.body, color: palette.tx, fontWeight: 500 }}>{existing}</div>
       </div>
       <div>
-        <div style={{ ...TYPE_SCALE.caption, color: palette.muted }}>{label} · New statement</div>
-        <div style={{ ...TYPE_SCALE.body, color: palette.tx, fontWeight: 700 }}>{next}</div>
+        <div style={{ ...TYPE_SCALE.caption, color: palette.muted, fontWeight: 600, letterSpacing: "0.3px", marginBottom: 6 }}>New {label}</div>
+        <div style={{ ...TYPE_SCALE.body, color: palette.ac, fontWeight: 700 }}>{next}</div>
       </div>
     </div>
   );
@@ -47,11 +47,11 @@ function MatchCandidateCard({ match, selected, onSelect }) {
     <Card
       variant={selected ? "highlight" : "interactive"}
       onClick={onSelect}
-      role={onSelect ? "radio" : undefined}
-      aria-checked={onSelect ? selected : undefined}
-      tabIndex={onSelect ? 0 : undefined}
-      onKeyDown={onSelect ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(); } } : undefined}
-      style={{ cursor: onSelect ? "pointer" : "default" }}
+      role="radio"
+      aria-checked={selected}
+      tabIndex={0}
+      onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(); } }}
+      style={{ cursor: "pointer" }}
     >
       <div style={{ ...TYPE_SCALE.cardTitle, color: palette.tx }}>{match.debtName}</div>
       <div style={{ ...TYPE_SCALE.body, color: palette.tx2, marginTop: 4 }}>{formatMoney(match.diff?.balance?.existingValue)}</div>
@@ -89,51 +89,57 @@ function MatchSection({ item, isHousehold, onUpdateExisting, onNewDebt, busy }) 
 
   return (
     <Card variant="elevated">
-      <div style={{ ...TYPE_SCALE.sectionTitle, color: palette.tx }}>{matches.length > 1 ? "Which debt is this?" : "Possible match"}</div>
-      <p style={{ ...TYPE_SCALE.body, color: palette.tx2 }}>{getReviewWhy(item)}</p>
-      <div role={matches.length > 1 ? "radiogroup" : undefined} aria-label="Possible matching debts" style={{ display: "grid", gap: 10, marginTop: 10 }}>
+      <div style={{ ...TYPE_SCALE.sectionTitle, color: palette.tx, marginBottom: 12 }}>{matches.length > 1 ? "Which debt is this?" : "Possible match"}</div>
+      <p style={{ ...TYPE_SCALE.body, color: palette.tx2, marginBottom: 16 }}>{getReviewWhy(item)}</p>
+      <div role={matches.length > 1 ? "radiogroup" : undefined} aria-label="Possible matching debts" style={{ display: "grid", gap: 12, marginBottom: 16 }}>
         {matches.map((match) => (
           <MatchCandidateCard
             key={match.debtId}
             match={match}
             isHousehold={isHousehold}
             selected={selectedDebtId === match.debtId}
-            onSelect={matches.length > 1 ? () => setSelectedDebtId(match.debtId) : undefined}
+            onSelect={() => setSelectedDebtId(match.debtId)}
           />
         ))}
       </div>
 
       {selectedMatch ? (
-        <div style={{ marginTop: 16 }}>
-          <div style={{ ...TYPE_SCALE.overline, color: palette.muted, marginBottom: 4 }}>Why this looks like a match</div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${palette.border}` }}>
+          <div style={{ ...TYPE_SCALE.overline, color: palette.muted, marginBottom: 12, fontWeight: 600, letterSpacing: "0.3px" }}>Why this looks like a match</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
             {selectedMatch.reasons?.map((reason) => <Badge key={reason} tone="success">{reason}</Badge>)}
           </div>
           <DiffRow label="Balance" existing={formatMoney(selectedMatch.diff.balance?.existingValue)} next={formatMoney(selectedMatch.diff.balance?.newValue)} />
           {selectedMatch.diff.apr?.newValue != null && selectedMatch.diff.apr?.state !== "same" ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ flex: 1 }}><DiffRow label="APR" existing={formatPercent(selectedMatch.diff.apr?.existingValue)} next={formatPercent(selectedMatch.diff.apr?.newValue)} /></div>
-              <Checkbox label="Use new APR" checked={!!acceptedFields.apr} onChange={() => toggleField("apr")} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 16, alignItems: "start", paddingTop: 12 }}>
+              <DiffRow label="APR" existing={formatPercent(selectedMatch.diff.apr?.existingValue)} next={formatPercent(selectedMatch.diff.apr?.newValue)} />
+              <div style={{ marginTop: 4 }}>
+                <Checkbox label="Use new" checked={!!acceptedFields.apr} onChange={() => toggleField("apr")} />
+              </div>
             </div>
           ) : null}
           {selectedMatch.diff.minimumPayment?.newValue != null && selectedMatch.diff.minimumPayment?.state !== "same" ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ flex: 1 }}><DiffRow label={FIELD_LABEL.minimumRequiredPayment} existing={formatMoney(selectedMatch.diff.minimumPayment?.existingValue)} next={formatMoney(selectedMatch.diff.minimumPayment?.newValue)} /></div>
-              <Checkbox label="Use new minimum" checked={!!acceptedFields.minimumRequiredPayment} onChange={() => toggleField("minimumRequiredPayment")} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 16, alignItems: "start", paddingTop: 12 }}>
+              <DiffRow label={FIELD_LABEL.minimumRequiredPayment} existing={formatMoney(selectedMatch.diff.minimumPayment?.existingValue)} next={formatMoney(selectedMatch.diff.minimumPayment?.newValue)} />
+              <div style={{ marginTop: 4 }}>
+                <Checkbox label="Use new" checked={!!acceptedFields.minimumRequiredPayment} onChange={() => toggleField("minimumRequiredPayment")} />
+              </div>
             </div>
           ) : null}
           {selectedMatch.diff.dueDay?.newValue && selectedMatch.diff.dueDay?.state !== "same" ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ flex: 1 }}><DiffRow label={FIELD_LABEL.dueDay} existing={selectedMatch.diff.dueDay?.existingValue || "Not set"} next={selectedMatch.diff.dueDay?.newValue} /></div>
-              <Checkbox label="Use new due day" checked={!!acceptedFields.dueDay} onChange={() => toggleField("dueDay")} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 16, alignItems: "start", paddingTop: 12 }}>
+              <DiffRow label={FIELD_LABEL.dueDay} existing={selectedMatch.diff.dueDay?.existingValue || "Not set"} next={selectedMatch.diff.dueDay?.newValue} />
+              <div style={{ marginTop: 4 }}>
+                <Checkbox label="Use new" checked={!!acceptedFields.dueDay} onChange={() => toggleField("dueDay")} />
+              </div>
             </div>
           ) : null}
 
-          <InfoCallout style={{ marginTop: 14 }} title={`Update ${selectedMatch.debtName}?`}>
+          <InfoCallout style={{ marginTop: 20 }} title={`Update ${selectedMatch.debtName}?`}>
             We&apos;ll keep this as the same debt, add the new confirmed balance, and update only the details you checked above.
             We won&apos;t create a payment automatically, and we won&apos;t erase your old balance history.
           </InfoCallout>
-          <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 12, marginTop: 16, flexWrap: "wrap" }}>
             <Button variant="primary" disabled={busy} onClick={() => onUpdateExisting(selectedMatch.debtId, buildMetadataUpdates())}>
               {busy ? "Saving..." : "Update this debt"}
             </Button>
@@ -142,7 +148,7 @@ function MatchSection({ item, isHousehold, onUpdateExisting, onNewDebt, busy }) 
         </div>
       ) : matches.length > 1 ? (
         <div style={{ marginTop: 16 }}>
-          <Button variant="secondary" disabled={busy} onClick={onNewDebt}>It&apos;s a new debt</Button>
+          <Button variant="secondary" disabled={busy} onClick={onNewDebt} style={{ width: "100%" }}>It&apos;s a new debt</Button>
         </div>
       ) : null}
     </Card>

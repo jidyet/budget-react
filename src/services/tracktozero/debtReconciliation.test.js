@@ -129,7 +129,7 @@ describe("debt reconciliation", () => {
 
   it("builds field diffs that distinguish same, changed, new information, missing, and conflicting values", () => {
     const diff = buildReconciliationDiff({
-      candidate: candidate({ accountReferenceSafe: "last4:5678", minimumPayment: null }),
+      candidate: candidate({ accountReferenceSafe: "last4:5678", minimumPayment: null, dueDate: null }),
       debt: debt({ accountReferenceSafe: "last4:1234", dueDay: null }),
       latestSnapshot: { balance: 12000, observedAt: "2026-07-10T00:00:00.000Z" },
     });

@@ -32,6 +32,7 @@ import * as lang from "./homeLanguage.js";
 const PADDING = "var(--ttz-space-5, 24px)";
 const SPACING = "var(--ttz-space-4, 16px)";
 const GAP_LARGE = "var(--ttz-space-6, 32px)";
+const MAIN_PADDING = "var(--ttz-space-5, 24px)";
 
 // ─────────────────────────────────────────────────────────────────────────
 // STATE: NO DEBTS — Activation
@@ -112,20 +113,24 @@ function DebtFreedomHero({ homeContext }) {
   const percentCleared = progress?.percent || 0;
 
   return (
-    <Card variant="elevated" padding={PADDING} style={{ background: `linear-gradient(135deg, ${palette.acS || palette.surf2} 0%, ${palette.surf} 100%)` }}>
-      <div style={{ display: "grid", gap: GAP_LARGE }}>
-        {/* Progress bar */}
+    <Card variant="elevated" padding={PADDING} style={{ 
+      background: `linear-gradient(135deg, ${palette.acS || palette.ac} 0%, ${palette.ac}ee 100%)`,
+      boxShadow: "0 8px 32px rgba(0,0,0,0.08)"
+    }}>
+      <div style={{ display: "grid", gap: SPACING }}>
+        {/* Progress bar section */}
         <div>
-          <div style={{ ...TYPE_SCALE.overline, color: palette.muted, marginBottom: 8 }}>
+          <div style={{ ...TYPE_SCALE.overline, color: "rgba(255,255,255,0.7)", marginBottom: 8, letterSpacing: "0.5px", fontWeight: 600 }}>
             {lang.momentumLabel()}
           </div>
-          <div style={{ height: 8, background: palette.border, borderRadius: 999, overflow: "hidden" }}>
+          <div style={{ height: 10, background: "rgba(255,255,255,0.2)", borderRadius: 999, overflow: "hidden" }}>
             <div
               style={{
                 height: "100%",
                 width: `${percentCleared}%`,
-                background: palette.go,
+                background: "rgba(255,255,255,0.9)",
                 transition: "width 0.4s ease-out",
+                borderRadius: 999,
               }}
               role="progressbar"
               aria-valuenow={percentCleared}
@@ -134,17 +139,17 @@ function DebtFreedomHero({ homeContext }) {
               aria-label="Debt payoff progress"
             />
           </div>
-          <p style={{ ...TYPE_SCALE.body, color: palette.tx2, marginTop: 6 }}>
+          <p style={{ ...TYPE_SCALE.body, color: "rgba(255,255,255,0.85)", marginTop: 8, marginBottom: 0 }}>
             {percentCleared > 0 ? `You're moving. ${lang.clearedLabel(percentCleared)}` : "Progress starts after your next confirmed balance update."}
           </p>
         </div>
 
         {/* Main metrics grid */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: SPACING }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "var(--ttz-space-5, 24px)", marginTop: SPACING }}>
           {/* Left to Go */}
           <div>
-            <div style={{ ...TYPE_SCALE.overline, color: palette.muted }}>{lang.leftToGoLabel()}</div>
-            <div style={{ ...TYPE_SCALE.metric, color: palette.tx, marginTop: 4 }}>
+            <div style={{ ...TYPE_SCALE.overline, color: "rgba(255,255,255,0.6)", letterSpacing: "0.5px", fontWeight: 600 }}>{lang.leftToGoLabel()}</div>
+            <div style={{ ...TYPE_SCALE.metric, color: "#FFFFFF", marginTop: 8, fontWeight: 700 }}>
               {formatMoney(totalDebt)}
             </div>
           </div>
@@ -152,11 +157,11 @@ function DebtFreedomHero({ homeContext }) {
           {/* Zero Day (if reachable) */}
           {zeroDay && (
             <div>
-              <div style={{ ...TYPE_SCALE.overline, color: palette.muted }}>{lang.zeroDayLabel()}</div>
-              <div style={{ ...TYPE_SCALE.metric, color: palette.tx, marginTop: 4 }}>
+              <div style={{ ...TYPE_SCALE.overline, color: "rgba(255,255,255,0.6)", letterSpacing: "0.5px", fontWeight: 600 }}>{lang.zeroDayLabel()}</div>
+              <div style={{ ...TYPE_SCALE.metric, color: "#FFFFFF", marginTop: 8, fontWeight: 700 }}>
                 {formatShortDate(zeroDay)}
               </div>
-              <p style={{ ...TYPE_SCALE.caption, color: palette.muted, marginTop: 2 }}>
+              <p style={{ ...TYPE_SCALE.caption, color: "rgba(255,255,255,0.7)", marginTop: 4, marginBottom: 0 }}>
                 {lang.zeroDaySupporting()}
               </p>
             </div>
@@ -165,8 +170,8 @@ function DebtFreedomHero({ homeContext }) {
           {/* Starting debt (if we know it) */}
           {progress?.openingBalance > 0 && (
             <div>
-              <div style={{ ...TYPE_SCALE.overline, color: palette.muted }}>{lang.startingDebtLabel()}</div>
-              <div style={{ ...TYPE_SCALE.metric, color: palette.tx2, marginTop: 4, fontSize: "0.9em" }}>
+              <div style={{ ...TYPE_SCALE.overline, color: "rgba(255,255,255,0.6)", letterSpacing: "0.5px", fontWeight: 600 }}>{lang.startingDebtLabel()}</div>
+              <div style={{ ...TYPE_SCALE.metric, color: "rgba(255,255,255,0.9)", marginTop: 8, fontSize: "1em", fontWeight: 600 }}>
                 {formatMoney(progress.openingBalance)}
               </div>
             </div>
@@ -205,35 +210,36 @@ function YourNextMoveCard({ homeContext, onRecordPayment, onViewDetails }) {
       variant="elevated"
       style={{
         borderLeft: `4px solid ${toneStyle.fg}`,
-        background: `linear-gradient(90deg, ${toneStyle.bg}15 0%, transparent 100%)`,
+        background: `linear-gradient(90deg, ${toneStyle.bg}20 0%, ${toneStyle.bg}05 100%)`,
+        boxShadow: "0 4px 16px rgba(0,0,0,0.06)"
       }}
     >
-      <div style={{ ...TYPE_SCALE.overline, color: toneStyle.fg, marginBottom: SPACING }}>
+      <div style={{ ...TYPE_SCALE.overline, color: toneStyle.fg, marginBottom: SPACING, letterSpacing: "0.5px", fontWeight: 600 }}>
         {lang.nextMoveEyebrow()}
       </div>
 
       <div style={{ display: "grid", gap: SPACING, marginBottom: GAP_LARGE }}>
         {/* Debt name + owner */}
         <div>
-          <h3 style={{ ...TYPE_SCALE.cardTitle, color: palette.tx, margin: 0 }}>{currentTarget.name}</h3>
+          <h3 style={{ ...TYPE_SCALE.cardTitle, color: palette.tx, margin: 0, fontWeight: 700 }}>{currentTarget.name}</h3>
           {isHousehold && (
-            <p style={{ ...TYPE_SCALE.body, color: palette.muted, marginTop: 4 }}>
+            <p style={{ ...TYPE_SCALE.body, color: palette.muted, marginTop: 6, fontSize: "0.95em" }}>
               {currentTarget.ownerLabel || "Unassigned"}
             </p>
           )}
         </div>
 
         {/* Balance and APR */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: SPACING }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: SPACING, padding: "12px 0" }}>
           <div>
-            <div style={{ ...TYPE_SCALE.caption, color: palette.muted }}>Balance</div>
-            <div style={{ ...TYPE_SCALE.body, color: palette.tx, marginTop: 2, fontWeight: 700 }}>
+            <div style={{ ...TYPE_SCALE.caption, color: palette.muted, fontWeight: 600, letterSpacing: "0.3px" }}>Balance</div>
+            <div style={{ ...TYPE_SCALE.body, color: palette.tx, marginTop: 6, fontWeight: 700, fontSize: "1.1em" }}>
               {formatMoney(currentTarget.currentBalance)}
             </div>
           </div>
           <div>
-            <div style={{ ...TYPE_SCALE.caption, color: palette.muted }}>APR</div>
-            <div style={{ ...TYPE_SCALE.body, color: palette.tx, marginTop: 2, fontWeight: 700 }}>
+            <div style={{ ...TYPE_SCALE.caption, color: palette.muted, fontWeight: 600, letterSpacing: "0.3px" }}>APR</div>
+            <div style={{ ...TYPE_SCALE.body, color: palette.tx, marginTop: 6, fontWeight: 700, fontSize: "1.1em" }}>
               {currentTarget.apr != null ? `${(currentTarget.apr * 100).toFixed(2)}%` : "Unknown"}
             </div>
           </div>
@@ -241,13 +247,13 @@ function YourNextMoveCard({ homeContext, onRecordPayment, onViewDetails }) {
 
         {/* Payment recommendation (if available) */}
         {totalPayment > 0 && (
-          <div style={{ background: palette.surf, padding: SPACING, borderRadius: "var(--ttz-radius-md, 12px)" }}>
-            <div style={{ ...TYPE_SCALE.caption, color: palette.muted }}>Recommended payment</div>
-            <div style={{ ...TYPE_SCALE.metric, color: palette.tx, marginTop: 4 }}>
+          <div style={{ background: palette.surf2, padding: "12px 16px", borderRadius: "var(--ttz-radius-md, 12px)", border: `1px solid ${palette.border}` }}>
+            <div style={{ ...TYPE_SCALE.caption, color: palette.muted, fontWeight: 600, letterSpacing: "0.3px" }}>Recommended payment</div>
+            <div style={{ ...TYPE_SCALE.metric, color: palette.tx, marginTop: 8, fontWeight: 700 }}>
               {formatMoney(totalPayment)}
             </div>
             {minimumPayment > 0 && extraPayment > 0 && (
-              <p style={{ ...TYPE_SCALE.caption, color: palette.muted, marginTop: 4 }}>
+              <p style={{ ...TYPE_SCALE.caption, color: palette.muted, marginTop: 6, marginBottom: 0, fontSize: "0.9em" }}>
                 {formatMoney(minimumPayment)} minimum + {formatMoney(extraPayment)} extra
               </p>
             )}
@@ -256,15 +262,15 @@ function YourNextMoveCard({ homeContext, onRecordPayment, onViewDetails }) {
 
         {/* Strategy explanation */}
         {strategy && (
-          <p style={{ ...TYPE_SCALE.body, color: palette.tx2, margin: 0 }}>
+          <p style={{ ...TYPE_SCALE.body, color: palette.tx2, margin: 0, fontSize: "0.95em", lineHeight: 1.5 }}>
             <strong>Why this debt:</strong> {lang.strategyExplanation(strategy, currentTarget.name)}
           </p>
         )}
       </div>
 
       {/* CTAs */}
-      <div style={{ display: "grid", gap: SPACING, gridTemplateColumns: "1fr auto" }}>
-        <Button variant="primary" onClick={onRecordPayment}>
+      <div style={{ display: "flex", gap: SPACING, flexWrap: "wrap" }}>
+        <Button variant="primary" onClick={onRecordPayment} style={{ flex: 1 }}>
           Record payment
         </Button>
         <Button variant="secondary" onClick={onViewDetails}>
@@ -533,7 +539,7 @@ export default function HomeCommandCenter({
   // ─────────────────────────────────────────────────────────────────────
 
   return (
-    <main style={{ display: "grid", gap: GAP_LARGE }}>
+    <main style={{ display: "grid", gap: GAP_LARGE, padding: `0 ${MAIN_PADDING}` }}>
       {/* HERO: Debt Freedom Scoreboard */}
       <DebtFreedomHero homeContext={homeContext} />
 
@@ -546,11 +552,11 @@ export default function HomeCommandCenter({
       {/* QUICK CHECK: Review Integration (only if open reviews exist) */}
       {homeContext.openReviewCount > 0 && <QuickCheckCard homeContext={homeContext} onGoToReview={onGoToReview} />}
 
-      {/* UP NEXT: Queue Preview */}
-      <UpNextCard homeContext={homeContext} onSeePlan={onGoToPlan} />
-
-      {/* HOUSEHOLD BREAKDOWN: For household workspaces */}
-      {homeContext.isHousehold && <HouseholdBreakdownCard homeContext={homeContext} />}
+      {/* UP NEXT + HOUSEHOLD: Side-by-side on larger screens */}
+      <div style={{ display: "grid", gridTemplateColumns: homeContext.isHousehold ? "repeat(auto-fit, minmax(280px, 1fr))" : "1fr", gap: GAP_LARGE }}>
+        <UpNextCard homeContext={homeContext} onSeePlan={onGoToPlan} />
+        {homeContext.isHousehold && <HouseholdBreakdownCard homeContext={homeContext} />}
+      </div>
     </main>
   );
 }

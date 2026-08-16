@@ -172,6 +172,18 @@ export const historicalStatementNote = () => "Adding it won't replace your curre
 export const addOlderBalanceLabel = () => "Add older balance";
 export const ignoreStatementLabel = () => "Ignore this statement";
 
+// New-debt confirmation (no existing-debt match was found at all, so there's
+// nothing to differentiate against - a single clear affirmative decision).
+export const newDebtPromptTitle = () => "Add this as a new debt?";
+export const newDebtPromptBody = () => "This doesn't match anything you already track. Confirm it once the details below look right.";
+export const addAsNewDebtLabel = () => "Add as a new debt";
+
+// Per-item immediate save (Part 5x) - a second way to persist, alongside the
+// batch "Save what I know". Saves only THIS item's staged answers the
+// moment the user is done with it, instead of requiring every other open
+// item to be decided first.
+export const saveThisDebtLabel = () => "Save this debt";
+
 // ── REVIEW-1C wizard: item-by-item navigation + pre-save summary ────────
 
 export const itemPositionLabel = (index, total) => `Item ${index} of ${total}`;

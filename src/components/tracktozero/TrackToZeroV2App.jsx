@@ -1718,7 +1718,7 @@ export default function TrackToZeroV2App() {
             workspaceId={workspaceId}
             reviewSnapshot={reviewState.snapshot}
             loadingReview={reviewState.status === "loading" && !reviewState.snapshot}
-            onRefreshReview={() => refreshReview(workspaceId)}
+            onRefreshReview={() => Promise.all([refreshReview(workspaceId), refresh(workspaceId)])}
           />
         )}
         {tab === "debts" && <Debts snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} refreshReview={() => refreshReview(workspaceId)} runAction={runAction} writeState={writeState} reviewSnapshot={reviewState.snapshot} onGoToReview={() => navigateTab("review")} />}

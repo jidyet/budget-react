@@ -12,12 +12,16 @@ import { REVIEW_TYPES } from "../../../services/tracktozero/reviewDomain.js";
 import { matchImportedOwnerToIdentity } from "../../../domain/tracktozero/personIdentity.js";
 import {
   REVIEW_TYPE_LABEL,
+  addAsNewDebtLabel,
   addOlderBalanceLabel,
   getReviewWhy,
   historicalStatementNote,
   historicalStatementQuestion,
   ignoreStatementLabel,
   leaveForLaterLabel,
+  newDebtPromptBody,
+  newDebtPromptTitle,
+  saveThisDebtLabel,
 } from "../../../services/tracktozero/reviewCopy.js";
 
 // REVIEW-1C's staged, inline batch-session sections. These are DELIBERATELY
@@ -154,6 +158,32 @@ function DuplicateSubSection({ staged, onStage }) {
       <p style={{ ...TYPE_SCALE.body, color: palette.tx2, marginBottom: 10 }}>This looks like a statement you&apos;ve already added.</p>
       <Button size="sm" variant={staged?.action === "dismissDuplicate" ? "primary" : "secondary"} onClick={() => onStage("duplicate", { action: "dismissDuplicate", args: {}, label: "Keep the existing one" })}>
         Keep the one already in TrackToZero
+      </Button>
+    </Card>
+  );
+}
+
+// Fix: a candidate the reconciliation engine found NO existing-debt match
+// for at all (MATCH_CLASSIFICATIONS.noMatch) never got a MatchSubSection or
+// DuplicateSubSection - both are gated on hasMatch/hasDuplicate, which stay
+// false for a genuine no-match candidate. Without this, such a candidate had
+// literally no staged action anywhere in this wizard that getTerminalEntry
+// recognizes (resolveAsNewDebt/resolveAsExistingDebt/dismissDuplicate), so
+// it could never leave the queue no matter how completely its other fields
+// (balance/due day/owner/etc.) were filled in - filed missing info just sat
+// there forever with nothing to actually resolve the item. Renders whenever
+// neither of those two sections would - i.e. there's no conflicting
+// existing debt to differentiate against, so a single clear "add it" is the
+// whole decision.
+function NewDebtSubSection({ staged, onStage }) {
+  const palette = ttzPalette;
+  const isStaged = staged?.action === "resolveAsNewDebt";
+  return (
+    <Card variant="default">
+      <div style={{ ...TYPE_SCALE.cardTitle, color: palette.tx, marginBottom: 4 }}>{newDebtPromptTitle()}</div>
+      <p style={{ ...TYPE_SCALE.body, color: palette.tx2, marginBottom: 10 }}>{newDebtPromptBody()}</p>
+      <Button size="sm" variant={isStaged ? "primary" : "secondary"} onClick={() => onStage("newDebt", { action: "resolveAsNewDebt", args: {}, label: addAsNewDebtLabel() })}>
+        {addAsNewDebtLabel()}
       </Button>
     </Card>
   );
@@ -418,12 +448,13 @@ function DebtClassificationSubSection({ item, staged, onStage }) {
 // One card per open review item - every applicable section renders inline,
 // stacked, so the user answers whatever they know in one continuous scroll
 // instead of a modal per field (Part 2/34).
-export default function ReviewSessionCard({ item, isHousehold, members, people = [], debts, latestSnapshotsByDebt, stagedForItem = {}, onStage, onLeaveForLater, onCreatePerson, busy, resultMessage, resultTone }) {
+export default function ReviewSessionCard({ item, isHousehold, members, people = [], debts, latestSnapshotsByDebt, stagedForItem = {}, onStage, onLeaveForLater, onSaveItem, onCreatePerson, busy, resultMessage, resultTone }) {
   const palette = ttzPalette;
   const candidate = item.candidate;
   const title = candidate.accountName || candidate.creditorName || "Debt statement";
   const hasMatch = item.types.includes(REVIEW_TYPES.matchDecision) || item.types.includes(REVIEW_TYPES.multipleMatches);
   const hasDuplicate = item.types.includes(REVIEW_TYPES.duplicateImport) && !hasMatch;
+  const hasNothingStaged = !Object.keys(stagedForItem).length;
 
   return (
     <Card variant={item.blocking ? "warning" : "default"}>
@@ -434,7 +465,10 @@ export default function ReviewSessionCard({ item, isHousehold, members, people =
             {item.types.map((type) => <Badge key={type} tone={item.blocking ? "warning" : "neutral"}>{REVIEW_TYPE_LABEL[type] || type}</Badge>)}
           </div>
         </div>
-        <Button size="sm" variant="ghost" disabled={busy} onClick={onLeaveForLater}>{leaveForLaterLabel()}</Button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={onLeaveForLater}>{leaveForLaterLabel()}</Button>
+          <Button size="sm" variant="primary" disabled={busy || hasNothingStaged} onClick={onSaveItem}>{saveThisDebtLabel()}</Button>
+        </div>
       </div>
 
       {resultMessage ? (
@@ -446,8 +480,11 @@ export default function ReviewSessionCard({ item, isHousehold, members, people =
       <div style={{ display: "grid", gap: 10 }}>
         {hasMatch ? (
           <MatchSubSection item={item} staged={stagedForItem.match} onStage={onStage} debts={debts} latestSnapshotsByDebt={latestSnapshotsByDebt} />
-        ) : null}
-        {hasDuplicate ? <DuplicateSubSection staged={stagedForItem.duplicate} onStage={onStage} /> : null}
+        ) : hasDuplicate ? (
+          <DuplicateSubSection staged={stagedForItem.duplicate} onStage={onStage} />
+        ) : (
+          <NewDebtSubSection staged={stagedForItem.newDebt} onStage={onStage} />
+        )}
         {item.types.includes(REVIEW_TYPES.debtClassification) ? <DebtClassificationSubSection item={item} staged={stagedForItem.classification} onStage={onStage} /> : null}
         {item.types.includes(REVIEW_TYPES.businessScope) ? <BusinessScopeSubSection staged={stagedForItem.scope} onStage={onStage} /> : null}
         {item.types.includes(REVIEW_TYPES.balanceConfirmation) ? <BalanceSubSection item={item} staged={stagedForItem.balance} onStage={onStage} /> : null}

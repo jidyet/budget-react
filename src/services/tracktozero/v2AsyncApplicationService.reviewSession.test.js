@@ -112,6 +112,40 @@ describe("REVIEW-1C: saveReviewSession - all items answered", () => {
   });
 });
 
+describe("Fix: a no-match candidate (only missing-info signals, no reconciliation match) can still be fully resolved into a real Debt", () => {
+  it("filling in balance/minimum/due date/owner plus an explicit resolveAsNewDebt decision (the UI's new NewDebtSubSection) creates the debt exactly like a matched candidate would", async () => {
+    const { repository, service } = makeService("seed-owner");
+    const batch = await service.createImportBatch("household-seed", {
+      sourceType: "pdf", sourceFilename: "usbank.pdf",
+      candidates: [firstmarkCandidate({
+        candidateId: "no-match-1", accountName: "USBANK Credit Card", accountReferenceSafe: "last4:5555",
+        currentBalance: 6265.18, balanceStatus: "unresolved", minimumPayment: null, dueDate: "",
+        ownerType: "unassigned", ownerId: "", ownerSuggestion: "Kristina",
+        evidence: {}, // no reconciliation at all - this is the "no_match" shape
+      })],
+    });
+
+    const result = await service.saveReviewSession("household-seed", [
+      { importBatchId: batch.id, importCandidateId: "no-match-1", action: "resolveBalance", args: { currentBalance: 6265.18 } },
+      { importBatchId: batch.id, importCandidateId: "no-match-1", action: "resolveDueDate", args: { dueDay: 10 } },
+      { importBatchId: batch.id, importCandidateId: "no-match-1", action: "resolveOwner", args: { ownerType: "unassigned", ownerId: "" } },
+      { importBatchId: batch.id, importCandidateId: "no-match-1", action: "resolveAsNewDebt", args: {} },
+    ]);
+
+    expect(result.failedCount).toBe(0);
+    expect(result.staleCount).toBe(0);
+    expect(result.resolvedCount).toBe(4);
+
+    const created = repository.listDebts("household-seed").find((d) => d.accountReferenceSafe === "last4:5555");
+    expect(created).toBeDefined(); // it actually became a real Debt, not stuck open forever
+    expect(created.currentBalance).toBe(6265.18);
+    expect(created.dueDay).toBe(10);
+
+    const snapshot = await service.getReviewSnapshot("household-seed");
+    expect(snapshot.openItems.some((item) => item.importCandidateId === "no-match-1")).toBe(false);
+  });
+});
+
 describe("REVIEW-1C: saveReviewSession - partial answers leave the rest genuinely open", () => {
   it("an item never staged is untouched and remains open, while staged items resolve", async () => {
     const { repository, service } = makeService();

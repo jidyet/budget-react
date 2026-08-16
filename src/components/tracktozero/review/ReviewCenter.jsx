@@ -173,33 +173,58 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
     }
   };
 
+  const flattenStagedForItem = (item) => {
+    const forItem = staged[item.id];
+    if (!forItem) return [];
+    return Object.values(forItem).map((entry) => ({ itemId: item.id, importBatchId: item.importBatchId, importCandidateId: item.importCandidateId, action: entry.action, args: entry.args }));
+  };
+
+  // Shared between the batch "Save what I know" and the per-item "Save this
+  // debt" (Part 5x) so both apply an identical, single definition of what a
+  // saveReviewSession result means for local state - never two independently
+  // maintained copies of this logic that could quietly drift apart.
+  const applySaveResult = (result) => {
+    const nextResults = {};
+    for (const entry of result.resolved) nextResults[entry.itemId] = { message: "Saved.", tone: "success" };
+    for (const entry of result.stale) nextResults[entry.itemId] = { message: entry.message, tone: "danger" };
+    for (const entry of result.failed) nextResults[entry.itemId] = { message: entry.message, tone: "warning" };
+    setItemResults((state) => ({ ...state, ...nextResults }));
+    setStaged((state) => {
+      const next = { ...state };
+      for (const entry of result.resolved) delete next[entry.itemId];
+      return next;
+    });
+  };
+
   const runSaveReviewedChanges = async () => {
-    const flat = [];
-    for (const item of needsAttentionItems) {
-      const forItem = staged[item.id];
-      if (!forItem) continue;
-      for (const entry of Object.values(forItem)) {
-        flat.push({ itemId: item.id, importBatchId: item.importBatchId, importCandidateId: item.importCandidateId, action: entry.action, args: entry.args });
-      }
-    }
+    const flat = needsAttentionItems.flatMap(flattenStagedForItem);
     setConfirmSave(false);
     if (!flat.length) return;
     setSaving(true);
     try {
       const result = await service.saveReviewSession(workspaceId, flat);
-      const nextResults = {};
-      for (const entry of result.resolved) nextResults[entry.itemId] = { message: "Saved.", tone: "success" };
-      for (const entry of result.stale) nextResults[entry.itemId] = { message: entry.message, tone: "danger" };
-      for (const entry of result.failed) nextResults[entry.itemId] = { message: entry.message, tone: "warning" };
-      setItemResults(nextResults);
-      setStaged((state) => {
-        const next = { ...state };
-        for (const entry of result.resolved) delete next[entry.itemId];
-        return next;
-      });
+      applySaveResult(result);
       const distinctResolvedItems = new Set(result.resolved.map((entry) => entry.itemId)).size;
       const stillOpenCount = Math.max(0, needsAttentionItems.length - distinctResolvedItems);
       setSummary(saveResultSummary({ resolvedCount: distinctResolvedItems, staleCount: result.stale.length, failedCount: result.failed.length, stillOpenCount }));
+      await onRefreshReview();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Save just THIS item's staged answers immediately (Part 5x) - the user
+  // doesn't have to decide every other open item first. Reuses the exact
+  // same saveReviewSession primitive the batch save calls, just scoped to
+  // one item's entries, so a single candidate can be saved the moment its
+  // own information is complete.
+  const handleSaveItem = async (item) => {
+    const flat = flattenStagedForItem(item);
+    if (!flat.length) return;
+    setSaving(true);
+    try {
+      const result = await service.saveReviewSession(workspaceId, flat);
+      applySaveResult(result);
       await onRefreshReview();
     } finally {
       setSaving(false);
@@ -298,6 +323,7 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
                     stagedForItem={staged[currentItem.id] || {}}
                     onStage={(subtype, entry) => handleStage(currentItem, subtype, entry)}
                     onLeaveForLater={() => handleLeaveForLater(currentItem)}
+                    onSaveItem={() => handleSaveItem(currentItem)}
                     onCreatePerson={handleCreatePerson}
                     busy={saving}
                     resultMessage={itemResults[currentItem.id]?.message}

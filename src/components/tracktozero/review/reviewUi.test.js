@@ -444,6 +444,119 @@ describe("REVIEW-1C: buildPreSaveSummary - truthful pre-save categorization", ()
   });
 });
 
+describe("Fix: a no-match candidate always has a way to reach a terminal decision", () => {
+  // Before this fix, a candidate the reconciliation engine found NO existing-
+  // debt match for (evidence.reconciliation absent, or classification
+  // "no_match") never rendered MatchSubSection or DuplicateSubSection - both
+  // are gated on hasMatch/hasDuplicate, which stay false here. That left such
+  // a candidate with no staged action getTerminalEntry recognizes as
+  // terminal, so it could never leave the review queue no matter how
+  // completely its other fields (balance/due day/owner) were filled in.
+  const noMatchCandidate = (overrides = {}) => ({
+    candidateId: "no-match-1",
+    accountName: "USBANK Credit Card",
+    currentBalance: 0,
+    balanceStatus: "unresolved",
+    aprStatus: "known",
+    apr: 0.05,
+    minimumPayment: null,
+    dueDate: "",
+    ownerSuggestion: "Kristina",
+    ownerType: "unassigned",
+    ownerId: "",
+    evidence: {},
+    ...overrides,
+  });
+  const noMatchItem = (candidateOverrides = {}) =>
+    toReviewItem({ batch: batch({ id: "no-match-batch" }), candidate: noMatchCandidate(candidateOverrides) });
+
+  it("renders 'Add this as a new debt?' instead of a match/duplicate section when there's no existing-debt match at all", () => {
+    const html = render(h(ReviewSessionCard, {
+      item: noMatchItem(), isHousehold: true, members: [], people: [], debts: [], latestSnapshotsByDebt: {},
+      onStage: () => {}, onLeaveForLater: () => {},
+    }));
+    expect(html).toContain("Add this as a new debt?");
+    expect(html).toContain("Add as a new debt");
+    expect(html).not.toContain("Possible match");
+    expect(html).not.toContain("Already added?");
+  });
+
+  it("does not render the new-debt prompt when a real match was found (existing hasMatch path still wins)", () => {
+    const matched = toReviewItem({
+      batch: batch({ id: "matched-batch" }),
+      candidate: matchCandidate({ candidateId: "matched-1" }),
+    });
+    const html = render(h(ReviewSessionCard, {
+      item: matched, isHousehold: false, members: [], people: [], debts: [], latestSnapshotsByDebt: {},
+      onStage: () => {}, onLeaveForLater: () => {},
+    }));
+    expect(html).toContain("Possible match");
+    expect(html).not.toContain("Add this as a new debt?");
+  });
+
+  it("does not render the new-debt prompt for a duplicate candidate (existing hasDuplicate path still wins)", () => {
+    const duplicate = toReviewItem({
+      batch: batch({ id: "dup-batch" }),
+      candidate: matchCandidate({ candidateId: "dup-1", evidence: { reconciliation: { classification: "duplicate_import", matches: [] } } }),
+    });
+    const html = render(h(ReviewSessionCard, {
+      item: duplicate, isHousehold: false, members: [], people: [], debts: [], latestSnapshotsByDebt: {},
+      onStage: () => {}, onLeaveForLater: () => {},
+    }));
+    expect(html).toContain("Already added?");
+    expect(html).not.toContain("Add this as a new debt?");
+  });
+
+  it("a staged resolveAsNewDebt from the new-debt prompt counts as a ready, terminal decision (same contract as MatchSubSection's 'new debt' path)", () => {
+    const target = noMatchItem();
+    const summary = buildPreSaveSummary([target], {
+      [target.id]: { newDebt: { action: "resolveAsNewDebt", args: {} } },
+    });
+    expect(summary.newDebtCount).toBe(1);
+    expect(summary.stillNeedsDecision).toBe(0);
+  });
+});
+
+describe("Fix: per-item 'Save this debt' action", () => {
+  it("is present but disabled when nothing has been staged for this item yet", () => {
+    const html = render(h(ReviewSessionCard, {
+      item: item(), isHousehold: false, members: [], people: [], debts: [], latestSnapshotsByDebt: {},
+      stagedForItem: {}, onStage: () => {}, onLeaveForLater: () => {}, onSaveItem: () => {},
+    }));
+    expect(html).toContain("Save this debt");
+    const saveButton = html.match(/<button[^>]*>Save this debt<\/button>/)[0];
+    expect(saveButton).toContain('disabled=""');
+  });
+
+  it("becomes enabled once something is staged for this item", () => {
+    const target = item();
+    const html = render(h(ReviewSessionCard, {
+      item: target, isHousehold: false, members: [], people: [], debts: [], latestSnapshotsByDebt: {},
+      stagedForItem: { match: { action: "resolveAsNewDebt", args: {}, label: "Track as a new debt" } },
+      onStage: () => {}, onLeaveForLater: () => {}, onSaveItem: () => {},
+    }));
+    const saveButton = html.match(/<button[^>]*>Save this debt<\/button>/)[0];
+    expect(saveButton).not.toContain('disabled=""');
+  });
+
+  it("the wizard's per-item card offers Save this debt alongside the batch Save what I know action", () => {
+    const snapshot = {
+      workspace: { type: "personal" },
+      members: [],
+      debts: [{ id: "debt-1", name: "Firstmark Services", currentBalance: 34233.67 }],
+      latestSnapshotsByDebt: {},
+    };
+    const openItem = item();
+    const html = render(h(ReviewCenter, {
+      snapshot, service: {}, workspaceId: "personal-seed",
+      reviewSnapshot: { openItems: [openItem], resolvedItems: [], openCount: 1, blockingCount: 1 },
+      loadingReview: false, onRefreshReview: async () => {},
+    }));
+    expect(html).toContain("Save this debt");
+    expect(html).toContain("Save what I know");
+  });
+});
+
 describe("DATA-HH1: OwnerSubSection (ReviewSessionCard)", () => {
   const ownerCandidate = (overrides = {}) => ({
     candidateId: "owner-cand-1",

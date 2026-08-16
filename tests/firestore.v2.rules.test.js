@@ -95,6 +95,26 @@ test("workspace creator can bootstrap owner membership", async () => {
   await assertSucceeds(db.doc("workspaces/new/members/owner").set(member("new", "owner", "owner")));
 });
 
+test("member_index mirror: owner can create their own index entry and find it via a top-level query (what listMembershipsForUser relies on)", async () => {
+  const owner = testEnv.authenticatedContext("owner").firestore();
+  await assertSucceeds(owner.doc("workspaces/new").set(ws("new", "owner")));
+  await assertSucceeds(owner.doc("workspaces/new/members/owner").set(member("new", "owner", "owner")));
+  await assertSucceeds(owner.doc("member_index/new_owner").set(member("new", "owner", "owner")));
+
+  const ownSnap = await assertSucceeds(
+    owner.collection("member_index").where("uid", "==", "owner").where("status", "==", "active").get()
+  );
+  if (ownSnap.docs.map((d) => d.id).join(",") !== "new_owner") {
+    throw new Error(`Expected only new_owner in member_index results, got: ${ownSnap.docs.map((d) => d.id).join(",")}`);
+  }
+
+  // A different signed-in user cannot forge an index entry for someone
+  // else's membership, and cannot read it either.
+  const outsider = testEnv.authenticatedContext("outsider").firestore();
+  await assertFails(outsider.doc("member_index/new_owner").set(member("new", "owner", "owner")));
+  await assertFails(outsider.doc("member_index/new_owner").get());
+});
+
 test("unauthenticated and non-members cannot read/write financial data", async () => {
   await seedWorkspace();
   await assertFails(testEnv.unauthenticatedContext().firestore().doc("workspaces/w1/debts/d1").get());

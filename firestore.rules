@@ -855,6 +855,32 @@ service cloud.firestore {
         && getAfter(v2OpeningSnapshotPath(workspaceId, debtId, request.resource.data.openingBalanceSnapshotId)).data.source in ["manual", "import"];
     }
 
+    // Top-level mirror of each active /workspaces/{workspaceId}/members/{uid}
+    // doc, keyed by `${workspaceId}_${uid}` - lets listMembershipsForUser
+    // find "every workspace this user belongs to" via a plain top-level
+    // query. A collectionGroup("members") query can't do this: Firestore's
+    // rules engine cannot prove a field-based rule safe for a
+    // collectionGroup query whose parent path is a wildcard (confirmed by
+    // isolated testing - the identical rule+query works at the top level
+    // and for a single, known-workspace nested query, but is
+    // unconditionally denied once collectionGroup + wildcard parent are
+    // combined, regardless of rule wording). Kept in sync at every write
+    // site that creates a /members/{uid} doc (see saveMembership,
+    // acceptMemberInvite) - if you add a way to update or remove a
+    // membership, mirror that write here too or this index will drift.
+    match /member_index/{indexId} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow create: if indexId == request.resource.data.workspaceId + "_" + request.resource.data.uid
+        && (v2InitialOwnerMembership(request.resource.data.workspaceId, request.resource.data.uid)
+          || v2InviteAcceptanceMembership(request.resource.data.workspaceId, request.resource.data.uid)
+          || (v2MigrationOperator(request.resource.data.workspaceId)
+            && request.resource.data.workspaceId is string
+            && request.resource.data.uid is string
+            && v2ValidRole(request.resource.data.role)));
+      allow delete: if (v2Owner(resource.data.workspaceId) && !v2TargetIsOwner(resource.data.workspaceId, resource.data.uid))
+        || v2MigrationOperator(resource.data.workspaceId);
+    }
+
     match /workspaces/{workspaceId} {
       allow create: if v2WorkspaceCreator(workspaceId);
       allow read: if v2ViewerPlus(workspaceId);

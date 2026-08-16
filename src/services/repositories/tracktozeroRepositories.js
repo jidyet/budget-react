@@ -6,6 +6,17 @@ const clone = (value) => structuredClone(value);
 export const v2Paths = {
   workspace: (workspaceId) => `workspaces/${workspaceId}`,
   member: (workspaceId, uid) => `workspaces/${workspaceId}/members/${uid}`,
+  // Top-level mirror of each active membership doc, kept in sync alongside
+  // it (see FirebaseTrackToZeroRepository.saveMembership/acceptMemberInvite).
+  // Exists purely so listMembershipsForUser can query without a
+  // collectionGroup - Firestore security rules cannot prove a field-based
+  // rule safe for a collectionGroup query whose parent path is a wildcard
+  // (confirmed: the same rule+query works at the top level and for a
+  // single, known-workspace nested query, but is unconditionally denied
+  // once collectionGroup + wildcard parent are combined, regardless of
+  // rule wording) - a real Firestore/rules-engine limitation, not a bug in
+  // any one rule.
+  memberIndex: (workspaceId, uid) => `member_index/${workspaceId}_${uid}`,
   memberInvite: (workspaceId, inviteId) => `workspaces/${workspaceId}/member_invites/${inviteId}`,
   person: (workspaceId, personId) => `workspaces/${workspaceId}/people/${personId}`,
   debt: (workspaceId, debtId) => `workspaces/${workspaceId}/debts/${debtId}`,

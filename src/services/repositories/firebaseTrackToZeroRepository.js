@@ -1,9 +1,7 @@
 import {
   collection,
-  collectionGroup,
   deleteDoc,
   doc,
-  documentId,
   getDoc,
   getDocs,
   orderBy,
@@ -88,7 +86,11 @@ export class FirebaseTrackToZeroRepository {
   // ── Membership ─────────────────────────────────────────────────────────
   async saveMembership(input) {
     const membership = createWorkspaceMembership(input);
-    await setDoc(doc(this.db, v2Paths.member(membership.workspaceId, membership.uid)), toFirestoreDoc("member", membership));
+    const payload = toFirestoreDoc("member", membership);
+    const batch = writeBatch(this.db);
+    batch.set(doc(this.db, v2Paths.member(membership.workspaceId, membership.uid)), payload);
+    batch.set(doc(this.db, v2Paths.memberIndex(membership.workspaceId, membership.uid)), payload);
+    await batch.commit();
     return membership;
   }
   async getMembership(workspaceId, uid) {
@@ -100,9 +102,15 @@ export class FirebaseTrackToZeroRepository {
     return snap.docs.map((d) => fromFirestoreDoc("member", d.data()));
   }
   async listMembershipsForUser(uid) {
+    // Queries the top-level member_index mirror (see v2Paths.memberIndex),
+    // not a collectionGroup("members") query - Firestore's security rules
+    // engine cannot prove a field-based rule safe for a collectionGroup
+    // query whose parent path is a wildcard, so that query is always denied
+    // regardless of how the rule is written. A top-level collection has no
+    // such restriction.
     const snap = await getDocs(query(
-      collectionGroup(this.db, "members"),
-      where(documentId(), "==", uid),
+      collection(this.db, "member_index"),
+      where("uid", "==", uid),
       where("status", "==", "active")
     ));
     return snap.docs.map((d) => fromFirestoreDoc("member", d.data()));
@@ -147,7 +155,9 @@ export class FirebaseTrackToZeroRepository {
         acceptedAt,
         acceptedByUserId,
       });
-      tx.set(memberRef, toFirestoreDoc("member", savedMembership));
+      const memberPayload = toFirestoreDoc("member", savedMembership);
+      tx.set(memberRef, memberPayload);
+      tx.set(doc(this.db, v2Paths.memberIndex(savedMembership.workspaceId, savedMembership.uid)), memberPayload);
       tx.set(inviteRef, toFirestoreDoc("memberInvite", acceptedInvite));
       return { membership: savedMembership, invite: acceptedInvite };
     });
@@ -366,12 +376,12 @@ export class FirebaseTrackToZeroRepository {
     return run;
   }
   async saveMigrationBootstrap({ workspace, ownerMembership, manifest }) {
+    const nextMembership = createWorkspaceMembership(ownerMembership);
+    const memberPayload = toFirestoreDoc("member", nextMembership);
     const batch = writeBatch(this.db);
     batch.set(doc(this.db, v2Paths.workspace(workspace.id)), toFirestoreDoc("workspace", createWorkspace(workspace)));
-    batch.set(
-      doc(this.db, v2Paths.member(ownerMembership.workspaceId, ownerMembership.uid)),
-      toFirestoreDoc("member", createWorkspaceMembership(ownerMembership))
-    );
+    batch.set(doc(this.db, v2Paths.member(nextMembership.workspaceId, nextMembership.uid)), memberPayload);
+    batch.set(doc(this.db, v2Paths.memberIndex(nextMembership.workspaceId, nextMembership.uid)), memberPayload);
     batch.set(
       doc(this.db, v2Paths.migrationRun(manifest.workspaceId, manifest.id)),
       toFirestoreDoc("migrationRun", { ...manifest })
@@ -382,12 +392,11 @@ export class FirebaseTrackToZeroRepository {
   async saveOwnerWorkspaceBootstrap({ workspace, ownerMembership }) {
     const nextWorkspace = createWorkspace(workspace);
     const nextMembership = createWorkspaceMembership(ownerMembership);
+    const memberPayload = toFirestoreDoc("member", nextMembership);
     const batch = writeBatch(this.db);
     batch.set(doc(this.db, v2Paths.workspace(nextWorkspace.id)), toFirestoreDoc("workspace", nextWorkspace));
-    batch.set(
-      doc(this.db, v2Paths.member(nextMembership.workspaceId, nextMembership.uid)),
-      toFirestoreDoc("member", nextMembership)
-    );
+    batch.set(doc(this.db, v2Paths.member(nextMembership.workspaceId, nextMembership.uid)), memberPayload);
+    batch.set(doc(this.db, v2Paths.memberIndex(nextMembership.workspaceId, nextMembership.uid)), memberPayload);
     await batch.commit();
     return { workspace: nextWorkspace, ownerMembership: nextMembership };
   }

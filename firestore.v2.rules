@@ -193,6 +193,32 @@ service cloud.firestore {
       return request.resource.data == resource.data;
     }
 
+    // Top-level mirror of each active /workspaces/{workspaceId}/members/{uid}
+    // doc, keyed by `${workspaceId}_${uid}` - lets listMembershipsForUser
+    // find "every workspace this user belongs to" via a plain top-level
+    // query. A collectionGroup("members") query can't do this: Firestore's
+    // rules engine cannot prove a field-based rule safe for a
+    // collectionGroup query whose parent path is a wildcard (confirmed by
+    // isolated testing - the identical rule+query works at the top level
+    // and for a single, known-workspace nested query, but is
+    // unconditionally denied once collectionGroup + wildcard parent are
+    // combined, regardless of rule wording). Kept in sync at every write
+    // site that creates a /members/{uid} doc (see saveMembership,
+    // acceptMemberInvite) - if you add a way to update or remove a
+    // membership, mirror that write here too or this index will drift.
+    match /member_index/{indexId} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow create: if indexId == request.resource.data.workspaceId + "_" + request.resource.data.uid
+        && (isInitialOwnerMembership(request.resource.data.workspaceId, request.resource.data.uid)
+          || isInviteAcceptanceMembership(request.resource.data.workspaceId, request.resource.data.uid)
+          || (isMigrationOperator(request.resource.data.workspaceId)
+            && request.resource.data.workspaceId is string
+            && request.resource.data.uid is string
+            && validRole(request.resource.data.role)));
+      allow delete: if (isOwner(resource.data.workspaceId) && !targetIsOwner(resource.data.workspaceId, resource.data.uid))
+        || isMigrationOperator(resource.data.workspaceId);
+    }
+
     match /workspaces/{workspaceId} {
       allow create: if isWorkspaceCreator(workspaceId);
       allow read: if isViewerPlus(workspaceId);

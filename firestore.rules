@@ -734,6 +734,96 @@ service cloud.firestore {
       return exists(v2MemberPath(workspaceId, uid)) && get(v2MemberPath(workspaceId, uid)).data.role == "owner";
     }
 
+    function v2InvitePath(workspaceId, inviteId) {
+      return /databases/$(database)/documents/workspaces/$(workspaceId)/member_invites/$(inviteId);
+    }
+
+    function v2InviteRoleValid(inviteData) {
+      return inviteData.role in ["admin", "contributor", "viewer"];
+    }
+
+    function v2InviteCoreUnchanged() {
+      return request.resource.data.workspaceId == resource.data.workspaceId
+        && request.resource.data.id == resource.data.id
+        && request.resource.data.tokenHash == resource.data.tokenHash
+        && request.resource.data.emailNormalized == resource.data.emailNormalized
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.invitedByUserId == resource.data.invitedByUserId
+        && request.resource.data.expiresAt == resource.data.expiresAt;
+    }
+
+    function v2InviteMatchesSignedInEmail(inviteData) {
+      return signedIn()
+        && "email" in request.auth.token
+        && request.auth.token.email == inviteData.emailNormalized;
+    }
+
+    function v2AcceptedInviteAfter(workspaceId, inviteId, uid) {
+      return existsAfter(v2InvitePath(workspaceId, inviteId))
+        && getAfter(v2InvitePath(workspaceId, inviteId)).data.workspaceId == workspaceId
+        && getAfter(v2InvitePath(workspaceId, inviteId)).data.id == inviteId
+        && getAfter(v2InvitePath(workspaceId, inviteId)).data.status == "accepted"
+        && getAfter(v2InvitePath(workspaceId, inviteId)).data.acceptedByUserId == uid
+        && v2InviteMatchesSignedInEmail(getAfter(v2InvitePath(workspaceId, inviteId)).data)
+        && getAfter(v2InvitePath(workspaceId, inviteId)).data.expiresAt > request.time;
+    }
+
+    function v2InviteAcceptanceMembership(workspaceId, uid) {
+      return signedIn()
+        && uid == request.auth.uid
+        && request.resource.data.workspaceId == workspaceId
+        && request.resource.data.uid == uid
+        && request.resource.data.status == "active"
+        && v2ValidRole(request.resource.data.role)
+        && request.resource.data.role != "owner"
+        && "acceptedInviteId" in request.resource.data
+        && request.resource.data.acceptedInviteId is string
+        && v2AcceptedInviteAfter(workspaceId, request.resource.data.acceptedInviteId, uid)
+        && request.resource.data.role == getAfter(v2InvitePath(workspaceId, request.resource.data.acceptedInviteId)).data.role;
+    }
+
+    function v2IsInviteAcceptanceUpdate(workspaceId, inviteId) {
+      return resource != null
+        && signedIn()
+        && resource.data.workspaceId == workspaceId
+        && resource.data.id == inviteId
+        && resource.data.status == "pending"
+        && v2InviteCoreUnchanged()
+        && request.resource.data.status == "accepted"
+        && request.resource.data.acceptedByUserId == request.auth.uid
+        && request.resource.data.canceledAt == resource.data.canceledAt
+        && request.resource.data.canceledByUserId == resource.data.canceledByUserId
+        && request.resource.data.expiresAt > request.time
+        && v2InviteMatchesSignedInEmail(resource.data)
+        && existsAfter(v2MemberPath(workspaceId, request.auth.uid))
+        && getAfter(v2MemberPath(workspaceId, request.auth.uid)).data.workspaceId == workspaceId
+        && getAfter(v2MemberPath(workspaceId, request.auth.uid)).data.uid == request.auth.uid
+        && getAfter(v2MemberPath(workspaceId, request.auth.uid)).data.acceptedInviteId == inviteId;
+    }
+
+    function v2IsSelfPersonLink(workspaceId, personId) {
+      return resource != null
+        && signedIn()
+        && v2IsMember(workspaceId)
+        && resource.data.workspaceId == workspaceId
+        && resource.data.id == personId
+        && request.resource.data.workspaceId == workspaceId
+        && request.resource.data.id == personId
+        && request.resource.data.displayName == resource.data.displayName
+        && request.resource.data.normalizedName == resource.data.normalizedName
+        && request.resource.data.kind == resource.data.kind
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.mergedIntoPersonId == resource.data.mergedIntoPersonId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.aliases == resource.data.aliases
+        && request.resource.data.workspaceMembershipId == request.auth.uid
+        && (resource.data.workspaceMembershipId == null || resource.data.workspaceMembershipId == "")
+        && request.resource.data.updatedBy == request.auth.uid;
+    }
+
     function v2PaymentCoreUnchanged() {
       return request.resource.data.workspaceId == resource.data.workspaceId
         && request.resource.data.debtId == resource.data.debtId
@@ -774,6 +864,7 @@ service cloud.firestore {
       match /members/{uid} {
         allow read: if v2ViewerPlus(workspaceId) || (signedIn() && uid == request.auth.uid);
         allow create: if v2InitialOwnerMembership(workspaceId, uid)
+          || v2InviteAcceptanceMembership(workspaceId, uid)
           || (v2MigrationOperator(workspaceId)
             && request.resource.data.workspaceId == workspaceId
             && request.resource.data.uid == uid
@@ -792,16 +883,23 @@ service cloud.firestore {
       }
 
       match /member_invites/{inviteId} {
-        allow read: if v2AdminPlus(workspaceId);
+        allow get: if true;
+        allow list: if v2ViewerPlus(workspaceId);
         allow create: if v2AdminPlus(workspaceId)
           && request.resource.data.workspaceId == workspaceId
+          && request.resource.data.id == inviteId
+          && request.resource.data.tokenHash == inviteId
           && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.invitedByUserId == request.auth.uid
           && request.resource.data.status == "pending"
-          && request.resource.data.role in ["admin", "contributor", "viewer"]
-          && request.resource.data.email is string;
-        allow update, delete: if v2AdminPlus(workspaceId)
+          && v2InviteRoleValid(request.resource.data)
+          && request.resource.data.emailNormalized is string
+          && request.resource.data.expiresAt > request.time;
+        allow update: if (v2AdminPlus(workspaceId)
           && request.resource.data.workspaceId == workspaceId
-          && request.resource.data.role in ["admin", "contributor", "viewer"];
+          && v2InviteRoleValid(request.resource.data))
+          || v2IsInviteAcceptanceUpdate(workspaceId, inviteId);
+        allow delete: if false;
       }
 
       match /import_batches/{batchId} {
@@ -826,9 +924,10 @@ service cloud.firestore {
           && request.resource.data.workspaceId == workspaceId
           && request.resource.data.id == personId
           && request.resource.data.createdBy == request.auth.uid;
-        allow update: if v2AdminPlus(workspaceId)
+        allow update: if (v2AdminPlus(workspaceId)
           && request.resource.data.workspaceId == workspaceId
-          && request.resource.data.id == personId;
+          && request.resource.data.id == personId)
+          || v2IsSelfPersonLink(workspaceId, personId);
       }
 
       match /debts/{debtId} {

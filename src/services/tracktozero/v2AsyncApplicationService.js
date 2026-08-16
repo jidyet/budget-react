@@ -43,6 +43,50 @@ const stableIdPart = (value) => String(value || "")
   .replace(/[^a-z0-9]+/g, "-")
   .replace(/^-+|-+$/g, "")
   .slice(0, 64);
+const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
+const normalizeDisplayName = (value) => normalizePersonName(String(value || "").trim());
+const inviteExpiryDays = 7;
+const addDaysIso = (iso, days) => new Date(Date.parse(iso) + (days * 24 * 60 * 60 * 1000)).toISOString();
+const getWorkspaceLabel = (workspace = {}) => workspace.name || (workspace.type === "household" ? "Your household" : "Your workspace");
+const encodeBase64Url = (bytes) => {
+  let binary = "";
+  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+};
+const randomInviteToken = () => {
+  const bytes = new Uint8Array(32);
+  globalThis.crypto.getRandomValues(bytes);
+  return encodeBase64Url(bytes);
+};
+const hashInviteToken = async (token) => {
+  const bytes = new TextEncoder().encode(String(token || ""));
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+};
+const maskInviteEmail = (email) => {
+  const normalized = normalizeEmail(email);
+  if (!normalized.includes("@")) return "";
+  const [local, domain] = normalized.split("@");
+  return `${local.slice(0, 2)}${local.length > 2 ? "…" : ""}@${domain}`;
+};
+const inviteStatusFromRecord = (invite, nowIso = V2_TEST_NOW) => {
+  if (!invite) return "invalid";
+  if (invite.status === "accepted") return "accepted";
+  if (invite.status === "canceled") return "canceled";
+  if (invite.status === "expired") return "expired";
+  if (invite.expiresAt && Date.parse(invite.expiresAt) <= Date.parse(nowIso)) return "expired";
+  return invite.status || "pending";
+};
+const uniqueBy = (items, keyFn) => {
+  const seen = new Set();
+  return items.filter((item) => {
+    const key = keyFn(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+const inviteRoute = (workspaceId, rawToken) => `/join?workspace=${encodeURIComponent(workspaceId)}&token=${encodeURIComponent(rawToken)}`;
 
 const parseAsOf = (asOf) => {
   const date = new Date(asOf || V2_TEST_NOW);
@@ -68,7 +112,7 @@ export const getUserSafeTrackToZeroError = (error) => {
   if (code.includes("permission-denied") || /permission|insufficient/i.test(message)) {
     return {
       kind: "permission_denied",
-      message: "Your role allows viewing this information, but not changing it.",
+      message: "This account does not have access to that TrackToZero workspace or action.",
     };
   }
   if (/emulator|required|unavailable/i.test(message)) {
@@ -148,6 +192,20 @@ export const createTrackToZeroV2AsyncAppService = ({
       .map((workspace) => ({ ...workspace }))
       .sort((a, b) => a.type.localeCompare(b.type) || a.id.localeCompare(b.id));
 
+  const getUserWorkspaces = async () => {
+    if (typeof repository.listMembershipsForUser !== "function") return getWorkspaces();
+    const memberships = await repository.listMembershipsForUser(actorId);
+    const workspaces = await Promise.all(
+      memberships.map(async (membership) => repository.getWorkspace(membership.workspaceId))
+    );
+    return uniqueBy(
+      workspaces
+        .filter(Boolean)
+        .sort((a, b) => (a.type || "").localeCompare(b.type || "") || String(a.name || a.id).localeCompare(String(b.name || b.id))),
+      (workspace) => workspace.id
+    );
+  };
+
   const bootstrapOwnerWorkspace = async (workspaceId, { type = "personal", displayName = "", email = "" } = {}) => {
     assertInteractive();
     const existingMembership = await Promise.resolve(repository.getMembership(workspaceId, actorId)).catch(() => null);
@@ -156,6 +214,7 @@ export const createTrackToZeroV2AsyncAppService = ({
       id: workspaceId,
       type,
       status: "active",
+      name: type === "household" ? `${displayName || "Your"} household` : "",
       activePlanId: "",
       createdAt: asOf,
       createdBy: actorId,
@@ -181,21 +240,156 @@ export const createTrackToZeroV2AsyncAppService = ({
 
   const createMemberInvite = async (workspaceId, { email = "", role = "viewer" } = {}) => {
     assertInteractive();
-    const { membership } = await getWorkspaceContext(workspaceId);
+    const { workspace, membership, members, people } = await getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "manageMembers")) throw new Error("Your role cannot manage household invitations.");
     if (!["admin", "contributor", "viewer"].includes(role)) throw new Error("Owners cannot be invited or transferred in this beta flow.");
-    const normalizedEmail = String(email || "").trim().toLowerCase();
+    const normalizedEmail = normalizeEmail(email);
     if (!normalizedEmail || !normalizedEmail.includes("@")) throw new Error("Enter a valid invite email.");
     if (typeof repository.saveMemberInvite !== "function") throw new Error("Invitation storage is unavailable.");
-    return repository.saveMemberInvite({
-      id: id("invite"),
+    if (members.some((memberDoc) => normalizeEmail(memberDoc.email) === normalizedEmail && memberDoc.status === "active")) {
+      throw new Error("They're already in this household.");
+    }
+    const pendingInvites = typeof repository.listMemberInvites === "function"
+      ? await repository.listMemberInvites(workspaceId)
+      : [];
+    for (const pendingInvite of pendingInvites) {
+      if (normalizeEmail(pendingInvite.emailNormalized) === normalizedEmail && inviteStatusFromRecord(pendingInvite, asOf) === "pending") {
+        await repository.cancelMemberInvite?.({
+          workspaceId,
+          inviteId: pendingInvite.id,
+          canceledAt: asOf,
+          canceledByUserId: actorId,
+        });
+      }
+    }
+    const rawToken = randomInviteToken();
+    const tokenHash = await hashInviteToken(rawToken);
+    const savedInvite = await repository.saveMemberInvite({
+      id: tokenHash,
       workspaceId,
-      email: normalizedEmail,
+      workspaceName: getWorkspaceLabel(workspace),
+      emailNormalized: normalizedEmail,
       role,
       status: "pending",
+      tokenHash,
+      invitedByUserId: actorId,
+      invitedByName: membership.displayName || membership.email || actorId,
+      workspacePersonId: "",
       createdAt: asOf,
       createdBy: actorId,
-      note: "Pending invite only. This does not grant workspace access until a future secure acceptance flow exists.",
+      expiresAt: addDaysIso(asOf, inviteExpiryDays),
+    });
+    return {
+      ...savedInvite,
+      emailMasked: maskInviteEmail(savedInvite.emailNormalized),
+      joinUrl: inviteRoute(workspaceId, rawToken),
+      delivery: "copy_link",
+      peopleCount: people.length,
+    };
+  };
+
+  const listMemberInvites = async (workspaceId) => {
+    const { membership } = await getWorkspaceContext(workspaceId);
+    if (!ROLE_PERMISSIONS[membership.role]?.view) throw new Error("You are not allowed to view household invites.");
+    if (typeof repository.listMemberInvites !== "function") return [];
+    return (await repository.listMemberInvites(workspaceId))
+      .map((invite) => ({
+        ...invite,
+        derivedStatus: inviteStatusFromRecord(invite, asOf),
+        emailMasked: maskInviteEmail(invite.emailNormalized),
+      }))
+      .sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
+  };
+
+  const getJoinInvitePreview = async (workspaceId, token) => {
+    const tokenHash = await hashInviteToken(token);
+    const invite = await repository.getMemberInvite?.(workspaceId, tokenHash);
+    if (!invite) return { state: "invalid", invite: null };
+    const derivedStatus = inviteStatusFromRecord(invite, asOf);
+    return {
+      state: derivedStatus === "pending" ? "ready" : derivedStatus,
+      invite: {
+        ...invite,
+        derivedStatus,
+        emailMasked: maskInviteEmail(invite.emailNormalized),
+      },
+    };
+  };
+
+  const suggestWorkspacePersonMatches = async (workspaceId, { displayName = "", email = "" } = {}) => {
+    if (typeof repository.listWorkspacePersons !== "function") return [];
+    const people = await repository.listWorkspacePersons(workspaceId);
+    const activePeople = people.filter((person) => person.status !== "merged" && !person.workspaceMembershipId);
+    const normalizedName = normalizeDisplayName(displayName);
+    const emailName = normalizeDisplayName(normalizeEmail(email).split("@")[0]?.replace(/[._-]+/g, " ") || "");
+    return activePeople.filter((person) => {
+      if (!normalizedName && !emailName) return false;
+      if (person.normalizedName === normalizedName || person.normalizedName === emailName) return true;
+      return (person.aliases || []).some((alias) => {
+        const normalizedAlias = normalizeDisplayName(alias);
+        return normalizedAlias && (normalizedAlias === normalizedName || normalizedAlias === emailName);
+      });
+    });
+  };
+
+  const acceptMemberInvite = async (workspaceId, { token, displayName = "", email = "" } = {}) => {
+    assertInteractive();
+    const normalizedEmail = normalizeEmail(email);
+    if (!normalizedEmail) throw new Error("Sign in with the invited email to continue.");
+    const tokenHash = await hashInviteToken(token);
+    const invite = await repository.getMemberInvite?.(workspaceId, tokenHash);
+    const derivedStatus = inviteStatusFromRecord(invite, asOf);
+    if (!invite) throw new Error("This invite link is invalid.");
+    if (derivedStatus === "expired") throw new Error("This invite has expired.");
+    if (derivedStatus === "canceled") throw new Error("This invite was canceled.");
+    if (normalizeEmail(invite.emailNormalized) !== normalizedEmail) {
+      throw new Error(`This invite was sent to ${invite.emailNormalized}. Sign in with that account to continue.`);
+    }
+    const existingMembership = await Promise.resolve(repository.getMembership(workspaceId, actorId)).catch(() => null);
+    if (derivedStatus === "accepted") {
+      return {
+        invite: { ...invite, derivedStatus },
+        membership: existingMembership,
+        personMatches: existingMembership ? await suggestWorkspacePersonMatches(workspaceId, { displayName, email }) : [],
+        alreadyAccepted: true,
+      };
+    }
+    const membershipInput = existingMembership || {
+      workspaceId,
+      uid: actorId,
+      role: invite.role,
+      status: "active",
+      displayName,
+      email: normalizedEmail,
+      acceptedInviteId: invite.id,
+      createdAt: asOf,
+      createdBy: actorId,
+    };
+    const accepted = await repository.acceptMemberInvite({
+      workspaceId,
+      inviteId: invite.id,
+      membership: membershipInput,
+      acceptedAt: asOf,
+      acceptedByUserId: actorId,
+    });
+    return {
+      invite: { ...accepted.invite, derivedStatus: "accepted" },
+      membership: accepted.membership,
+      personMatches: await suggestWorkspacePersonMatches(workspaceId, { displayName, email }),
+      alreadyAccepted: false,
+    };
+  };
+
+  const cancelMemberInvite = async (workspaceId, inviteId) => {
+    assertInteractive();
+    const { membership } = await getWorkspaceContext(workspaceId);
+    if (!hasPermission(membership, "manageMembers")) throw new Error("Your role cannot cancel household invitations.");
+    if (typeof repository.cancelMemberInvite !== "function") throw new Error("Invitation storage is unavailable.");
+    return repository.cancelMemberInvite({
+      workspaceId,
+      inviteId,
+      canceledAt: asOf,
+      canceledByUserId: actorId,
     });
   };
 
@@ -233,6 +427,9 @@ export const createTrackToZeroV2AsyncAppService = ({
   const getWorkspaceSnapshot = async (workspaceId) => {
     const context = await getWorkspaceContext(workspaceId);
     const debts = await repository.listDebts(workspaceId);
+    const memberInvites = typeof repository.listMemberInvites === "function"
+      ? await repository.listMemberInvites(workspaceId)
+      : [];
     const activeContext = await getActivePlanContext(workspaceId);
     const expectedCheckpoints = await getExpectedCheckpoints(workspaceId, activeContext);
     const snapshotsByDebt = await latestSnapshotsByDebtAsync(repository, workspaceId, debts);
@@ -284,6 +481,11 @@ export const createTrackToZeroV2AsyncAppService = ({
       ...context,
       mode,
       asOf,
+      memberInvites: memberInvites.map((invite) => ({
+        ...invite,
+        derivedStatus: inviteStatusFromRecord(invite, asOf),
+        emailMasked: maskInviteEmail(invite.emailNormalized),
+      })),
       debts,
       includedDebts,
       activeContext,
@@ -300,6 +502,46 @@ export const createTrackToZeroV2AsyncAppService = ({
       payoffQueue,
       projectedZeroDate: projectionWithWarnings.projection.at(-1)?.month || activeContext?.version?.projectedZeroDate || "",
     };
+  };
+
+  const renameWorkspace = async (workspaceId, name) => {
+    assertInteractive();
+    const { workspace, membership } = await getWorkspaceContext(workspaceId);
+    if (!hasPermission(membership, "manageMembers")) throw new Error("Your role cannot rename this household.");
+    const trimmed = String(name || "").trim();
+    if (!trimmed) throw new Error("Enter a household name.");
+    return repository.putWorkspace({
+      ...workspace,
+      name: trimmed,
+      updatedAt: asOf,
+      updatedBy: actorId,
+    });
+  };
+
+  const connectWorkspacePersonToMember = async (workspaceId, { personId, memberUid = actorId, allowSelfService = false } = {}) => {
+    assertInteractive();
+    const context = await getWorkspaceContext(workspaceId);
+    const selfService = allowSelfService && memberUid === actorId;
+    if (!selfService && !hasPermission(context.membership, "manageMembers")) {
+      throw new Error("Your role cannot connect household profiles.");
+    }
+    const person = context.people.find((entry) => entry.id === personId && entry.status !== "merged");
+    if (!person) throw new Error("That financial profile was not found.");
+    if (person.workspaceMembershipId && person.workspaceMembershipId !== memberUid) {
+      throw new Error("This financial profile is already connected to another account.");
+    }
+    const member = context.members.find((entry) => entry.uid === memberUid && entry.status === "active");
+    if (!member) throw new Error("That household member was not found.");
+    const alreadyLinkedPerson = context.people.find((entry) => entry.workspaceMembershipId === memberUid && entry.id !== personId && entry.status !== "merged");
+    if (alreadyLinkedPerson) {
+      throw new Error("This account is already connected to another financial profile.");
+    }
+    return repository.saveWorkspacePerson({
+      ...person,
+      workspaceMembershipId: memberUid,
+      updatedAt: asOf,
+      updatedBy: actorId,
+    });
   };
 
   const createNewDebt = async (workspaceId, input) => {
@@ -1639,11 +1881,18 @@ export const createTrackToZeroV2AsyncAppService = ({
     mode,
     actorId,
     getWorkspaces,
+    getUserWorkspaces,
     bootstrapOwnerWorkspace,
     createMemberInvite,
+    listMemberInvites,
+    getJoinInvitePreview,
+    acceptMemberInvite,
+    cancelMemberInvite,
     getWorkspaceContext,
     getWorkspaceSnapshot,
     getActivePlanContext,
+    renameWorkspace,
+    connectWorkspacePersonToMember,
     createNewDebt,
     updateDebt,
     recordPayment,

@@ -374,9 +374,9 @@ const runBrowserQa = async () => {
     screenshots.push(await screenshot(cdp, "viewer-readonly"));
 
     await evaluate(cdp, setSelectByText("Role preview", "Non-member"));
-    await waitForText(cdp, "TrackToZero test persistence is unavailable");
+    await waitForText(cdp, "You do not have access to this TrackToZero workspace");
     const nonMemberText = (await auditPage(cdp)).text;
-    if (!nonMemberText.includes("Your role allows viewing this information, but not changing it.")) findings.push("Non-member safe permission-denied copy missing.");
+    if (!nonMemberText.includes("This account does not have access to that TrackToZero workspace or action.")) findings.push("Non-member safe permission-denied copy missing.");
     if (/FirebaseError|Missing or insufficient permissions/i.test(nonMemberText)) findings.push("Raw Firebase permission error leaked to the UI.");
     screenshots.push(await screenshot(cdp, "non-member-denied"));
 

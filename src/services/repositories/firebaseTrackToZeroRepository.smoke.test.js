@@ -7,7 +7,8 @@ describe("FirebaseTrackToZeroRepository (smoke)", () => {
     expect(repo.db).toEqual({ __fake: true });
     const methods = [
       "saveWorkspace", "getWorkspace", "putWorkspace",
-      "saveMembership", "getMembership",
+      "saveMembership", "getMembership", "listMembershipsForUser",
+      "saveMemberInvite", "getMemberInvite", "acceptMemberInvite", "cancelMemberInvite",
       "saveDebt", "createDebtWithOpeningSnapshot", "updateDebtFromImportCandidate", "listDebts",
       "savePlan", "getPlan", "putPlan", "listPlans",
       "savePlanVersion", "getPlanVersion", "updatePlanVersion",

@@ -1,13 +1,16 @@
 import {
   collection,
+  collectionGroup,
   deleteDoc,
   doc,
+  documentId,
   getDoc,
   getDocs,
   orderBy,
   query,
   runTransaction,
   setDoc,
+  where,
   writeBatch,
 } from "firebase/firestore";
 import {
@@ -20,6 +23,7 @@ import {
   createPlanVersion,
   createSavedScenario,
   createWorkspace,
+  createWorkspaceInvitation,
   createWorkspaceMembership,
   createWorkspacePerson,
 } from "../../domain/tracktozero/models.js";
@@ -95,14 +99,74 @@ export class FirebaseTrackToZeroRepository {
     const snap = await getDocs(collection(this.db, "workspaces", workspaceId, "members"));
     return snap.docs.map((d) => fromFirestoreDoc("member", d.data()));
   }
+  async listMembershipsForUser(uid) {
+    const snap = await getDocs(query(
+      collectionGroup(this.db, "members"),
+      where(documentId(), "==", uid),
+      where("status", "==", "active")
+    ));
+    return snap.docs.map((d) => fromFirestoreDoc("member", d.data()));
+  }
   async saveMemberInvite(input) {
-    const invite = { ...input };
-    await setDoc(doc(this.db, v2Paths.memberInvite(invite.workspaceId, invite.id)), invite);
+    const invite = createWorkspaceInvitation(input);
+    await setDoc(doc(this.db, v2Paths.memberInvite(invite.workspaceId, invite.id)), toFirestoreDoc("memberInvite", invite));
     return invite;
+  }
+  async getMemberInvite(workspaceId, inviteId) {
+    const snap = await getDoc(doc(this.db, v2Paths.memberInvite(workspaceId, inviteId)));
+    return snap.exists() ? createWorkspaceInvitation(fromFirestoreDoc("memberInvite", snap.data())) : null;
   }
   async listMemberInvites(workspaceId) {
     const snap = await getDocs(collection(this.db, "workspaces", workspaceId, "member_invites"));
-    return snap.docs.map((d) => ({ ...d.data() }));
+    return snap.docs.map((d) => createWorkspaceInvitation(fromFirestoreDoc("memberInvite", d.data())));
+  }
+  async acceptMemberInvite({ workspaceId, inviteId, membership, acceptedAt, acceptedByUserId }) {
+    return runTransaction(this.db, async (tx) => {
+      const inviteRef = doc(this.db, v2Paths.memberInvite(workspaceId, inviteId));
+      const memberRef = doc(this.db, v2Paths.member(membership.workspaceId, membership.uid));
+      const [inviteSnap, memberSnap] = await Promise.all([tx.get(inviteRef), tx.get(memberRef)]);
+      if (!inviteSnap.exists()) throw new Error("Invite not found");
+      if (memberSnap.exists()) {
+        const existingMembership = fromFirestoreDoc("member", memberSnap.data());
+        const currentInvite = createWorkspaceInvitation(fromFirestoreDoc("memberInvite", inviteSnap.data()));
+        if (currentInvite.status !== "accepted") {
+          tx.set(inviteRef, toFirestoreDoc("memberInvite", {
+            ...currentInvite,
+            status: "accepted",
+            acceptedAt,
+            acceptedByUserId,
+          }));
+        }
+        return { membership: existingMembership, invite: createWorkspaceInvitation({ ...currentInvite, status: "accepted", acceptedAt, acceptedByUserId }) };
+      }
+      const currentInvite = createWorkspaceInvitation(fromFirestoreDoc("memberInvite", inviteSnap.data()));
+      const savedMembership = createWorkspaceMembership(membership);
+      const acceptedInvite = createWorkspaceInvitation({
+        ...currentInvite,
+        status: "accepted",
+        acceptedAt,
+        acceptedByUserId,
+      });
+      tx.set(memberRef, toFirestoreDoc("member", savedMembership));
+      tx.set(inviteRef, toFirestoreDoc("memberInvite", acceptedInvite));
+      return { membership: savedMembership, invite: acceptedInvite };
+    });
+  }
+  async cancelMemberInvite({ workspaceId, inviteId, canceledAt, canceledByUserId }) {
+    return runTransaction(this.db, async (tx) => {
+      const inviteRef = doc(this.db, v2Paths.memberInvite(workspaceId, inviteId));
+      const inviteSnap = await tx.get(inviteRef);
+      if (!inviteSnap.exists()) throw new Error("Invite not found");
+      const currentInvite = createWorkspaceInvitation(fromFirestoreDoc("memberInvite", inviteSnap.data()));
+      const canceledInvite = createWorkspaceInvitation({
+        ...currentInvite,
+        status: "canceled",
+        canceledAt,
+        canceledByUserId,
+      });
+      tx.set(inviteRef, toFirestoreDoc("memberInvite", canceledInvite));
+      return canceledInvite;
+    });
   }
 
   // ── Person (DATA-HH1) ──────────────────────────────────────────────────

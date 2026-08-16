@@ -10,6 +10,7 @@ import {
 import { createTrackToZeroV2AsyncAppService, getUserSafeTrackToZeroError } from "../../services/tracktozero/v2AsyncApplicationService";
 import { V2_TEST_ACTOR_ID, V2_TEST_NOW } from "../../services/tracktozero/v2SeedData";
 import { getLaunchFlags } from "../../config/launchFlags";
+import { ROLE_PERMISSIONS } from "../../domain/tracktozero/constants.js";
 import { effectiveOwnerType, isConfirmedZero, isDebtNeedsReview, looksLikeJunkOwnerLabel, presentedOwnerLabel } from "../../domain/tracktozero/ownership.js";
 import AppShell from "./layout/AppShell.jsx";
 import PageContainer from "./layout/PageContainer.jsx";
@@ -110,6 +111,12 @@ function Field({ label, children }) {
   return <label style={styles.label}><span>{label}</span>{children}</label>;
 }
 
+function getRuntimeErrorTitle(status) {
+  if (status === "permission_denied") return "You do not have access to this TrackToZero workspace";
+  if (status === "repository_error") return "TrackToZero test persistence is unavailable";
+  return "TrackToZero could not load this workspace";
+}
+
 // Workspace-aware owner selector shared by manual debt entry and import
 // review. Personal workspaces have nothing to choose - every debt always
 // belongs to the signed-in member, so it's shown as a fixed, non-editable
@@ -198,6 +205,118 @@ function OwnerField({ workspace, members = [], people = [], ownerType, ownerId, 
       ) : null}
       {createError ? <p role="alert" style={{ color: "#991b1b", fontSize: 12, marginTop: 4 }}>{createError}</p> : null}
     </Field>
+  );
+}
+
+function JoinInviteScreen({ previewState, authState, authForm, setAuthForm, onSubmit, authBusy }) {
+  const preview = previewState.preview;
+  const invite = preview?.invite;
+  const title = preview?.state === "ready"
+    ? `You've been invited to join ${invite?.workspaceName || "a household"}`
+    : "This invite needs attention";
+  const message = preview?.state === "expired"
+    ? "This invite expired. Ask the household owner to create a new link."
+    : preview?.state === "canceled"
+    ? "This invite was canceled. Ask the household owner for a fresh link."
+    : preview?.state === "accepted"
+    ? "This invite was already used. Sign in if you already joined this household."
+    : preview?.state === "invalid"
+    ? "This invite link isn't valid."
+    : "Sign in or create an account to continue.";
+  return (
+    <main style={styles.shell}>
+      <div style={styles.wrap}>
+        <Section title={title} eyebrow="Join household">
+          {previewState.status === "loading" ? <p>Checking that invite...</p> : <p>{message}</p>}
+          {invite && (
+            <div style={{ ...styles.card, boxShadow: "none", marginTop: 14 }}>
+              <p><strong>Household:</strong> {invite.workspaceName || "Household workspace"}</p>
+              <p><strong>Role:</strong> {invite.role}</p>
+              <p><strong>Invited by:</strong> {invite.invitedByName || "TrackToZero member"}</p>
+            </div>
+          )}
+          {preview?.state === "ready" && !authState.user && (
+            <form onSubmit={onSubmit} style={{ display: "grid", gap: 12, maxWidth: 460, marginTop: 18 }}>
+              <Field label="Email">
+                <input style={styles.input} type="email" value={authForm.email} onChange={(event) => setAuthForm({ ...authForm, email: event.target.value })} required />
+              </Field>
+              <Field label="Password">
+                <input style={styles.input} type="password" value={authForm.password} onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })} minLength={6} required />
+              </Field>
+              {authState.error && <p role="alert" style={{ color: "#991b1b", fontWeight: 800 }}>{authState.error}</p>}
+              <button type="submit" disabled={authBusy} style={authBusy ? styles.disabledButton : styles.primaryButton}>
+                {authBusy ? "Please wait..." : authForm.mode === "signup" ? "Create account and continue" : "Sign in to continue"}
+              </button>
+              <button type="button" style={styles.button} onClick={() => setAuthForm({ ...authForm, mode: authForm.mode === "signup" ? "login" : "signup" })}>
+                {authForm.mode === "signup" ? "I already have an account" : "I need to create an account"}
+              </button>
+            </form>
+          )}
+        </Section>
+      </div>
+    </main>
+  );
+}
+
+function JoinAcceptScreen({ preview, signedInEmail, onAccept, busy, error }) {
+  const invite = preview?.invite;
+  return (
+    <main style={styles.shell}>
+      <div style={styles.wrap}>
+        <Section title={`Join ${invite?.workspaceName || "this household"}`} eyebrow="Invitation ready">
+          <p>You're signed in as <strong>{signedInEmail}</strong>.</p>
+          <div style={{ ...styles.card, boxShadow: "none", marginTop: 14 }}>
+            <p><strong>Role:</strong> {invite?.role}</p>
+            <p><strong>Invited by:</strong> {invite?.invitedByName || "TrackToZero member"}</p>
+            <p><strong>Invite email:</strong> {invite?.emailNormalized}</p>
+          </div>
+          {error && <p role="alert" style={{ color: "#991b1b", fontWeight: 800 }}>{error}</p>}
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
+            <button type="button" disabled={busy} style={busy ? styles.disabledButton : styles.primaryButton} onClick={onAccept}>
+              {busy ? "Joining..." : "Join household"}
+            </button>
+          </div>
+        </Section>
+      </div>
+    </main>
+  );
+}
+
+function JoinConnectScreen({ workspaceName, matches = [], onConnect, onSkip, busy, error }) {
+  const [selectedPersonId, setSelectedPersonId] = useState(matches[0]?.id || "");
+  if (!matches.length) return null;
+  return (
+    <main style={styles.shell}>
+      <div style={styles.wrap}>
+        <Section title="One quick thing" eyebrow="Connect your financial profile">
+          <p>You're in. We already found a financial profile in {workspaceName || "this household"} that might be yours.</p>
+          {matches.length === 1 ? (
+            <div style={{ ...styles.card, boxShadow: "none", marginTop: 14 }}>
+              <p><strong>{matches[0].displayName}</strong></p>
+              <p style={{ color: "#4d6a82", marginBottom: 0 }}>If this is you, connect it now. Your debts stay on the same financial profile either way.</p>
+            </div>
+          ) : (
+            <Field label="Which financial profile is yours?">
+              <select style={styles.input} value={selectedPersonId} onChange={(event) => setSelectedPersonId(event.target.value)}>
+                {matches.map((person) => <option key={person.id} value={person.id}>{person.displayName}</option>)}
+              </select>
+            </Field>
+          )}
+          {error && <p role="alert" style={{ color: "#991b1b", fontWeight: 800 }}>{error}</p>}
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
+            <button
+              type="button"
+              disabled={busy || !(matches.length === 1 ? matches[0]?.id : selectedPersonId)}
+              style={busy ? styles.disabledButton : styles.primaryButton}
+              onClick={() => onConnect(matches.length === 1 ? matches[0].id : selectedPersonId)}
+            >
+              {busy ? "Connecting..." : "Yes, connect me"}
+            </button>
+            <button type="button" disabled={busy} style={styles.button} onClick={onSkip}>Not now</button>
+          </div>
+        </Section>
+      </div>
+    </main>
   );
 }
 
@@ -1295,17 +1414,25 @@ function MigrationPanel() {
   );
 }
 
-function Settings({ snapshot, repositoryMode }) {
+function Settings({ snapshot, repositoryMode, service, refresh, runAction, writeState }) {
   const flags = getLaunchFlags();
+  const canManageMembers = ROLE_PERMISSIONS[snapshot.membership?.role]?.manageMembers;
+  const [householdName, setHouseholdName] = useState(snapshot.workspace.name || "");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState("viewer");
+  const [latestInvite, setLatestInvite] = useState(null);
+  const [pendingConnections, setPendingConnections] = useState({});
   const dataMode = repositoryMode === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction
     ? "Clean V2 beta"
     : repositoryMode === TRACKTOZERO_V2_REPOSITORY_MODES.localBeta
     ? "Local beta (Firebase emulator)"
     : snapshot.mode === "legacy_preview" ? "Read-only legacy preview" : "Interactive v2 seed/test workspace";
+  const unlinkedPeople = (snapshot.people || []).filter((person) => person.status !== "merged" && !person.workspaceMembershipId);
   return (
     <Section title="Workspace settings" eyebrow="Settings">
       <div style={styles.grid}>
         <div>
+          <p><strong>Workspace name:</strong> {snapshot.workspace.name || (snapshot.workspace.type === "household" ? "Your household" : "Personal workspace")}</p>
           <p><strong>Workspace type:</strong> {snapshot.workspace.type}</p>
           <p><strong>Your role:</strong> {snapshot.membership?.role}</p>
           <p><strong>Data mode:</strong> {dataMode}</p>
@@ -1319,6 +1446,139 @@ function Settings({ snapshot, repositoryMode }) {
           <p>TrackToZero provides planning projections based on the information you enter. Actual balances, interest, fees, and payoff amounts may differ from your creditor's records.</p>
         </div>
       </div>
+      {snapshot.workspace.type === "household" && (
+        <>
+          <div style={{ ...styles.grid, marginTop: 18 }}>
+            <div style={{ ...styles.card, boxShadow: "none" }}>
+              <h3 style={{ marginTop: 0 }}>Household details</h3>
+              <Field label="Household name">
+                <input style={styles.input} value={householdName} onChange={(event) => setHouseholdName(event.target.value)} disabled={!canManageMembers || writeState.inProgress} />
+              </Field>
+              <button
+                type="button"
+                disabled={!canManageMembers || writeState.inProgress || !householdName.trim()}
+                style={canManageMembers && !writeState.inProgress ? styles.primaryButton : styles.disabledButton}
+                onClick={() => runAction("save household name", async () => {
+                  await service.renameWorkspace(snapshot.workspace.id, householdName);
+                  await refresh();
+                })}
+              >
+                {writeState.action === "save household name" ? "Saving..." : "Save household name"}
+              </button>
+            </div>
+            <div style={{ ...styles.card, boxShadow: "none" }}>
+              <h3 style={{ marginTop: 0 }}>Invite someone</h3>
+              <Field label="Email address">
+                <input style={styles.input} type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} disabled={!canManageMembers || writeState.inProgress} placeholder="jamie@example.com" />
+              </Field>
+              <Field label="Role">
+                <select style={styles.input} value={inviteRole} onChange={(event) => setInviteRole(event.target.value)} disabled={!canManageMembers || writeState.inProgress}>
+                  <option value="viewer">Viewer</option>
+                  <option value="contributor">Contributor</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </Field>
+              <button
+                type="button"
+                disabled={!canManageMembers || writeState.inProgress || !inviteEmail.trim()}
+                style={canManageMembers && !writeState.inProgress ? styles.primaryButton : styles.disabledButton}
+                onClick={() => runAction("create invite", async () => {
+                  const invite = await service.createMemberInvite(snapshot.workspace.id, { email: inviteEmail, role: inviteRole });
+                  setLatestInvite(invite);
+                  setInviteEmail("");
+                  await refresh();
+                })}
+              >
+                {writeState.action === "create invite" ? "Creating..." : "Create invite"}
+              </button>
+              {!canManageMembers && <p style={{ color: "#4d6a82", marginBottom: 0 }}>Only owners and admins can invite people.</p>}
+            </div>
+          </div>
+          {latestInvite && (
+            <div style={{ ...styles.card, marginTop: 16, borderColor: "#86efac" }}>
+              <h3 style={{ marginTop: 0 }}>Invite ready</h3>
+              <p style={{ marginBottom: 8 }}>{latestInvite.emailNormalized} · expires {new Date(latestInvite.expiresAt).toLocaleDateString()}</p>
+              <button
+                type="button"
+                style={styles.primaryButton}
+                onClick={async () => {
+                  if (navigator?.clipboard?.writeText) {
+                    await navigator.clipboard.writeText(latestInvite.joinUrl);
+                  }
+                }}
+              >
+                Copy invite link
+              </button>
+            </div>
+          )}
+          <div style={{ ...styles.grid, marginTop: 18 }}>
+            <div style={{ ...styles.card, boxShadow: "none" }}>
+              <h3 style={{ marginTop: 0 }}>Pending invites</h3>
+              {snapshot.memberInvites?.length ? (
+                <div style={{ display: "grid", gap: 12 }}>
+                  {snapshot.memberInvites.map((invite) => (
+                    <article key={invite.id} style={{ border: "1px solid #d7e7f5", borderRadius: 16, padding: 12, background: "#fff" }}>
+                      <p style={{ margin: 0, fontWeight: 800 }}>{invite.emailNormalized}</p>
+                      <p style={{ margin: "6px 0", color: "#4d6a82" }}>{invite.role} · {invite.derivedStatus} · expires {new Date(invite.expiresAt).toLocaleDateString()}</p>
+                      {invite.derivedStatus === "pending" ? (
+                        <button
+                          type="button"
+                          disabled={!canManageMembers || writeState.inProgress}
+                          style={canManageMembers && !writeState.inProgress ? styles.button : styles.disabledButton}
+                          onClick={() => runAction("cancel invite", async () => {
+                            await service.cancelMemberInvite(snapshot.workspace.id, invite.id);
+                            await refresh();
+                          })}
+                        >
+                          Cancel invite
+                        </button>
+                      ) : null}
+                    </article>
+                  ))}
+                </div>
+              ) : <p style={{ marginBottom: 0, color: "#4d6a82" }}>No household invites yet.</p>}
+            </div>
+            <div style={{ ...styles.card, boxShadow: "none" }}>
+              <h3 style={{ marginTop: 0 }}>Financial people not connected to an account</h3>
+              {unlinkedPeople.length ? (
+                <div style={{ display: "grid", gap: 12 }}>
+                  {unlinkedPeople.map((person) => (
+                    <article key={person.id} style={{ border: "1px solid #d7e7f5", borderRadius: 16, padding: 12, background: "#fff" }}>
+                      <p style={{ margin: 0, fontWeight: 800 }}>{person.displayName}</p>
+                      <p style={{ margin: "6px 0", color: "#4d6a82" }}>This financial profile is still separate from a member account.</p>
+                      {canManageMembers ? (
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                          <select
+                            style={{ ...styles.input, minWidth: 220 }}
+                            value={pendingConnections[person.id] || ""}
+                            onChange={(event) => setPendingConnections((state) => ({ ...state, [person.id]: event.target.value }))}
+                          >
+                            <option value="">Choose a member</option>
+                            {snapshot.members.filter((member) => member.status === "active").map((member) => (
+                              <option key={member.uid} value={member.uid}>{member.displayName || member.uid} · {member.role}</option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            disabled={!pendingConnections[person.id] || writeState.inProgress}
+                            style={!pendingConnections[person.id] || writeState.inProgress ? styles.disabledButton : styles.button}
+                            onClick={() => runAction("connect profile", async () => {
+                              await service.connectWorkspacePersonToMember(snapshot.workspace.id, { personId: person.id, memberUid: pendingConnections[person.id] });
+                              await refresh();
+                            })}
+                          >
+                            Connect account
+                          </button>
+                        </div>
+                      ) : null}
+                    </article>
+                  ))}
+                </div>
+              ) : <p style={{ marginBottom: 0, color: "#4d6a82" }}>No unconnected financial profiles right now.</p>}
+            </div>
+          </div>
+        </>
+      )}
       {flags.trackToZeroMigrationEnabled && <MigrationPanel />}
     </Section>
   );
@@ -1365,10 +1625,19 @@ const getRuntimeRepository = () => {
 
 const safeUid = (uid) => String(uid || "").replace(/[\\/]/g, "_");
 const workspaceIdForUser = (uid, type = "personal") => `${type}-workspace-${safeUid(uid)}`;
-const productionWorkspaceCandidates = (uid) => [
-  { id: workspaceIdForUser(uid, "personal"), type: "personal" },
-  { id: workspaceIdForUser(uid, "household"), type: "household" },
-];
+const getJoinIntent = () => {
+  if (typeof window === "undefined") return null;
+  const url = new URL(window.location.href);
+  if (!url.pathname.startsWith("/join")) return null;
+  const workspaceId = url.searchParams.get("workspace") || "";
+  const token = url.searchParams.get("token") || "";
+  if (!workspaceId || !token) return null;
+  return { workspaceId, token };
+};
+const clearJoinIntent = () => {
+  if (typeof window === "undefined") return;
+  window.history.replaceState({}, "", "/");
+};
 
 export default function TrackToZeroV2App() {
   const runtime = useMemo(() => getRuntimeConfig(), []);
@@ -1411,12 +1680,20 @@ export default function TrackToZeroV2App() {
   const [actorId, setActorId] = useState(usesRealAuthUi ? "" : V2_TEST_ACTOR_ID);
   const [tab, setTab] = useState("home");
   const [scenario, setScenario] = useState(null);
+  const [joinIntent, setJoinIntent] = useState(() => getJoinIntent());
+  const [joinPreviewState, setJoinPreviewState] = useState({ status: joinIntent ? "loading" : "idle", preview: null, error: "" });
+  const [joinAcceptedState, setJoinAcceptedState] = useState({ status: "idle", workspaceId: "", matches: [], invite: null, error: "" });
   const [runtimeState, setRuntimeState] = useState({ status: "idle", snapshot: null, workspaces: [], error: "" });
   const [writeState, setWriteState] = useState({ inProgress: false, action: "", error: "", success: "" });
   const [reviewState, setReviewState] = useState({ status: "idle", snapshot: null });
   const requestSeq = useRef(0);
   const reviewRequestSeq = useRef(0);
   const asOf = useMemo(() => usesRealAuthUi ? new Date().toISOString() : V2_TEST_NOW, [usesRealAuthUi]);
+  const isFreshLocalBetaSignup = Boolean(
+    isLocalBetaRuntime
+      && authState.user?.metadata?.creationTime
+      && authState.user?.metadata?.creationTime === authState.user?.metadata?.lastSignInTime
+  );
   const service = useMemo(() => createTrackToZeroV2AsyncAppService({ repository, actorId, asOf }), [repository, actorId, asOf]);
 
   useEffect(() => {
@@ -1443,6 +1720,35 @@ export default function TrackToZeroV2App() {
     });
   }, [usesRealAuthUi, isLocalBetaRuntime, localBetaAuthError, activeAuth]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const syncJoinIntent = () => setJoinIntent(getJoinIntent());
+    window.addEventListener("popstate", syncJoinIntent);
+    return () => window.removeEventListener("popstate", syncJoinIntent);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!joinIntent) {
+      setJoinPreviewState({ status: "idle", preview: null, error: "" });
+      return undefined;
+    }
+    setJoinPreviewState({ status: "loading", preview: null, error: "" });
+    Promise.resolve()
+      .then(async () => service.getJoinInvitePreview(joinIntent.workspaceId, joinIntent.token))
+      .then((preview) => {
+        if (cancelled) return;
+        setJoinPreviewState({ status: "ready", preview, error: "" });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setJoinPreviewState({ status: "error", preview: null, error: error?.message || "We couldn't load that invite right now." });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [joinIntent, service]);
+
   const submitAuth = async (event) => {
     event.preventDefault();
     setAuthBusy(true);
@@ -1462,23 +1768,47 @@ export default function TrackToZeroV2App() {
     requestSeq.current = requestId;
     setRuntimeState((state) => ({ ...state, status: "loading", error: "", snapshot: null }));
     try {
+      let availableWorkspaces = null;
       if (usesRealAuthUi) {
         if (!authState.user || !actorId) return;
-        if (!nextWorkspaceId) {
-          const candidates = productionWorkspaceCandidates(actorId);
-          for (const candidate of candidates) {
-            const membership = await repository.getMembership(candidate.id, actorId).catch(() => null);
-            if (membership?.status === "active") {
-              setWorkspaceId(candidate.id);
-              nextWorkspaceId = candidate.id;
-              break;
-            }
-          }
-          if (!nextWorkspaceId) {
+        if (
+          isFreshLocalBetaSignup
+          && !nextWorkspaceId
+          && !joinAcceptedState.workspaceId
+          && !joinIntent?.workspaceId
+        ) {
+          if (requestSeq.current !== requestId) return;
+          setRuntimeState({ status: "needs_onboarding", workspaces: [], snapshot: null, error: "" });
+          return;
+        }
+        try {
+          availableWorkspaces = await service.getUserWorkspaces();
+        } catch (error) {
+          const safe = getUserSafeTrackToZeroError(error);
+          if (
+            isLocalBetaRuntime
+            && safe.kind === "permission_denied"
+            && !nextWorkspaceId
+            && !joinAcceptedState.workspaceId
+            && !joinIntent?.workspaceId
+          ) {
             if (requestSeq.current !== requestId) return;
             setRuntimeState({ status: "needs_onboarding", workspaces: [], snapshot: null, error: "" });
             return;
           }
+          throw error;
+        }
+        const preferredWorkspaceId = joinAcceptedState.workspaceId || joinIntent?.workspaceId || "";
+        const requestedWorkspaceId = availableWorkspaces.find((workspace) => workspace.id === nextWorkspaceId)?.id || "";
+        nextWorkspaceId = requestedWorkspaceId
+          || availableWorkspaces.find((workspace) => workspace.id === preferredWorkspaceId)?.id
+          || availableWorkspaces[0]?.id
+          || "";
+        if (nextWorkspaceId && nextWorkspaceId !== workspaceId) setWorkspaceId(nextWorkspaceId);
+        if (!nextWorkspaceId) {
+          if (requestSeq.current !== requestId) return;
+          setRuntimeState({ status: "needs_onboarding", workspaces: [], snapshot: null, error: "" });
+          return;
         }
       } else {
         await ensureTrackToZeroV2EmulatorActor({
@@ -1491,7 +1821,7 @@ export default function TrackToZeroV2App() {
       }
       const snapshot = await service.getWorkspaceSnapshot(nextWorkspaceId);
       const workspaces = usesRealAuthUi
-        ? productionWorkspaceCandidates(actorId).filter((workspace) => workspace.id === nextWorkspaceId)
+        ? (availableWorkspaces || await service.getUserWorkspaces())
         : runtime.mode === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseEmulator
         ? runtime.seedWorkspaceIds.map((id) => ({ id, type: id.includes("household") ? "household" : "personal" }))
         : await service.getWorkspaces();
@@ -1502,7 +1832,7 @@ export default function TrackToZeroV2App() {
       const safe = getUserSafeTrackToZeroError(error);
       setRuntimeState({ status: safe.kind, workspaces: [], snapshot: null, error: safe.message });
     }
-  }, [actorId, authState.user, usesRealAuthUi, repository, runtime, service, workspaceId]);
+  }, [actorId, authState.user, isFreshLocalBetaSignup, isLocalBetaRuntime, joinAcceptedState.workspaceId, joinIntent, usesRealAuthUi, repository, runtime, service, workspaceId]);
 
   // Review counts/lists come from exactly one place - service.getReviewSnapshot,
   // which itself only calls REVIEW-1A's shared selectors over
@@ -1547,6 +1877,63 @@ export default function TrackToZeroV2App() {
       setWorkspaceId(nextWorkspaceId);
       await refresh(nextWorkspaceId);
     });
+  };
+
+  const acceptJoinInvite = async () => {
+    if (!joinIntent || !authState.user) return;
+    await runAction("join household", async () => {
+      const result = await service.acceptMemberInvite(joinIntent.workspaceId, {
+        token: joinIntent.token,
+        displayName: authState.user?.displayName || authState.user?.email || "",
+        email: authState.user?.email || "",
+      });
+      if (result.personMatches?.length) {
+        setJoinAcceptedState({
+          status: "needs_person_link",
+          workspaceId: joinIntent.workspaceId,
+          matches: result.personMatches,
+          invite: result.invite,
+          error: "",
+        });
+        return;
+      }
+      setJoinAcceptedState({
+        status: "joined",
+        workspaceId: joinIntent.workspaceId,
+        matches: [],
+        invite: result.invite,
+        error: "",
+      });
+      setWorkspaceId(joinIntent.workspaceId);
+      clearJoinIntent();
+      setJoinIntent(null);
+      await refresh(joinIntent.workspaceId);
+    }, { write: true });
+  };
+
+  const connectJoinedPerson = async (personId) => {
+    if (!joinAcceptedState.workspaceId) return;
+    await runAction("connect profile", async () => {
+      await service.connectWorkspacePersonToMember(joinAcceptedState.workspaceId, {
+        personId,
+        memberUid: actorId,
+        allowSelfService: true,
+      });
+      setWorkspaceId(joinAcceptedState.workspaceId);
+      setJoinAcceptedState({ status: "joined", workspaceId: joinAcceptedState.workspaceId, matches: [], invite: joinAcceptedState.invite, error: "" });
+      clearJoinIntent();
+      setJoinIntent(null);
+      await refresh(joinAcceptedState.workspaceId);
+    }, { write: true });
+  };
+
+  const skipJoinedPersonConnection = async () => {
+    if (!joinAcceptedState.workspaceId) return;
+    setWorkspaceId(joinAcceptedState.workspaceId);
+    setJoinAcceptedState((state) => ({ ...state, status: "joined", matches: [] }));
+    clearJoinIntent();
+    setJoinIntent(null);
+    await refresh(joinAcceptedState.workspaceId);
   };
 
   useEffect(() => {
@@ -1601,6 +1988,19 @@ export default function TrackToZeroV2App() {
     ? (localBetaAuthError || "Local beta configuration error: the local Firebase emulators are not reachable. Run `npm run emulators:v2` first.")
     : "Production Firebase is not configured for this release. The app is in a safe disabled state.";
 
+  if (usesRealAuthUi && joinIntent && !authState.user && authState.status !== "loading") {
+    return (
+      <JoinInviteScreen
+        previewState={joinPreviewState}
+        authState={authState}
+        authForm={authForm}
+        setAuthForm={setAuthForm}
+        onSubmit={submitAuth}
+        authBusy={authBusy}
+      />
+    );
+  }
+
   if (usesRealAuthUi && (authState.status === "loading" || !authState.user)) {
     return (
       <AuthScreen
@@ -1612,6 +2012,46 @@ export default function TrackToZeroV2App() {
         firebaseReady={firebaseReady && authState.status !== "unavailable"}
         unavailableMessage={authUnavailableMessage}
         eyebrow={isLocalBetaRuntime ? "Local beta (emulator)" : "Clean beta"}
+      />
+    );
+  }
+
+  if (usesRealAuthUi && joinIntent && joinPreviewState.status === "ready") {
+    const preview = joinPreviewState.preview;
+    if (preview?.state === "ready") {
+      return (
+        <JoinAcceptScreen
+          preview={preview}
+          signedInEmail={authState.user?.email || ""}
+          onAccept={acceptJoinInvite}
+          busy={writeState.inProgress && writeState.action === "join household"}
+          error={writeState.action === "join household" ? writeState.error : ""}
+        />
+      );
+    }
+    if (preview?.state !== "accepted") {
+      return (
+        <JoinInviteScreen
+          previewState={joinPreviewState}
+          authState={authState}
+          authForm={authForm}
+          setAuthForm={setAuthForm}
+          onSubmit={submitAuth}
+          authBusy={authBusy}
+        />
+      );
+    }
+  }
+
+  if (joinAcceptedState.status === "needs_person_link") {
+    return (
+      <JoinConnectScreen
+        workspaceName={joinAcceptedState.invite?.workspaceName}
+        matches={joinAcceptedState.matches}
+        onConnect={connectJoinedPerson}
+        onSkip={skipJoinedPersonConnection}
+        busy={writeState.inProgress && writeState.action === "connect profile"}
+        error={writeState.action === "connect profile" ? writeState.error : ""}
       />
     );
   }
@@ -1643,7 +2083,7 @@ export default function TrackToZeroV2App() {
     return (
       <main style={styles.shell}>
         <div style={styles.wrap}>
-          <Section title="TrackToZero test persistence is unavailable" eyebrow={runtimeState.status}>
+          <Section title={getRuntimeErrorTitle(runtimeState.status)} eyebrow={runtimeState.status}>
             <p>{runtimeState.error || "We could not load the TrackToZero 2.0 workspace."}</p>
             <button style={styles.button} onClick={() => refresh(workspaceId)}>Retry</button>
           </Section>
@@ -1723,7 +2163,7 @@ export default function TrackToZeroV2App() {
         )}
         {tab === "debts" && <Debts snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} refreshReview={() => refreshReview(workspaceId)} runAction={runAction} writeState={writeState} reviewSnapshot={reviewState.snapshot} onGoToReview={() => navigateTab("review")} />}
         {tab === "plan" && <Plan snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} />}
-        {tab === "settings" && <Settings snapshot={snapshot} repositoryMode={runtime.mode} />}
+        {tab === "settings" && <Settings snapshot={snapshot} repositoryMode={runtime.mode} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} />}
       </PageContainer>
     </AppShell>
   );

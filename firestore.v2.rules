@@ -80,6 +80,88 @@ service cloud.firestore {
     function targetIsOwner(workspaceId, uid) {
       return exists(memberPath(workspaceId, uid)) && get(memberPath(workspaceId, uid)).data.role == "owner";
     }
+    function invitePath(workspaceId, inviteId) {
+      return /databases/$(database)/documents/workspaces/$(workspaceId)/member_invites/$(inviteId);
+    }
+    function inviteRoleValid(inviteData) {
+      return inviteData.role in ["admin", "contributor", "viewer"];
+    }
+    function inviteCoreUnchanged() {
+      return request.resource.data.workspaceId == resource.data.workspaceId
+        && request.resource.data.id == resource.data.id
+        && request.resource.data.tokenHash == resource.data.tokenHash
+        && request.resource.data.emailNormalized == resource.data.emailNormalized
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.invitedByUserId == resource.data.invitedByUserId
+        && request.resource.data.expiresAt == resource.data.expiresAt;
+    }
+    function inviteMatchesSignedInEmail(inviteData) {
+      return signedIn()
+        && "email" in request.auth.token
+        && request.auth.token.email == inviteData.emailNormalized;
+    }
+    function acceptedInviteAfter(workspaceId, inviteId, uid) {
+      return existsAfter(invitePath(workspaceId, inviteId))
+        && getAfter(invitePath(workspaceId, inviteId)).data.workspaceId == workspaceId
+        && getAfter(invitePath(workspaceId, inviteId)).data.id == inviteId
+        && getAfter(invitePath(workspaceId, inviteId)).data.status == "accepted"
+        && getAfter(invitePath(workspaceId, inviteId)).data.acceptedByUserId == uid
+        && inviteMatchesSignedInEmail(getAfter(invitePath(workspaceId, inviteId)).data)
+        && getAfter(invitePath(workspaceId, inviteId)).data.expiresAt > request.time;
+    }
+    function isInviteAcceptanceMembership(workspaceId, uid) {
+      return signedIn()
+        && uid == request.auth.uid
+        && request.resource.data.workspaceId == workspaceId
+        && request.resource.data.uid == uid
+        && request.resource.data.status == "active"
+        && validRole(request.resource.data.role)
+        && request.resource.data.role != "owner"
+        && "acceptedInviteId" in request.resource.data
+        && request.resource.data.acceptedInviteId is string
+        && acceptedInviteAfter(workspaceId, request.resource.data.acceptedInviteId, uid)
+        && request.resource.data.role == getAfter(invitePath(workspaceId, request.resource.data.acceptedInviteId)).data.role;
+    }
+    function isInviteAcceptanceUpdate(workspaceId, inviteId) {
+      return resource != null
+        && signedIn()
+        && resource.data.workspaceId == workspaceId
+        && resource.data.id == inviteId
+        && resource.data.status == "pending"
+        && inviteCoreUnchanged()
+        && request.resource.data.status == "accepted"
+        && request.resource.data.acceptedByUserId == request.auth.uid
+        && request.resource.data.canceledAt == resource.data.canceledAt
+        && request.resource.data.canceledByUserId == resource.data.canceledByUserId
+        && request.resource.data.expiresAt > request.time
+        && inviteMatchesSignedInEmail(resource.data)
+        && existsAfter(memberPath(workspaceId, request.auth.uid))
+        && getAfter(memberPath(workspaceId, request.auth.uid)).data.workspaceId == workspaceId
+        && getAfter(memberPath(workspaceId, request.auth.uid)).data.uid == request.auth.uid
+        && getAfter(memberPath(workspaceId, request.auth.uid)).data.acceptedInviteId == inviteId;
+    }
+    function isSelfPersonLink(workspaceId, personId) {
+      return resource != null
+        && signedIn()
+        && isMember(workspaceId)
+        && resource.data.workspaceId == workspaceId
+        && resource.data.id == personId
+        && request.resource.data.workspaceId == workspaceId
+        && request.resource.data.id == personId
+        && request.resource.data.displayName == resource.data.displayName
+        && request.resource.data.normalizedName == resource.data.normalizedName
+        && request.resource.data.kind == resource.data.kind
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.mergedIntoPersonId == resource.data.mergedIntoPersonId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.aliases == resource.data.aliases
+        && request.resource.data.workspaceMembershipId == request.auth.uid
+        && (resource.data.workspaceMembershipId == null || resource.data.workspaceMembershipId == "")
+        && request.resource.data.updatedBy == request.auth.uid;
+    }
     function immutablePaymentCoreUnchanged() {
       return request.resource.data.workspaceId == resource.data.workspaceId
         && request.resource.data.debtId == resource.data.debtId
@@ -120,6 +202,7 @@ service cloud.firestore {
       match /members/{uid} {
         allow read: if isViewerPlus(workspaceId) || (signedIn() && uid == request.auth.uid);
         allow create: if isInitialOwnerMembership(workspaceId, uid)
+          || isInviteAcceptanceMembership(workspaceId, uid)
           || (isMigrationOperator(workspaceId)
             && request.resource.data.workspaceId == workspaceId
             && request.resource.data.uid == uid
@@ -138,16 +221,23 @@ service cloud.firestore {
       }
 
       match /member_invites/{inviteId} {
-        allow read: if isAdminPlus(workspaceId);
+        allow get: if true;
+        allow list: if isViewerPlus(workspaceId);
         allow create: if isAdminPlus(workspaceId)
           && request.resource.data.workspaceId == workspaceId
+          && request.resource.data.id == inviteId
+          && request.resource.data.tokenHash == inviteId
           && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.invitedByUserId == request.auth.uid
           && request.resource.data.status == "pending"
-          && request.resource.data.role in ["admin", "contributor", "viewer"]
-          && request.resource.data.email is string;
-        allow update, delete: if isAdminPlus(workspaceId)
+          && inviteRoleValid(request.resource.data)
+          && request.resource.data.emailNormalized is string
+          && request.resource.data.expiresAt > request.time;
+        allow update: if (isAdminPlus(workspaceId)
           && request.resource.data.workspaceId == workspaceId
-          && request.resource.data.role in ["admin", "contributor", "viewer"];
+          && inviteRoleValid(request.resource.data))
+          || isInviteAcceptanceUpdate(workspaceId, inviteId);
+        allow delete: if false;
       }
 
       match /import_batches/{batchId} {
@@ -173,9 +263,10 @@ service cloud.firestore {
           && request.resource.data.workspaceId == workspaceId
           && request.resource.data.id == personId
           && request.resource.data.createdBy == request.auth.uid;
-        allow update: if isAdminPlus(workspaceId)
+        allow update: if (isAdminPlus(workspaceId)
           && request.resource.data.workspaceId == workspaceId
-          && request.resource.data.id == personId;
+          && request.resource.data.id == personId)
+          || isSelfPersonLink(workspaceId, personId);
       }
 
       match /debts/{debtId} {

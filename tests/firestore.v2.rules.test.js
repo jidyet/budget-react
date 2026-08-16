@@ -8,6 +8,7 @@ const PROJECT_ID = "demo-budget-react-v2";
 let testEnv;
 
 const now = () => new Date("2026-01-01T00:00:00.000Z");
+const inviteExpiry = () => new Date("2027-01-08T00:00:00.000Z");
 const ws = (id = "w1", createdBy = "owner") => ({ id, type: "household", status: "active", activePlanId: "", createdAt: now(), createdBy });
 const member = (workspaceId, uid, role) => ({ workspaceId, uid, role, status: "active", createdAt: now(), createdBy: "owner" });
 const debt = (workspaceId = "w1", id = "d1", createdBy = "owner") => ({ id, workspaceId, name: "Card", status: "active", currentBalance: 100, minimumRequiredPayment: 10, createdBy, openingBalanceSnapshotId: `opening-${id}` });
@@ -15,9 +16,26 @@ const payment = (workspaceId = "w1", debtId = "d1", uid = "contrib") => ({ id: "
 const snapshot = (workspaceId = "w1", debtId = "d1", uid = "contrib") => ({ id: "s1", workspaceId, debtId, balance: 75, observedAt: now(), source: "manual", createdAt: now(), createdBy: uid });
 const plan = (workspaceId = "w1", id = "plan1") => ({ id, workspaceId, status: "draft", activeVersionId: "", createdAt: now(), createdBy: "owner" });
 const version = (workspaceId = "w1", planId = "plan1", id = "v1") => ({ id, workspaceId, planId, versionNumber: 1, strategy: "avalanche", asOf: now(), startingDebtSnapshot: [], extraMonthlyPayment: 0, createdAt: now(), createdBy: "owner", createdBecause: "activation" });
-const invite = (workspaceId = "w1", id = "invite1", createdBy = "owner") => ({ id, workspaceId, email: "future@example.test", role: "viewer", status: "pending", createdAt: now(), createdBy });
+const invite = (workspaceId = "w1", id = "invite1", createdBy = "owner") => ({
+  id,
+  workspaceId,
+  workspaceName: "Test household",
+  emailNormalized: "future@example.test",
+  role: "viewer",
+  status: "pending",
+  tokenHash: id,
+  invitedByUserId: createdBy,
+  invitedByName: "Owner",
+  createdAt: now(),
+  createdBy,
+  expiresAt: inviteExpiry(),
+  acceptedAt: null,
+  acceptedByUserId: "",
+  canceledAt: null,
+  canceledByUserId: "",
+});
 const person = (workspaceId = "w1", id = "person1", createdBy = "owner", displayName = "Babajide Yusuf") => ({
-  id, workspaceId, displayName, normalizedName: "babajide yusuf", aliases: [], kind: "imported_person", status: "active",
+  id, workspaceId, displayName, normalizedName: String(displayName).trim().toLowerCase(), aliases: [], kind: "imported_person", status: "active",
   workspaceMembershipId: "", mergedIntoPersonId: "", source: "import_confirmed", createdAt: now(), createdBy,
 });
 
@@ -124,6 +142,86 @@ test("raw-email invite creates no access-granting membership", async () => {
   await assertFails(testEnv.authenticatedContext("future-user").firestore().doc("workspaces/w1/members/future-user").set(member("w1", "future-user", "viewer")));
 });
 
+test("invited user can accept exactly their own pending invite by creating membership + accepted invite atomically", async () => {
+  await seedWorkspace();
+  await seed(async (db) => {
+    await db.doc("workspaces/w1/member_invites/invite-accept").set(invite("w1", "invite-accept", "owner"));
+  });
+  const invitee = testEnv.authenticatedContext("future-user", { email: "future@example.test" }).firestore();
+  const batch = invitee.batch();
+  batch.set(
+    invitee.doc("workspaces/w1/members/future-user"),
+    {
+      workspaceId: "w1",
+      uid: "future-user",
+      role: "viewer",
+      status: "active",
+      displayName: "Future User",
+      email: "future@example.test",
+      acceptedInviteId: "invite-accept",
+      createdAt: now(),
+      createdBy: "future-user",
+    }
+  );
+  batch.update(invitee.doc("workspaces/w1/member_invites/invite-accept"), {
+    workspaceId: "w1",
+    id: "invite-accept",
+    workspaceName: "Test household",
+    emailNormalized: "future@example.test",
+    role: "viewer",
+    status: "accepted",
+    tokenHash: "invite-accept",
+    invitedByUserId: "owner",
+    invitedByName: "Owner",
+    createdAt: now(),
+    createdBy: "owner",
+    expiresAt: inviteExpiry(),
+    acceptedAt: now(),
+    acceptedByUserId: "future-user",
+  });
+  await assertSucceeds(batch.commit());
+});
+
+test("invite acceptance is blocked when the authenticated email does not match the invite", async () => {
+  await seedWorkspace();
+  await seed(async (db) => {
+    await db.doc("workspaces/w1/member_invites/invite-mismatch").set(invite("w1", "invite-mismatch", "owner"));
+  });
+  const outsider = testEnv.authenticatedContext("future-user", { email: "other@example.test" }).firestore();
+  const batch = outsider.batch();
+  batch.set(
+    outsider.doc("workspaces/w1/members/future-user"),
+    {
+      workspaceId: "w1",
+      uid: "future-user",
+      role: "viewer",
+      status: "active",
+      displayName: "Future User",
+      email: "other@example.test",
+      acceptedInviteId: "invite-mismatch",
+      createdAt: now(),
+      createdBy: "future-user",
+    }
+  );
+  batch.update(outsider.doc("workspaces/w1/member_invites/invite-mismatch"), {
+    workspaceId: "w1",
+    id: "invite-mismatch",
+    workspaceName: "Test household",
+    emailNormalized: "future@example.test",
+    role: "viewer",
+    status: "accepted",
+    tokenHash: "invite-mismatch",
+    invitedByUserId: "owner",
+    invitedByName: "Owner",
+    createdAt: now(),
+    createdBy: "owner",
+    expiresAt: inviteExpiry(),
+    acceptedAt: now(),
+    acceptedByUserId: "future-user",
+  });
+  await assertFails(batch.commit());
+});
+
 test("cross-workspace member insertion is denied", async () => {
   await seedWorkspace();
   const owner = testEnv.authenticatedContext("owner").firestore();
@@ -206,6 +304,51 @@ test("a person document from another workspace can never be forged into this one
   const owner = testEnv.authenticatedContext("owner").firestore();
   // The path's workspaceId (w1) must match the document's own workspaceId field.
   await assertFails(owner.doc("workspaces/w1/people/cross").set(person("w2", "cross", "owner")));
+});
+
+test("a member can self-connect an unlinked household person, but cannot steal one already linked elsewhere", async () => {
+  await seedWorkspace();
+  await seed(async (db) => {
+    await db.doc("workspaces/w1/people/person1").set(person("w1", "person1", "owner", "Future User"));
+    await db.doc("workspaces/w1/members/future-user").set(member("w1", "future-user", "viewer"));
+  });
+  const future = testEnv.authenticatedContext("future-user", { email: "future@example.test" }).firestore();
+  await assertSucceeds(future.doc("workspaces/w1/people/person1").update({
+    workspaceId: "w1",
+    id: "person1",
+    displayName: "Future User",
+    normalizedName: "future user",
+    aliases: [],
+    kind: "imported_person",
+    status: "active",
+    workspaceMembershipId: "future-user",
+    mergedIntoPersonId: "",
+    source: "import_confirmed",
+    createdAt: now(),
+    createdBy: "owner",
+    updatedAt: now(),
+    updatedBy: "future-user",
+  }));
+
+  await seed(async (db) => {
+    await db.doc("workspaces/w1/people/person2").set({ ...person("w1", "person2", "owner", "Taken"), workspaceMembershipId: "admin" });
+  });
+  await assertFails(future.doc("workspaces/w1/people/person2").update({
+    workspaceId: "w1",
+    id: "person2",
+    displayName: "Taken",
+    normalizedName: "babajide yusuf",
+    aliases: [],
+    kind: "imported_person",
+    status: "active",
+    workspaceMembershipId: "future-user",
+    mergedIntoPersonId: "",
+    source: "import_confirmed",
+    createdAt: now(),
+    createdBy: "owner",
+    updatedAt: now(),
+    updatedBy: "future-user",
+  }));
 });
 
 // UX-4

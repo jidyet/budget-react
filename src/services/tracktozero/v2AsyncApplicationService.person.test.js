@@ -280,4 +280,70 @@ describe("DATA-HH1: security", () => {
     await expect(outsiderService.listWorkspacePersons("household-seed")).rejects.toThrow(/not a member/i);
     await expect(outsiderService.createImportedPerson("household-seed", { displayName: "Intruder" })).rejects.toThrow(/not a member/i);
   });
+
+  it("lets a joined member explicitly connect themselves to an existing unlinked WorkspacePerson without changing debt truth", async () => {
+    const { repository, service } = makeService("seed-owner");
+    const person = await service.createImportedPerson("household-seed", { displayName: "Future User" });
+    const debt = await service.createNewDebt("household-seed", {
+      clientRequestId: "person-owned-before-link",
+      name: "Connected later card",
+      currentBalance: 400,
+      minimumRequiredPayment: 25,
+      aprStatus: "known",
+      apr: 19.99,
+      ownerType: "person",
+      ownerId: person.id,
+      includedInCorePayoffPlan: true,
+    });
+
+    repository.saveMembership({
+      workspaceId: "household-seed",
+      uid: "future-user",
+      role: "viewer",
+      status: "active",
+      displayName: "Future User",
+      email: "future@example.test",
+      createdAt: V2_TEST_NOW,
+      createdBy: "seed-owner",
+    });
+
+    const futureService = createTrackToZeroV2AsyncAppService({ repository, actorId: "future-user", asOf: V2_TEST_NOW });
+    const linked = await futureService.connectWorkspacePersonToMember("household-seed", {
+      personId: person.id,
+      memberUid: "future-user",
+      allowSelfService: true,
+    });
+
+    expect(linked.workspaceMembershipId).toBe("future-user");
+    const reloadedDebt = repository.listDebts("household-seed").find((entry) => entry.id === debt.id);
+    expect(reloadedDebt.ownerType).toBe("person");
+    expect(reloadedDebt.ownerId).toBe(person.id);
+    expect(repository.listPaymentEvents("household-seed", debt.id)).toHaveLength(0);
+    expect(repository.listBalanceSnapshots("household-seed", debt.id)).toHaveLength(1);
+  });
+
+  it("blocks connecting a WorkspacePerson that is already linked to another account", async () => {
+    const { repository, service } = makeService("seed-owner");
+    const person = await service.createImportedPerson("household-seed", { displayName: "Already Linked" });
+    await service.connectWorkspacePersonToMember("household-seed", {
+      personId: person.id,
+      memberUid: "seed-admin",
+    });
+    repository.saveMembership({
+      workspaceId: "household-seed",
+      uid: "future-user",
+      role: "viewer",
+      status: "active",
+      displayName: "Future User",
+      email: "future@example.test",
+      createdAt: V2_TEST_NOW,
+      createdBy: "seed-owner",
+    });
+    const futureService = createTrackToZeroV2AsyncAppService({ repository, actorId: "future-user", asOf: V2_TEST_NOW });
+    await expect(futureService.connectWorkspacePersonToMember("household-seed", {
+      personId: person.id,
+      memberUid: "future-user",
+      allowSelfService: true,
+    })).rejects.toThrow(/already connected/i);
+  });
 });

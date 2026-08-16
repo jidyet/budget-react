@@ -56,11 +56,53 @@ describe("TrackToZero v2 async application service", () => {
 
     const invite = await ownerService.createMemberInvite("household-owner-a", { email: "future@example.test", role: "viewer" });
 
-    expect(invite).toMatchObject({ status: "pending", role: "viewer", email: "future@example.test" });
+    expect(invite).toMatchObject({ status: "pending", role: "viewer", emailNormalized: "future@example.test", delivery: "copy_link" });
+    expect(invite.joinUrl).toContain("/join?workspace=household-owner-a&token=");
     expect(repository.listMemberInvites("household-owner-a")).toHaveLength(1);
     expect(repository.getMembership("household-owner-a", "future-user")).toBeNull();
     const futureService = createTrackToZeroV2AsyncAppService({ repository, actorId: "future-user", asOf: V2_TEST_NOW });
     await expect(futureService.getWorkspaceSnapshot("household-owner-a")).rejects.toThrow(/not a member/i);
+  });
+
+  it("accepts a valid invite exactly once and never creates duplicate memberships", async () => {
+    const repository = new InMemoryTrackToZeroRepository();
+    const ownerService = createTrackToZeroV2AsyncAppService({ repository, actorId: "owner-a", asOf: V2_TEST_NOW });
+    await ownerService.bootstrapOwnerWorkspace("household-owner-a", { type: "household", displayName: "Owner A", email: "owner@example.test" });
+    const invite = await ownerService.createMemberInvite("household-owner-a", { email: "future@example.test", role: "viewer" });
+    const token = new URL(`https://tracktozero.test${invite.joinUrl}`).searchParams.get("token");
+    const futureService = createTrackToZeroV2AsyncAppService({ repository, actorId: "future-user", asOf: V2_TEST_NOW });
+
+    const accepted = await futureService.acceptMemberInvite("household-owner-a", {
+      token,
+      displayName: "Future User",
+      email: "future@example.test",
+    });
+    expect(accepted.membership).toMatchObject({ workspaceId: "household-owner-a", uid: "future-user", role: "viewer", acceptedInviteId: invite.id });
+    expect(repository.listMemberships("household-owner-a").filter((membership) => membership.uid === "future-user")).toHaveLength(1);
+
+    const acceptedAgain = await futureService.acceptMemberInvite("household-owner-a", {
+      token,
+      displayName: "Future User",
+      email: "future@example.test",
+    });
+    expect(acceptedAgain.alreadyAccepted).toBe(true);
+    expect(repository.listMemberships("household-owner-a").filter((membership) => membership.uid === "future-user")).toHaveLength(1);
+  });
+
+  it("blocks invite acceptance when the signed-in email does not match the invited email", async () => {
+    const repository = new InMemoryTrackToZeroRepository();
+    const ownerService = createTrackToZeroV2AsyncAppService({ repository, actorId: "owner-a", asOf: V2_TEST_NOW });
+    await ownerService.bootstrapOwnerWorkspace("household-owner-a", { type: "household", displayName: "Owner A", email: "owner@example.test" });
+    const invite = await ownerService.createMemberInvite("household-owner-a", { email: "future@example.test", role: "viewer" });
+    const token = new URL(`https://tracktozero.test${invite.joinUrl}`).searchParams.get("token");
+    const futureService = createTrackToZeroV2AsyncAppService({ repository, actorId: "future-user", asOf: V2_TEST_NOW });
+
+    await expect(futureService.acceptMemberInvite("household-owner-a", {
+      token,
+      displayName: "Future User",
+      email: "other@example.test",
+    })).rejects.toThrow(/future@example\.test/i);
+    expect(repository.getMembership("household-owner-a", "future-user")).toBeNull();
   });
 
   it("creates manual debts with an opening balance snapshot and preserves APR/mortgage truth", async () => {
@@ -258,7 +300,7 @@ describe("TrackToZero v2 async application service", () => {
   it("translates permission and repository failures into safe UI language", () => {
     expect(getUserSafeTrackToZeroError({ code: "permission-denied", message: "FirebaseError: Missing or insufficient permissions" })).toEqual({
       kind: "permission_denied",
-      message: "Your role allows viewing this information, but not changing it.",
+      message: "This account does not have access to that TrackToZero workspace or action.",
     });
     expect(getUserSafeTrackToZeroError(new Error("FIRESTORE_EMULATOR_HOST missing")).message).toMatch(/temporarily unavailable/);
   });

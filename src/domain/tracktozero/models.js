@@ -5,6 +5,7 @@ import {
   EVENT_SOURCES,
   IMPORT_BATCH_STATUSES,
   IMPORT_CANDIDATE_DECISIONS,
+  INVITATION_STATUSES,
   MEMBER_ROLES,
   OWNER_TYPES,
   PERSON_KINDS,
@@ -35,6 +36,7 @@ export const createWorkspace = (input = {}) => {
     id: requireString(input.id, "workspace.id"),
     type: requireEnum(input.type, WORKSPACE_TYPES, "workspace.type"),
     status: requireEnum(input.status || "active", WORKSPACE_STATUSES, "workspace.status"),
+    name: optionalString(input.name),
     activePlanId: optionalString(input.activePlanId),
     createdAt: nowOr(input.createdAt),
     createdBy: requireString(input.createdBy, "workspace.createdBy"),
@@ -52,6 +54,7 @@ export const createWorkspaceMembership = (input = {}) => {
     status: input.status || "active",
     displayName: optionalString(input.displayName),
     email: optionalString(input.email),
+    acceptedInviteId: optionalString(input.acceptedInviteId),
     createdAt: nowOr(input.createdAt),
     createdBy: optionalString(input.createdBy),
     updatedAt: optionalTimestamp(input.updatedAt),
@@ -59,6 +62,26 @@ export const createWorkspaceMembership = (input = {}) => {
   };
   return deepFreezeClone(membership);
 };
+
+export const createWorkspaceInvitation = (input = {}) => deepFreezeClone({
+  id: requireString(input.id, "invite.id"),
+  workspaceId: requireString(input.workspaceId, "invite.workspaceId"),
+  workspaceName: optionalString(input.workspaceName),
+  emailNormalized: requireString(input.emailNormalized, "invite.emailNormalized"),
+  role: requireEnum(input.role, MEMBER_ROLES.filter((role) => role !== "owner"), "invite.role"),
+  status: requireEnum(input.status || "pending", INVITATION_STATUSES, "invite.status"),
+  tokenHash: requireString(input.tokenHash || input.id, "invite.tokenHash"),
+  invitedByUserId: requireString(input.invitedByUserId, "invite.invitedByUserId"),
+  invitedByName: optionalString(input.invitedByName),
+  workspacePersonId: optionalString(input.workspacePersonId),
+  createdAt: nowOr(input.createdAt),
+  createdBy: requireString(input.createdBy || input.invitedByUserId, "invite.createdBy"),
+  expiresAt: requireTimestamp(input.expiresAt, "invite.expiresAt"),
+  acceptedAt: optionalTimestamp(input.acceptedAt),
+  acceptedByUserId: optionalString(input.acceptedByUserId),
+  canceledAt: optionalTimestamp(input.canceledAt),
+  canceledByUserId: optionalString(input.canceledByUserId),
+});
 
 // DATA-HH1: a Workspace-scoped financial identity for a person referenced by
 // imported/entered data who may or may not have a TrackToZero account. This

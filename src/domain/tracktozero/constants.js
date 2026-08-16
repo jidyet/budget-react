@@ -1,6 +1,7 @@
 export const WORKSPACE_TYPES = Object.freeze(["personal", "household"]);
 export const WORKSPACE_STATUSES = Object.freeze(["active", "archived"]);
 export const MEMBER_ROLES = Object.freeze(["owner", "admin", "contributor", "viewer"]);
+export const INVITATION_STATUSES = Object.freeze(["pending", "accepted", "canceled", "expired"]);
 export const DEBT_STATUSES = Object.freeze(["active", "paid_off", "archived"]);
 export const APR_STATUSES = Object.freeze(["known", "unknown", "no_interest", "promotional"]);
 export const PLAN_STATUSES = Object.freeze(["draft", "active", "completed", "archived"]);

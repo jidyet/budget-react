@@ -1,4 +1,4 @@
-import { createBalanceSnapshot, createDebt, createExpectedCheckpoint, createImportBatch, createPaymentEvent, createPayoffPlan, createPlanVersion, createSavedScenario, createWorkspace, createWorkspaceMembership, createWorkspacePerson } from "../../domain/tracktozero/models.js";
+import { createBalanceSnapshot, createDebt, createExpectedCheckpoint, createImportBatch, createPaymentEvent, createPayoffPlan, createPlanVersion, createSavedScenario, createWorkspace, createWorkspaceInvitation, createWorkspaceMembership, createWorkspacePerson } from "../../domain/tracktozero/models.js";
 import { activatePlanTransaction } from "../tracktozero/activePlanService.js";
 
 const clone = (value) => structuredClone(value);
@@ -70,13 +70,50 @@ export class InMemoryTrackToZeroRepository {
   }
   getMembership(workspaceId, uid) { return this.members.has(this.key(workspaceId, uid)) ? clone(this.members.get(this.key(workspaceId, uid))) : null; }
   listMemberships(workspaceId) { return [...this.members.values()].filter((m) => m.workspaceId === workspaceId).map(clone); }
+  listMembershipsForUser(uid) {
+    return [...this.members.values()]
+      .filter((membership) => membership.uid === uid && membership.status === "active")
+      .sort((a, b) => String(a.workspaceId).localeCompare(String(b.workspaceId)))
+      .map(clone);
+  }
   saveMemberInvite(input) {
-    const invite = clone(input);
+    const invite = createWorkspaceInvitation(input);
     this.memberInvites.set(this.key(invite.workspaceId, invite.id), invite);
     return clone(invite);
   }
+  getMemberInvite(workspaceId, inviteId) {
+    const key = this.key(workspaceId, inviteId);
+    return this.memberInvites.has(key) ? clone(this.memberInvites.get(key)) : null;
+  }
   listMemberInvites(workspaceId) {
     return [...this.memberInvites.values()].filter((invite) => invite.workspaceId === workspaceId).map(clone);
+  }
+  acceptMemberInvite({ workspaceId, inviteId, membership, acceptedAt, acceptedByUserId }) {
+    const currentInvite = this.getMemberInvite(workspaceId, inviteId);
+    if (!currentInvite) throw new Error("Invite not found");
+    const savedMembership = this.saveMembership(membership);
+    const acceptedInvite = createWorkspaceInvitation({
+      ...currentInvite,
+      status: "accepted",
+      acceptedAt,
+      acceptedByUserId,
+      canceledAt: "",
+      canceledByUserId: "",
+    });
+    this.memberInvites.set(this.key(workspaceId, inviteId), clone(acceptedInvite));
+    return { membership: savedMembership, invite: clone(acceptedInvite) };
+  }
+  cancelMemberInvite({ workspaceId, inviteId, canceledAt, canceledByUserId }) {
+    const currentInvite = this.getMemberInvite(workspaceId, inviteId);
+    if (!currentInvite) throw new Error("Invite not found");
+    const canceledInvite = createWorkspaceInvitation({
+      ...currentInvite,
+      status: "canceled",
+      canceledAt,
+      canceledByUserId,
+    });
+    this.memberInvites.set(this.key(workspaceId, inviteId), clone(canceledInvite));
+    return clone(canceledInvite);
   }
 
   // DATA-HH1

@@ -23,7 +23,8 @@ const [EMULATOR_HOST, EMULATOR_PORT] = (process.env.FIRESTORE_EMULATOR_HOST || "
 let testEnv;
 
 const now = () => new Date("2026-01-01T00:00:00.000Z");
-const later = () => new Date("2026-02-01T00:00:00.000Z");
+const later = () => new Date("2026-09-01T00:00:00.000Z");
+const inviteExpiry = () => new Date("2027-01-08T00:00:00.000Z");
 
 const repoAs = (uid) => new FirebaseTrackToZeroRepository(testEnv.authenticatedContext(uid).firestore());
 
@@ -112,11 +113,16 @@ test("membership: raw email invite is pending-only and does not grant workspace 
   const invite = await repoAs("owner").saveMemberInvite({
     id: "invite-1",
     workspaceId: "w1",
-    email: "future@example.test",
+    workspaceName: "Household",
+    emailNormalized: "future@example.test",
     role: "viewer",
     status: "pending",
     createdAt: now().toISOString(),
     createdBy: "owner",
+    invitedByUserId: "owner",
+    invitedByName: "Owner",
+    tokenHash: "invite-1",
+    expiresAt: inviteExpiry(),
   });
   assert.equal(invite.status, "pending");
   assert.equal((await repoAs("owner").listMemberInvites("w1")).length, 1);

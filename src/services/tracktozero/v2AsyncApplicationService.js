@@ -131,6 +131,15 @@ export const getUserSafeTrackToZeroError = (error) => {
       message: "We couldn't save that file yet. Nothing was added. Try again.",
     };
   }
+  // A plain Error with no Firebase/Firestore error code (every Firebase SDK
+  // error carries one) is an intentional, already-user-safe validation
+  // message thrown by this app's own service layer - e.g. "This invite was
+  // sent to x@example.com. Sign in with that account to continue." Trust it
+  // verbatim instead of replacing it with a generic fallback that throws
+  // away the one piece of information the user actually needs.
+  if (!code && message) {
+    return { kind: "validation_error", message };
+  }
   return {
     kind: "repository_error",
     message: "TrackToZero could not complete that action. Nothing was changed. Try again.",

@@ -1414,13 +1414,12 @@ function MigrationPanel() {
   );
 }
 
-function Settings({ snapshot, repositoryMode, service, refresh, runAction, writeState }) {
+function Settings({ snapshot, repositoryMode, service, refresh, runAction, writeState, latestInvite, setLatestInvite }) {
   const flags = getLaunchFlags();
   const canManageMembers = ROLE_PERMISSIONS[snapshot.membership?.role]?.manageMembers;
   const [householdName, setHouseholdName] = useState(snapshot.workspace.name || "");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("viewer");
-  const [latestInvite, setLatestInvite] = useState(null);
   const [pendingConnections, setPendingConnections] = useState({});
   const dataMode = repositoryMode === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction
     ? "Clean V2 beta"
@@ -1680,11 +1679,20 @@ export default function TrackToZeroV2App() {
   const [actorId, setActorId] = useState(usesRealAuthUi ? "" : V2_TEST_ACTOR_ID);
   const [tab, setTab] = useState("home");
   const [scenario, setScenario] = useState(null);
+  // Lifted out of Settings (not local state there) because every write
+  // action calls refresh(), which briefly sets runtimeState.status to
+  // "loading" and replaces this component's whole child tree with a
+  // loading screen (see the runtimeState.status === "loading" render gate
+  // below) - that unmounts Settings and would silently lose the freshly
+  // created invite's one-time joinUrl. Only the invite's hashed token is
+  // ever persisted, so once this is lost there is no way to recover the
+  // link short of canceling and recreating the invite.
+  const [latestInvite, setLatestInvite] = useState(null);
   const [joinIntent, setJoinIntent] = useState(() => getJoinIntent());
   const [joinPreviewState, setJoinPreviewState] = useState({ status: joinIntent ? "loading" : "idle", preview: null, error: "" });
   const [joinAcceptedState, setJoinAcceptedState] = useState({ status: "idle", workspaceId: "", matches: [], invite: null, error: "" });
   const [runtimeState, setRuntimeState] = useState({ status: "idle", snapshot: null, workspaces: [], error: "" });
-  const [writeState, setWriteState] = useState({ inProgress: false, action: "", error: "", success: "" });
+  const [writeState, setWriteState] = useState({ inProgress: false, action: "", error: "", success: "", errorAction: "" });
   const [reviewState, setReviewState] = useState({ status: "idle", snapshot: null });
   const requestSeq = useRef(0);
   const reviewRequestSeq = useRef(0);
@@ -1855,13 +1863,19 @@ export default function TrackToZeroV2App() {
   }, [service, workspaceId]);
 
   const runAction = async (action, callback, { write = true } = {}) => {
-    setWriteState({ inProgress: write, action, error: "", success: "" });
+    setWriteState({ inProgress: write, action, error: "", success: "", errorAction: "" });
     try {
       await callback();
-      setWriteState({ inProgress: false, action: "", error: "", success: write ? `${action} saved.` : "" });
+      setWriteState({ inProgress: false, action: "", error: "", success: write ? `${action} saved.` : "", errorAction: "" });
     } catch (error) {
       const safe = getUserSafeTrackToZeroError(error);
-      setWriteState({ inProgress: false, action: "", error: `${action}: ${safe.message}`, success: "" });
+      // action is reset here just like on success (it also drives "busy"
+      // button labels elsewhere, which must not get stuck showing their
+      // in-progress text forever after a failure) - errorAction is the
+      // separate, dedicated field callers use to know THEIR action is the
+      // one that failed, since by render time action alone can no longer
+      // tell them apart from "nothing in progress".
+      setWriteState({ inProgress: false, action: "", error: `${action}: ${safe.message}`, success: "", errorAction: action });
     }
   };
 
@@ -2016,6 +2030,24 @@ export default function TrackToZeroV2App() {
     );
   }
 
+  // Must be checked before the joinIntent/joinPreviewState gate below:
+  // acceptJoinInvite() deliberately leaves joinIntent set (and never
+  // re-fetches joinPreviewState) while a person-link decision is pending,
+  // so that gate's preview?.state === "ready" is still true and would
+  // otherwise keep re-matching forever, making this screen unreachable.
+  if (joinAcceptedState.status === "needs_person_link") {
+    return (
+      <JoinConnectScreen
+        workspaceName={joinAcceptedState.invite?.workspaceName}
+        matches={joinAcceptedState.matches}
+        onConnect={connectJoinedPerson}
+        onSkip={skipJoinedPersonConnection}
+        busy={writeState.inProgress && writeState.action === "connect profile"}
+        error={writeState.errorAction === "connect profile" ? writeState.error : ""}
+      />
+    );
+  }
+
   if (usesRealAuthUi && joinIntent && joinPreviewState.status === "ready") {
     const preview = joinPreviewState.preview;
     if (preview?.state === "ready") {
@@ -2025,7 +2057,7 @@ export default function TrackToZeroV2App() {
           signedInEmail={authState.user?.email || ""}
           onAccept={acceptJoinInvite}
           busy={writeState.inProgress && writeState.action === "join household"}
-          error={writeState.action === "join household" ? writeState.error : ""}
+          error={writeState.errorAction === "join household" ? writeState.error : ""}
         />
       );
     }
@@ -2041,19 +2073,6 @@ export default function TrackToZeroV2App() {
         />
       );
     }
-  }
-
-  if (joinAcceptedState.status === "needs_person_link") {
-    return (
-      <JoinConnectScreen
-        workspaceName={joinAcceptedState.invite?.workspaceName}
-        matches={joinAcceptedState.matches}
-        onConnect={connectJoinedPerson}
-        onSkip={skipJoinedPersonConnection}
-        busy={writeState.inProgress && writeState.action === "connect profile"}
-        error={writeState.action === "connect profile" ? writeState.error : ""}
-      />
-    );
   }
 
   if (usesRealAuthUi && runtimeState.status === "needs_onboarding") {
@@ -2163,7 +2182,7 @@ export default function TrackToZeroV2App() {
         )}
         {tab === "debts" && <Debts snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} refreshReview={() => refreshReview(workspaceId)} runAction={runAction} writeState={writeState} reviewSnapshot={reviewState.snapshot} onGoToReview={() => navigateTab("review")} />}
         {tab === "plan" && <Plan snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} />}
-        {tab === "settings" && <Settings snapshot={snapshot} repositoryMode={runtime.mode} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} />}
+        {tab === "settings" && <Settings snapshot={snapshot} repositoryMode={runtime.mode} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} latestInvite={latestInvite} setLatestInvite={setLatestInvite} />}
       </PageContainer>
     </AppShell>
   );

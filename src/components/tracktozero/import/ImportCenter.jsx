@@ -129,6 +129,11 @@ export default function ImportCenter({ snapshot, service, refresh, refreshReview
       setPendingNonDebtItems(parsed.nonDebtItems || []);
       await refreshReview?.();
     } catch (error) {
+      // UX-8.1: always log the real error for debugging (browser devtools
+      // only - never shown to the user) - the UI-facing message is always
+      // routed through getUserSafeTrackToZeroError, which never leaks a
+      // stack trace, file path, or raw parser/Firestore internals.
+      console.error("TrackToZero: import analysis failed.", error);
       setImportState({ status: "ready", batch: null, error: getUserSafeTrackToZeroError(error).message });
     }
   };

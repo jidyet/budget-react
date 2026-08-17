@@ -98,9 +98,9 @@ export function getBlockingLine(blocking) {
 export const getReviewCenterSummary = ({ openCount, blockingCount }) => {
   if (!openCount) return "You're all caught up.";
   const nonBlocking = openCount - blockingCount;
-  const parts = [`${openCount} thing${openCount === 1 ? "" : "s"} need${openCount === 1 ? "s" : ""} a quick check`];
+  const parts = [`${openCount} import decision${openCount === 1 ? "" : "s"} still need${openCount === 1 ? "s" : ""} your input`];
   if (blockingCount > 0) parts.push(`${blockingCount} affect${blockingCount === 1 ? "s" : ""} your payoff plan`);
-  if (nonBlocking > 0) parts.push(`${nonBlocking} can wait`);
+  if (nonBlocking > 0) parts.push(`${nonBlocking} are lower priority`);
   return parts;
 };
 

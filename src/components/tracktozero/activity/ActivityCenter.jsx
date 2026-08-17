@@ -18,6 +18,7 @@ const KIND_LABELS = {
 const PAGE_SIZE = 20;
 
 function ActivityRow({ entry }) {
+  const showOwner = entry.ownerName && entry.ownerName !== entry.actorName;
   return (
     <div style={{ display: "grid", gap: 4, padding: "14px 0", borderBottom: `1px solid ${ttzPalette.border}` }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
@@ -28,7 +29,10 @@ function ActivityRow({ entry }) {
         <span style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted }}>{entry.dateLabel}</span>
       </div>
       {entry.detail ? <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>{entry.detail}</div> : null}
-      <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted }}>{entry.actorName}</div>
+      <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted }}>
+        Recorded by {entry.actorName}
+        {showOwner ? ` · Debt owner: ${entry.ownerName}` : ""}
+      </div>
     </div>
   );
 }

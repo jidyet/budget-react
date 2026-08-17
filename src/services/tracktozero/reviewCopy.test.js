@@ -42,10 +42,10 @@ describe("REVIEW-1B voice contract: simple, friendly, no jargon", () => {
   it("summary is truthful: only mentions the blocking/non-blocking split when it applies", () => {
     expect(getReviewCenterSummary({ openCount: 0, blockingCount: 0 })).toBe("You're all caught up.");
     const mixed = getReviewCenterSummary({ openCount: 3, blockingCount: 2 });
-    expect(mixed.join(" ")).toContain("3 things need a quick check");
+    expect(mixed.join(" ")).toContain("3 import decisions still need your input");
     expect(mixed.join(" ")).toContain("2 affect your payoff plan");
-    expect(mixed.join(" ")).toContain("1 can wait");
+    expect(mixed.join(" ")).toContain("1 are lower priority");
     const allBlocking = getReviewCenterSummary({ openCount: 2, blockingCount: 2 });
-    expect(allBlocking.join(" ")).not.toContain("can wait");
+    expect(allBlocking.join(" ")).not.toContain("lower priority");
   });
 });

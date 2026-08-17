@@ -728,7 +728,10 @@ export const deriveHomeContext = (snapshot, reviewSnapshot, scenario) => {
   const openReviewCount = reviewSnapshot?.actionableCount ?? reviewSnapshot?.openCount ?? 0;
   const blockingReviewCount = reviewSnapshot?.blockingCount || 0;
   const deferredBlockingCount = reviewSnapshot?.deferredBlockingCount || 0;
+  const staleBatchCount = reviewSnapshot?.staleBatchCount || 0;
+  const staleCandidateCount = reviewSnapshot?.staleCandidateCount || 0;
   const hasBlockingReview = blockingReviewCount > 0;
+  const hasStaleReview = staleBatchCount > 0;
   const whatIf = scenario || null;
 
   let homeState = "unknown";
@@ -774,7 +777,10 @@ export const deriveHomeContext = (snapshot, reviewSnapshot, scenario) => {
     openReviewCount,
     blockingReviewCount,
     deferredBlockingCount,
+    staleBatchCount,
+    staleCandidateCount,
     hasBlockingReview,
+    hasStaleReview,
     debtsAwaitingReforecast,
     householdBreakdown,
     members: snapshot.members,

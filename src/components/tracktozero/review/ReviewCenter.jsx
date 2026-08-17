@@ -119,6 +119,7 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
 
   const openItems = sortOpenReviewItems(reviewSnapshot?.openItems || []);
   const resolvedItems = reviewSnapshot?.resolvedItems || [];
+  const staleBatches = reviewSnapshot?.staleBatches || [];
   const needsAttentionItems = openItems.filter((item) => !isDeferred(item));
   const laterItems = openItems.filter(isDeferred);
   const openCount = reviewSnapshot?.openCount ?? openItems.length;
@@ -258,6 +259,17 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
     }
   };
 
+  const handleDismissStale = async (batchId) => {
+    setSaving(true);
+    try {
+      await service.dismissStaleImportBatch?.(workspaceId, batchId);
+      setSummary("Old review data removed. Re-import that file to review it with the latest classifier.");
+      await onRefreshReview();
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const preSaveSummary = useMemo(() => buildPreSaveSummary(needsAttentionItems, staged), [needsAttentionItems, staged]);
   const overallSummary = getReviewCenterSummary({ openCount, blockingCount });
   const goPrev = () => { if (currentIndex > 0) setCursorId(queue[currentIndex - 1].id); };
@@ -285,6 +297,39 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
         <LoadingState label="Loading reviews" />
       ) : (
         <>
+          {staleBatches.length ? (
+            <WarningCallout
+              style={{ marginBottom: 16 }}
+              title={`${staleBatches.length} older import${staleBatches.length === 1 ? "" : "s"} need${staleBatches.length === 1 ? "s" : ""} a fresh review.`}
+            >
+              <div style={{ display: "grid", gap: 12 }}>
+                <div>These spreadsheet imports were created before TrackToZero&apos;s latest review model. Their old candidate counts are excluded from today&apos;s review totals.</div>
+                <div style={{ display: "grid", gap: 10 }}>
+                  {staleBatches.map((batch) => (
+                    <Card key={batch.id} variant="default" style={{ padding: 16 }}>
+                      <div style={{ display: "grid", gap: 8 }}>
+                        <div style={{ ...TYPE_SCALE.body, color: palette.tx, fontWeight: 700 }}>
+                          {batch.sourceFilename || "Older import batch"}
+                        </div>
+                        <div style={{ ...TYPE_SCALE.caption, color: palette.tx2 }}>
+                          {batch.candidateCount} old candidate{batch.candidateCount === 1 ? "" : "s"} · parser {batch.parserVersion || "unknown"}
+                        </div>
+                        <div style={{ ...TYPE_SCALE.body, color: palette.tx2 }}>
+                          Re-import this source to review it with the latest classification rules.
+                        </div>
+                        <div>
+                          <Button variant="secondary" disabled={saving} onClick={() => handleDismissStale(batch.id)}>
+                            Dismiss old import
+                          </Button>
+                        </div>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            </WarningCallout>
+          ) : null}
+
           <SectionHeader title={Array.isArray(overallSummary) ? overallSummary[0] : overallSummary} description={Array.isArray(overallSummary) ? overallSummary.slice(1).join(" · ") : undefined} />
 
           <div role="tablist" aria-label="Review filter" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 20 }}>

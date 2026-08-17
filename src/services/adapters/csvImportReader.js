@@ -60,5 +60,10 @@ export const readCsvFileToCandidates = async (file, { importBatchId = "", source
   if (!headers.length) throw new Error("No header row was found in this file.");
   if (!rows.length) throw new Error("No rows were found in this file.");
 
-  return normalizeSpreadsheetRowsToCandidates({ headers, rows, source, importBatchId, sourceFilename: file.name });
+  try {
+    return normalizeSpreadsheetRowsToCandidates({ headers, rows, source, importBatchId, sourceFilename: file.name });
+  } catch (error) {
+    console.error("TrackToZero: CSV analysis failed after the file opened successfully.", error);
+    throw new Error("We opened this file, but couldn't analyze its contents. Try re-exporting it as .xlsx or .csv, or use a simpler layout.");
+  }
 };

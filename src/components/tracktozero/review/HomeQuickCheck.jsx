@@ -11,17 +11,17 @@ export default function HomeQuickCheck({ openCount, blockingCount, onGoToReview 
   if (!openCount) return null;
   return (
     <Card variant={blockingCount > 0 ? "warning" : "default"}>
-      <div style={{ ...TYPE_SCALE.overline, color: palette.muted }}>Quick check</div>
+      <div style={{ ...TYPE_SCALE.overline, color: palette.muted }}>Import review</div>
       <div style={{ ...TYPE_SCALE.cardTitle, color: palette.tx, marginTop: 4 }}>
-        {openCount} thing{openCount === 1 ? "" : "s"} need{openCount === 1 ? "s" : ""} your attention.
+        {openCount} import decision{openCount === 1 ? "" : "s"} still need{openCount === 1 ? "s" : ""} your input.
       </div>
       {blockingCount > 0 ? (
         <p style={{ ...TYPE_SCALE.body, color: palette.tx2, marginTop: 6 }}>
-          {blockingCount} need{blockingCount === 1 ? "s" : ""} a quick check before we fully trust your plan.
+          {blockingCount} affect{blockingCount === 1 ? "s" : ""} your payoff plan.
         </p>
       ) : null}
       <div style={{ marginTop: 12 }}>
-        <Button variant="secondary" onClick={onGoToReview}>Review them</Button>
+        <Button variant="secondary" onClick={onGoToReview}>Open review</Button>
       </div>
     </Card>
   );

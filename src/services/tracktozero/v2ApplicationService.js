@@ -14,6 +14,12 @@ import {
   monthKeyFromDate,
   sortDebtsForStrategy,
 } from "./projectionStatusService.js";
+import {
+  createImportBatchMetadata,
+  IMPORT_BATCH_CLASSIFIER_VERSION,
+  IMPORT_BATCH_PARSER_VERSION,
+  IMPORT_BATCH_SCHEMA_VERSION,
+} from "./importBatchVersioning.js";
 import { V2_TEST_NOW } from "./v2SeedData.js";
 
 export const V2_DATA_MODES = Object.freeze({
@@ -262,7 +268,21 @@ export const createTrackToZeroV2AppService = ({
     });
   };
 
-  const createImportBatch = (workspaceId, { sourceType, sourceFilename = "", candidates = [], warnings = [], parserVersion = "1" } = {}) => {
+  const createImportBatch = (
+    workspaceId,
+    {
+      sourceType,
+      sourceFilename = "",
+      candidates = [],
+      warnings = [],
+      parserVersion = IMPORT_BATCH_PARSER_VERSION,
+      classifierVersion = IMPORT_BATCH_CLASSIFIER_VERSION,
+      schemaVersion = IMPORT_BATCH_SCHEMA_VERSION,
+      sourceHash = "",
+      nonDebtItems = [],
+      scanSummary = {},
+    } = {}
+  ) => {
     assertInteractive();
     const { workspace, membership, members, people } = getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot import debts into this workspace.");
@@ -294,7 +314,7 @@ export const createTrackToZeroV2AppService = ({
       rejectedCount: 0,
       duplicateCount: 0,
       warnings,
-      metadata: { parserVersion },
+      metadata: createImportBatchMetadata({ parserVersion, classifierVersion, schemaVersion, sourceHash, nonDebtItems, scanSummary }),
       candidates: withOwnerSuggestions.map((candidate) => ({ ...candidate, importBatchId: batchId, workspaceId })),
     });
   };

@@ -15,6 +15,7 @@
 // response to a resolved review is v2AsyncApplicationService.js's job.
 
 import { MATCH_CLASSIFICATIONS } from "./debtReconciliation.js";
+import { isStaleImportBatch, summarizeStaleImportBatch } from "./importBatchVersioning.js";
 
 export const REVIEW_TYPES = Object.freeze({
   matchDecision: "MATCH_DECISION",
@@ -231,11 +232,20 @@ export const toReviewItem = ({ batch, candidate }) => {
 export const flattenReviewItems = (batches = []) =>
   batches.flatMap((batch) => (batch.candidates || []).map((candidate) => toReviewItem({ batch, candidate })));
 
+export const getStaleImportBatches = (batches = []) =>
+  batches.filter((batch) => batch?.status === "review_required" && isStaleImportBatch(batch));
+
+export const getFreshReviewBatches = (batches = []) =>
+  batches.filter((batch) => !isStaleImportBatch(batch));
+
+export const getStaleImportSummaries = (batches = []) =>
+  getStaleImportBatches(batches).map((batch) => summarizeStaleImportBatch(batch));
+
 // ── Shared selectors (Part 9) - the ONE place open/blocking/count logic
 // lives. Home, a future Review Center, and Import must all call these
 // instead of recomputing counts independently.
-export const getOpenReviewItems = (batches = []) => flattenReviewItems(batches).filter((item) => item.status === REVIEW_STATUS.open);
-export const getResolvedReviewItems = (batches = []) => flattenReviewItems(batches).filter((item) => item.status !== REVIEW_STATUS.open);
+export const getOpenReviewItems = (batches = []) => flattenReviewItems(getFreshReviewBatches(batches)).filter((item) => item.status === REVIEW_STATUS.open);
+export const getResolvedReviewItems = (batches = []) => flattenReviewItems(getFreshReviewBatches(batches)).filter((item) => item.status !== REVIEW_STATUS.open);
 export const getOpenReviewCount = (batches = []) => getOpenReviewItems(batches).length;
 export const getBlockingReviewCount = (batches = []) => getOpenReviewItems(batches).filter((item) => item.blocking).length;
 export const getReviewCountsByType = (batches = []) => {

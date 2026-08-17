@@ -26,7 +26,19 @@ export const readExcelFileToCandidates = async (file, { importBatchId = "", sour
   }
 
   const XLSX = await import("xlsx");
-  const result = discoverWorkbookDebtCandidates({ workbook, XLSX, fileName: file.name, importBatchId, source });
+  let result;
+  try {
+    result = discoverWorkbookDebtCandidates({ workbook, XLSX, fileName: file.name, importBatchId, source });
+  } catch (error) {
+    // UX-8.1: a genuine bug in candidate discovery (an edge case in a real,
+    // complex workbook - unusual cell types, merged regions, an empty/
+    // malformed sheet) must never surface its raw JS error text to the user
+    // (stack traces, internal field names). The file itself DID open (we
+    // already have a real `workbook` at this point) - this is specifically
+    // an analysis failure, distinct from "the file could not be read" above.
+    console.error("TrackToZero: workbook analysis failed after the file opened successfully.", error);
+    throw new Error("We opened this file, but couldn't analyze its contents. Try re-exporting it as .xlsx or .csv, or use a simpler layout.");
+  }
   if (!result.topology.sheetCount) throw new Error("No sheet was found in this file.");
   const nonEmptySheets = result.topology.sheets.filter((sheet) => sheet.nonEmptyCellCount > 0);
   if (!nonEmptySheets.length) throw new Error("No rows were found in this workbook.");

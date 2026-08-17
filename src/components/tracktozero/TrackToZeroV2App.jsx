@@ -510,7 +510,7 @@ function Settings({ snapshot, repositoryMode, service, refresh, runAction, write
           <p><strong>Data mode:</strong> {dataMode}</p>
         </div>
         <div>
-          <h3>Members</h3>
+          <h3>Verified members</h3>
           <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 8 }}>
             {snapshot.members.map((member) => (
               <li key={member.uid} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -592,7 +592,7 @@ function Settings({ snapshot, repositoryMode, service, refresh, runAction, write
           )}
           <div style={{ ...styles.grid, marginTop: 18 }}>
             <div style={{ ...styles.card, boxShadow: "none" }}>
-              <h3 style={{ marginTop: 0 }}>Pending invites</h3>
+              <h3 style={{ marginTop: 0 }}>Pending invitations</h3>
               {snapshot.memberInvites?.length ? (
                 <div style={{ display: "grid", gap: 12 }}>
                   {snapshot.memberInvites.map((invite) => (
@@ -623,7 +623,7 @@ function Settings({ snapshot, repositoryMode, service, refresh, runAction, write
               ) : <p style={{ marginBottom: 0, color: "#4d6a82" }}>No household invites yet.</p>}
             </div>
             <div style={{ ...styles.card, boxShadow: "none" }}>
-              <h3 style={{ marginTop: 0 }}>Financial people not connected to an account</h3>
+              <h3 style={{ marginTop: 0 }}>Financial profiles not connected to a verified member</h3>
               {unlinkedPeople.length ? (
                 <div style={{ display: "grid", gap: 12 }}>
                   {unlinkedPeople.map((person) => (
@@ -632,7 +632,7 @@ function Settings({ snapshot, repositoryMode, service, refresh, runAction, write
                         {person.displayName}
                         <Badge tone="neutral">Financial profile</Badge>
                       </p>
-                      <p style={{ margin: "6px 0", color: "#4d6a82" }}>Not connected to a TrackToZero account.</p>
+                      <p style={{ margin: "6px 0", color: "#4d6a82" }}>This debt-owner profile is not linked to a verified household member yet.</p>
                       {canManageMembers ? (
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                           <select
@@ -1273,7 +1273,10 @@ export default function TrackToZeroV2App() {
     // needs the user's attention, not every open review - an item the user
     // already chose "Skip all for now"/"Leave for later" on stays open
     // (still unresolved evidence) but no longer inflates this count.
-    navBadges: { review: reviewState.snapshot?.actionableCount ?? reviewState.snapshot?.openCount ?? 0 },
+    navBadges: {
+      review: (reviewState.snapshot?.actionableCount ?? reviewState.snapshot?.openCount ?? 0)
+        || (reviewState.snapshot?.staleBatchCount ?? 0),
+    },
   };
 
   // UX-8: the mobile quick-action sheet never mutates anything itself - it

@@ -36,24 +36,44 @@ const gridColumns = (min = 260) => ({
   gap: GAP_SM,
 });
 
+// UX-8.1: Home's financial figures previously used the mono font
+// (var(--ttz-font-mono), DM Mono) at metric sizes - it reads as code, not as
+// money. Money and other Home metrics now use the same primary UI font as
+// everything else, with font-variant-numeric: tabular-nums doing the actual
+// job the mono font was being used for (digits that line up), so a column of
+// amounts still stays visually aligned without looking like a terminal.
 const responsiveMetricValueStyle = {
-  fontFamily: "var(--ttz-font-mono)",
+  fontFamily: "var(--ttz-font-body, 'Instrument Sans', sans-serif)",
+  fontVariantNumeric: "tabular-nums",
   fontWeight: 700,
-  fontSize: "clamp(1.45rem, 1rem + 1.8vw, 2.4rem)",
+  fontSize: "clamp(1.3rem, 0.98rem + 1.5vw, 2.1rem)",
+  lineHeight: 1.15,
+  letterSpacing: "-0.01em",
+  overflowWrap: "anywhere",
+  minWidth: 0,
+};
+
+const responsiveHeroValueStyle = {
+  fontFamily: "var(--ttz-font-body, 'Instrument Sans', sans-serif)",
+  fontVariantNumeric: "tabular-nums",
+  fontWeight: 800,
+  fontSize: "clamp(1.85rem, 1.3rem + 2.4vw, 3rem)",
   lineHeight: 1.08,
   letterSpacing: "-0.02em",
   overflowWrap: "anywhere",
   minWidth: 0,
 };
 
-const responsiveHeroValueStyle = {
-  fontFamily: "var(--ttz-font-mono)",
-  fontWeight: 800,
-  fontSize: "clamp(2.05rem, 1.35rem + 3vw, 3.5rem)",
-  lineHeight: 1.02,
-  letterSpacing: "-0.03em",
-  overflowWrap: "anywhere",
-  minWidth: 0,
+// A smaller money style for compact contexts (ProgressRing's Starting/
+// Current/Reduction rows, card-level single amounts) - same font-family/
+// tabular-nums contract as the two above, just sized down.
+const moneySmStyle = {
+  fontFamily: "var(--ttz-font-body, 'Instrument Sans', sans-serif)",
+  fontVariantNumeric: "tabular-nums",
+  fontWeight: 700,
+  fontSize: 18,
+  lineHeight: 1.25,
+  color: ttzPalette.tx,
 };
 
 const pathTime = (point) => new Date(point.at).getTime();
@@ -82,17 +102,42 @@ function EmptyStateCard({ eyebrow, title, body, primaryCta, secondaryCta }) {
   );
 }
 
+// UX-8.1: the "Starting / Current / Goal" trio used to share one cramped
+// 3-column row with "Knocked out"/"Remaining" crammed below it - numbers
+// competed for space and the whole block read as one dense cluster. Each
+// figure now gets its own clearly-labeled row (label left, tabular-nums
+// value right), with "Confirmed reduction" as the one figure this card
+// exists to prove, set apart from the plain starting/current facts by
+// color only once it's actually genuine (> 0) - never colored as an
+// achievement at 0%.
+function ProgressStatRow({ label, value, emphasis = false, tone }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+      <span style={{ ...TYPE_SCALE.supporting, color: ttzPalette.tx2 }}>{label}</span>
+      <span style={{ ...moneySmStyle, fontSize: emphasis ? 20 : 16, fontWeight: emphasis ? 800 : 700, color: tone || ttzPalette.tx }}>{value}</span>
+    </div>
+  );
+}
+
 function ProgressRing({ progress, title, subtitle }) {
   const percent = Math.max(0, Math.min(100, Number(progress?.percent || 0)));
+  const hasRealProgress = Boolean(progress?.confirmed && progress.eliminated > 0);
   const circumference = 2 * Math.PI * 54;
   const dash = circumference * (percent / 100);
+  // Semantic color honesty (UX-8): the ring/eliminated figure is only ever
+  // colored as success once a genuine confirmed reduction exists - 0%,
+  // unconfirmed, or no-plan states stay neutral/brand-blue, never green.
+  const ringColor = hasRealProgress ? ttzPalette.go : progress?.confirmed ? ttzPalette.ac : ttzPalette.border2;
   const ariaLabel = progress?.confirmed
     ? `${Math.round(percent)}% of confirmed starting debt has been eliminated. ${money(progress.latestBalance)} remains.`
     : "0% confirmed progress. Update your balances over time to see your payoff progress here.";
 
   return (
-    <Card variant="default" style={{ padding: 24 }}>
-      <div style={{ display: "grid", gap: 16, justifyItems: "center", textAlign: "center" }}>
+    <Card
+      variant="default"
+      style={{ padding: 24, borderLeft: `3px solid ${hasRealProgress ? ttzPalette.go : ttzPalette.border2}` }}
+    >
+      <div style={{ display: "grid", gap: 18, justifyItems: "center", textAlign: "center" }}>
         <div>
           <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>{title}</div>
           <div style={{ ...TYPE_SCALE.supporting, color: ttzPalette.tx2, marginTop: 4 }}>{subtitle}</div>
@@ -110,7 +155,7 @@ function ProgressRing({ progress, title, subtitle }) {
               cy="74"
               r="54"
               fill="none"
-              stroke={progress?.confirmed && percent > 0 ? ttzPalette.ac : ttzPalette.border2}
+              stroke={ringColor}
               strokeWidth="12"
               strokeLinecap="round"
               strokeDasharray={`${dash} ${circumference - dash}`}
@@ -118,33 +163,23 @@ function ProgressRing({ progress, title, subtitle }) {
             />
           </svg>
           <div style={{ position: "absolute", display: "grid", justifyItems: "center", gap: 2 }}>
-            <div style={{ ...TYPE_SCALE.display, fontSize: 32, color: ttzPalette.tx }}>{Math.round(percent)}%</div>
+            <div style={{ fontFamily: "var(--ttz-font-body)", fontVariantNumeric: "tabular-nums", fontWeight: 800, fontSize: 32, color: ttzPalette.tx }}>{Math.round(percent)}%</div>
             <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>{progress?.confirmed ? "confirmed" : "needs history"}</div>
           </div>
         </div>
 
-        <div style={{ display: "grid", gap: 6, width: "100%" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, marginBottom: 4 }}>
-            <div>
-              <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted }}>Starting</div>
-              <div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.tx }}>{money(progress?.openingBalance || 0)}</div>
-            </div>
-            <div>
-              <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted }}>Current</div>
-              <div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.tx }}>{money(progress?.latestBalance || 0)}</div>
-            </div>
-            <div>
-              <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted }}>Goal</div>
-              <div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.tx }}>$0</div>
-            </div>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-            <span style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted }}>Knocked out</span>
-            <span style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx }}>{money(progress?.eliminated || 0)}</span>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-            <span style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted }}>Remaining</span>
-            <span style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx }}>{money(progress?.latestBalance || 0)}</span>
+        <div style={{ display: "grid", gap: 10, width: "100%", textAlign: "left" }}>
+          <ProgressStatRow label="Starting" value={money(progress?.openingBalance || 0)} />
+          <ProgressStatRow label="Current" value={money(progress?.latestBalance || 0)} />
+          <div style={{ height: 1, background: ttzPalette.border, margin: "2px 0" }} />
+          <ProgressStatRow
+            label="Confirmed reduction"
+            value={money(progress?.eliminated || 0)}
+            emphasis
+            tone={hasRealProgress ? ttzPalette.go : ttzPalette.tx}
+          />
+          <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted, textAlign: "right" }}>
+            {money(progress?.latestBalance || 0)} remaining · Goal $0
           </div>
         </div>
       </div>
@@ -218,11 +253,11 @@ function DebtSnapshotCard({ homeContext, onGoToDebts }) {
   if (!debtSnapshot) return null;
 
   return (
-    <Card variant="default" style={{ padding: 24 }}>
+    <Card variant="default" style={{ padding: 24, borderLeft: `3px solid ${ttzPalette.ac}` }}>
       <div style={{ display: "grid", gap: 12 }}>
-        <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Your debts</div>
+        <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.ac }}>Your debts</div>
         <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>{debtSnapshot.activeLabel}</div>
-        <div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.tx }}>{money(debtSnapshot.remainingDebt)} remaining</div>
+        <div style={{ ...moneySmStyle, fontSize: 20 }}>{money(debtSnapshot.remainingDebt)} <span style={{ ...TYPE_SCALE.supporting, color: ttzPalette.tx2, fontWeight: 500 }}>remaining</span></div>
         <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>
           {debtSnapshot.highestKnownApr != null
             ? `Highest known APR: ${formatPercent(debtSnapshot.highestKnownApr)}`
@@ -463,11 +498,11 @@ function HouseholdBreakdownCard({ homeContext, onGoToDebts }) {
   const allUnassignedOnly = items.length === 1 && items[0].type === "unassigned";
 
   return (
-    <Card variant="default" style={{ padding: 24 }}>
+    <Card variant="default" style={{ padding: 24, borderLeft: `3px solid ${ttzPalette.in}` }}>
       <div style={{ display: "grid", gap: 16 }}>
         <div>
-          <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Household snapshot</div>
-          <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 6 }}>Included payoff debt by owner. Joint debt is counted once.</div>
+          <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Debt by owner</div>
+          <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 6 }}>Included payoff debt for each verified household member. Joint debt is counted once.</div>
         </div>
 
         {allUnassignedOnly ? (
@@ -484,7 +519,7 @@ function HouseholdBreakdownCard({ homeContext, onGoToDebts }) {
               <div key={`${item.type}-${item.uid || item.displayName}`} style={{ display: "grid", gap: 6 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                   <span style={{ ...TYPE_SCALE.body, color: ttzPalette.tx }}>{item.displayName}</span>
-                  <span style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 700 }}>{money(item.totalDebt)}</span>
+                  <span style={{ ...moneySmStyle, fontSize: 15 }}>{money(item.totalDebt)}</span>
                 </div>
                 <div style={{ height: 10, borderRadius: 999, background: ttzPalette.surf2, overflow: "hidden" }}>
                   <div
@@ -517,11 +552,11 @@ function MomentumCard({ homeContext }) {
   }
 
   return (
-    <Card variant="default" style={{ padding: 24 }}>
+    <Card variant="default" style={{ padding: 24, borderLeft: `3px solid ${ttzPalette.border2}` }}>
       <div style={{ display: "grid", gap: 14 }}>
         <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Momentum</div>
         <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>{momentum.headline}</div>
-        <div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.ac }}>{money(momentum.eliminated || 0)} eliminated</div>
+        <div style={{ ...moneySmStyle, fontSize: 18, color: ttzPalette.ac }}>{money(momentum.eliminated || 0)} <span style={{ ...TYPE_SCALE.supporting, color: ttzPalette.tx2, fontWeight: 500 }}>eliminated</span></div>
         <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>{momentum.supporting || `Latest confirmed movement: ${movementCopy}`}</div>
       </div>
     </Card>
@@ -587,24 +622,40 @@ function WhatIfCard({ homeContext, onTryWhatIf }) {
 }
 
 function ReviewSummaryCard({ homeContext, onGoToReview }) {
-  if (!homeContext.openReviewCount) return null;
+  if (!homeContext.openReviewCount && !homeContext.staleBatchCount) return null;
+  if (homeContext.staleBatchCount > 0 && !homeContext.openReviewCount) {
+    return (
+      <Card variant="default" style={{ padding: 20, borderLeft: `4px solid ${toneColors(ttzPalette).warning.fg}` }}>
+        <div style={{ display: "grid", gap: 10 }}>
+          <div style={{ ...TYPE_SCALE.overline, color: toneColors(ttzPalette).warning.fg }}>Import review</div>
+          <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>
+            {homeContext.staleBatchCount} older import{homeContext.staleBatchCount === 1 ? "" : "s"} need{homeContext.staleBatchCount === 1 ? "s" : ""} to be restarted.
+          </div>
+          <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>
+            These were created before the latest review model. Re-open Review to start fresh with today&apos;s import rules.
+          </div>
+          <Button variant="secondary" onClick={onGoToReview}>Open review</Button>
+        </div>
+      </Card>
+    );
+  }
   const tone = homeContext.blockingReviewCount > 0 ? "warning" : "info";
   const colors = toneColors(ttzPalette)[tone];
   return (
-    <Card variant="default" style={{ padding: 20, borderLeft: `4px solid ${colors.fg}` }}>
+    <Card variant="default" style={{ padding: 20, borderLeft: `4px solid ${colors.fg}`, background: tone === "warning" ? colors.bg : ttzPalette.surf }}>
       <div style={{ display: "grid", gap: 10 }}>
-        <div style={{ ...TYPE_SCALE.overline, color: colors.fg }}>Needs attention</div>
+        <div style={{ ...TYPE_SCALE.overline, color: colors.fg }}>Import review</div>
         <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>
           {homeContext.blockingReviewCount > 0
-            ? `${homeContext.blockingReviewCount} item${homeContext.blockingReviewCount === 1 ? "" : "s"} need a quick review.`
-            : `${homeContext.openReviewCount} item${homeContext.openReviewCount === 1 ? "" : "s"} need a quick review.`}
+            ? `${homeContext.blockingReviewCount} decision${homeContext.blockingReviewCount === 1 ? "" : "s"} affect${homeContext.blockingReviewCount === 1 ? "s" : ""} your payoff plan.`
+            : `${homeContext.openReviewCount} import decision${homeContext.openReviewCount === 1 ? "" : "s"} still need${homeContext.openReviewCount === 1 ? "s" : ""} your input.`}
         </div>
         <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>
           {homeContext.blockingReviewCount > 0
             ? "Clean these up to keep your payoff plan accurate."
             : "Clean these up to keep your payoff picture accurate."}
         </div>
-        <Button variant="secondary" onClick={onGoToReview}>Review now</Button>
+        <Button variant="secondary" onClick={onGoToReview}>Open review</Button>
       </div>
     </Card>
   );
@@ -621,18 +672,23 @@ function ProjectionFootnote() {
 function NoActivePlanState({ homeContext, onCompareStrategies, onAddDebt, onGoToReview, onGoToDebts }) {
   return (
     <div style={{ display: "grid", gap: GAP }}>
-      <DebtFreedomHero homeContext={homeContext} />
-
-      <div style={gridColumns(280)}>
-        <Card variant="default" style={{ padding: 24 }}>
+      <div style={gridColumns(320)}>
+        <Card variant="elevated" style={{ padding: 28 }}>
           <div style={{ display: "grid", gap: 14 }}>
-            <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Pick your payoff path</div>
-            <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>No active payoff plan</div>
-            <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>
-              Compare Snowball and Avalanche with your current debts, then pick the payoff path you want to follow.
+            <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.ac }}>Your next move</div>
+            <div style={{ ...TYPE_SCALE.pageTitle, color: ttzPalette.tx, fontSize: 28 }}>
+              You have {money(homeContext.totalDebt)} in confirmed debt.
             </div>
+            <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>
+              Choose a payoff strategy to see which debt to target first, your projected $0 date, and the payoff order TrackToZero would use.
+            </div>
+            <ul style={{ margin: 0, paddingLeft: 18, color: ttzPalette.tx2, display: "grid", gap: 6 }}>
+              <li>Which debt to target first</li>
+              <li>Your projected debt-free date</li>
+              <li>Your payoff order across every included debt</li>
+            </ul>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <Button variant="primary" onClick={onCompareStrategies}>Compare strategies</Button>
+              <Button variant="primary" onClick={onCompareStrategies}>Compare Snowball vs Avalanche</Button>
               <Button variant="secondary" onClick={onAddDebt}>Add debt</Button>
             </div>
           </div>
@@ -640,10 +696,10 @@ function NoActivePlanState({ homeContext, onCompareStrategies, onAddDebt, onGoTo
 
         <Card variant="default" style={{ padding: 24 }}>
           <div style={{ display: "grid", gap: 14 }}>
-            <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>This month</div>
-            <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>No monthly payoff target yet.</div>
+            <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>What Home will unlock</div>
+            <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>No active payoff plan yet.</div>
             <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>
-              Once you choose a plan, we'll show what your plan expects this month, what you've recorded, and your next move.
+              Once you choose a plan, Home will show your monthly target, what you&apos;ve recorded, and your next step without guessing.
             </div>
           </div>
         </Card>
@@ -660,18 +716,22 @@ function NoActivePlanState({ homeContext, onCompareStrategies, onAddDebt, onGoTo
 
         <Card variant="default" style={{ padding: 24 }}>
           <div style={{ display: "grid", gap: 12 }}>
-            <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Needs attention</div>
+            <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Import review</div>
             <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>
-              {homeContext.openReviewCount > 0
-                ? `${homeContext.openReviewCount} item${homeContext.openReviewCount === 1 ? "" : "s"} need a quick review.`
+              {homeContext.staleBatchCount > 0
+                ? `${homeContext.staleBatchCount} older import${homeContext.staleBatchCount === 1 ? "" : "s"} need${homeContext.staleBatchCount === 1 ? "s" : ""} a fresh start.`
+                : homeContext.openReviewCount > 0
+                ? `${homeContext.openReviewCount} import decision${homeContext.openReviewCount === 1 ? "" : "s"} still need${homeContext.openReviewCount === 1 ? "s" : ""} review.`
                 : `${homeContext.debtCount} debt${homeContext.debtCount === 1 ? "" : "s"} tracked.`}
             </div>
             <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>
-              {homeContext.openReviewCount > 0
+              {homeContext.staleBatchCount > 0
+                ? "Older spreadsheet review data is no longer trustworthy under the current classifier."
+                : homeContext.openReviewCount > 0
                 ? "Clean these up to keep your payoff picture accurate."
                 : "You're ready to compare payoff strategies and choose your plan."}
             </div>
-            {homeContext.openReviewCount > 0 ? <Button variant="secondary" onClick={onGoToReview}>Review now</Button> : null}
+            {(homeContext.openReviewCount > 0 || homeContext.staleBatchCount > 0) ? <Button variant="secondary" onClick={onGoToReview}>Open review</Button> : null}
           </div>
         </Card>
 

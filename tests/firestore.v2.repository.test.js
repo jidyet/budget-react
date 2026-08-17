@@ -435,6 +435,57 @@ test("DATA-1 HOTFIX: a realistic workbook's DATA-1A discovery output persists th
   assert.equal(business.includedInCorePayoffPlan, false);
 });
 
+test("DIAGNOSTIC: fresh import + getReviewSnapshot succeed against real Firestore when a stale legacy-shaped ImportBatch already exists", async () => {
+  await seedBaseWorkspace();
+  // Reproduces the exact persisted-batch shape reported as stale in UX-8.1
+  // (classifierVersion/schemaVersion/sourceHash entirely absent - an older
+  // ImportBatch written before those metadata fields existed at all).
+  await repoAs("admin").saveImportBatch({
+    id: "stale-batch-1",
+    workspaceId: "w1",
+    createdBy: "admin",
+    createdAt: now(),
+    status: "review_required",
+    candidateCount: 53,
+    confirmedCount: 0,
+    rejectedCount: 0,
+    duplicateCount: 0,
+    warnings: [],
+    metadata: { parserVersion: "1" },
+    candidates: [sampleCandidate({ candidateId: "stale-c1", accountName: "HOUSEHOLD" })],
+    sourceType: "excel",
+    sourceFilename: "Household_Budget_2026_v27 - Copy.xlsx",
+  });
+
+  const service = createTrackToZeroV2AsyncAppService({ repository: repoAs("admin"), actorId: "admin", asOf: now().toISOString() });
+
+  // getReviewSnapshot must not throw with a legacy-shaped stale batch present.
+  const snapshotBefore = await service.getReviewSnapshot("w1");
+  assert.equal(snapshotBefore.staleBatchCount, 1, "the legacy batch must be recognized as stale");
+  assert.equal(snapshotBefore.openCount, 0, "the stale batch's candidates must not pollute fresh open counts");
+
+  const { candidates } = discoverWorkbookDebtCandidates({
+    workbook: buildRealisticWorkbook(), XLSX, fileName: "Household_Budget_2026_v27 - Copy.xlsx", importBatchId: "batch",
+  });
+
+  // The exact call ImportCenter.jsx's "Analyze file" button makes - must
+  // succeed even with the stale legacy batch already persisted.
+  const freshBatch = await service.createImportBatch("w1", {
+    sourceType: "excel", sourceFilename: "Household_Budget_2026_v27 - Copy.xlsx", candidates, warnings: [],
+  });
+  assert.equal(freshBatch.status, "review_required");
+  assert.ok(freshBatch.candidates.length > 0);
+
+  // Part 4 requirement: analyzing a file (creating a review-only ImportBatch)
+  // must never itself create authoritative financial records - "Nothing was
+  // changed" until the user explicitly confirms candidates and commits.
+  assert.deepEqual(await repoAs("admin").listDebts("w1"), [], "analyze must not create any Debt");
+
+  const snapshotAfter = await service.getReviewSnapshot("w1");
+  assert.equal(snapshotAfter.staleBatchCount, 1, "the old stale batch remains, untouched");
+  assert.equal(snapshotAfter.openCount, freshBatch.candidates.length, "only the fresh batch's candidates count as open review items");
+});
+
 test("plan + planVersion: admin can write, viewer can read, contributor cannot write", async () => {
   await seedBaseWorkspace();
   const plan = await repoAs("admin").savePlan({ id: "p1", workspaceId: "w1", status: "draft", createdAt: now(), createdBy: "admin" });

@@ -101,14 +101,14 @@ describe("REVIEW-1B: HomeQuickCheck", () => {
 
   it("shows the open count and, when relevant, the blocking line", () => {
     const html = render(h(HomeQuickCheck, { openCount: 2, blockingCount: 1, onGoToReview: () => {} }));
-    expect(html).toContain("2 things need your attention");
-    expect(html).toContain("fully trust your plan");
-    expect(html).toContain("Review them");
+    expect(html).toContain("2 import decisions still need your input");
+    expect(html).toContain("affects your payoff plan");
+    expect(html).toContain("Open review");
   });
 
   it("omits the blocking line when nothing is blocking", () => {
     const html = render(h(HomeQuickCheck, { openCount: 2, blockingCount: 0, onGoToReview: () => {} }));
-    expect(html).not.toContain("fully trust your plan");
+    expect(html).not.toContain("affect your payoff plan");
   });
 });
 
@@ -137,7 +137,7 @@ describe("REVIEW-1C: ReviewCenter (batch session)", () => {
       reviewSnapshot: { openItems: [openItem], resolvedItems: [], openCount: 1, blockingCount: 1 },
       loadingReview: false, onRefreshReview: async () => {},
     }));
-    expect(html).toContain("1 thing needs a quick check");
+    expect(html).toContain("1 import decision still needs your input");
     expect(html).toContain("Firstmark Services");
     expect(html).toContain("Item 1 of 1");
     expect(html).toContain("0 ready");

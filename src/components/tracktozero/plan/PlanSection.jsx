@@ -16,6 +16,7 @@ import { presentedOwnerLabel } from "../../../domain/tracktozero/ownership.js";
 import { deriveDebtsAwaitingReforecast } from "../../../services/tracktozero/projectionStatusService.js";
 import { PLAN_DESTINATIONS, resolvePlanDestination, buildPlanPath, navigateToPlanDestination } from "./planRouting.js";
 import { getWorkspacePresentation } from "../workspacePresentation.js";
+import { describeStrategyComparison } from "./strategyComparisonSummary.js";
 
 const GAP = "var(--ttz-space-4, 16px)";
 
@@ -457,9 +458,6 @@ function CompareStrategiesView({ snapshot, service }) {
 
   if (!result) return <LoadingState label="Comparing strategies" />;
 
-  const interestSavings = (result.snowball.estimatedInterest || 0) - (result.avalanche.estimatedInterest || 0);
-  const snowballFaster = (result.snowball.monthsToZero || 0) < (result.avalanche.monthsToZero || 0);
-
   return (
     <div style={{ display: "grid", gap: GAP }}>
       <Card variant="default">
@@ -480,9 +478,7 @@ function CompareStrategiesView({ snapshot, service }) {
       </div>
 
       <InfoCallout>
-        {snowballFaster
-          ? `Snowball is projected to reach $0 in ${result.snowball.monthsToZero} months, while Avalanche is ${result.avalanche.monthsToZero}. This tradeoff is about momentum vs interest savings.`
-          : `Avalanche is projected to save about ${money(Math.abs(interestSavings))} in interest and finish in ${result.avalanche.monthsToZero} months.`}
+        {describeStrategyComparison({ snowball: result.snowball, avalanche: result.avalanche })}
       </InfoCallout>
     </div>
   );

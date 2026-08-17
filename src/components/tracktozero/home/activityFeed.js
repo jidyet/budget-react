@@ -18,7 +18,7 @@
  */
 
 import { formatMoney, formatShortDate } from "../formatting.js";
-import { resolveActorName } from "../../../domain/tracktozero/ownership.js";
+import { presentedOwnerLabel, resolveActorName } from "../../../domain/tracktozero/ownership.js";
 
 const PLAN_VERSION_COPY = {
   activation: "Payoff plan activated",
@@ -47,6 +47,10 @@ export const deriveActivityFeed = (
 ) => {
   const debtById = new Map(debts.map((debt) => [debt.id, debt]));
   const actorName = (uid) => resolveActorName(uid, { members, people });
+  const ownerName = (debt) => {
+    const label = presentedOwnerLabel(debt);
+    return label && label !== "Unassigned" ? label : "";
+  };
   const entries = [];
 
   for (const debt of debts) {
@@ -59,6 +63,7 @@ export const deriveActivityFeed = (
       title: `${debt.name} added`,
       detail: `Starting balance ${formatMoney(debt.startingBalance)}`,
       actorName: actorName(debt.createdBy),
+      ownerName: ownerName(debt),
       dateLabel: formatShortDate(debt.createdAt),
     });
   }
@@ -78,6 +83,7 @@ export const deriveActivityFeed = (
       title: `${debt?.name || "A debt"} balance confirmed`,
       detail: formatMoney(snapshot.balance),
       actorName: actorName(snapshot.createdBy),
+      ownerName: ownerName(debt),
       dateLabel: formatShortDate(snapshot.observedAt),
     });
   }
@@ -93,6 +99,7 @@ export const deriveActivityFeed = (
       title: `${debt?.name || "A debt"} payment recorded`,
       detail: formatMoney(event.amount),
       actorName: actorName(event.createdBy),
+      ownerName: ownerName(debt),
       dateLabel: formatShortDate(event.paidAt),
     });
   }
@@ -117,6 +124,7 @@ export const deriveActivityFeed = (
       title: PLAN_VERSION_COPY[reason] || "Plan updated",
       detail,
       actorName: actorName(version.createdBy),
+      ownerName: "",
       dateLabel: formatShortDate(version.asOf || version.createdAt),
     });
   }

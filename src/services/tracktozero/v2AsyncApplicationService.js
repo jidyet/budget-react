@@ -27,12 +27,21 @@ import {
   getActionableOpenCount,
   getBlockingReviewCount,
   getDeferredBlockingCount,
+  getFreshReviewBatches,
   getOpenReviewCount,
   getOpenReviewItems,
   getResolvedReviewItems,
   getReviewCountsByType,
+  getStaleImportSummaries,
   sortOpenReviewItems,
 } from "./reviewDomain.js";
+import {
+  createImportBatchMetadata,
+  IMPORT_BATCH_CLASSIFIER_VERSION,
+  IMPORT_BATCH_PARSER_VERSION,
+  IMPORT_BATCH_SCHEMA_VERSION,
+  isStaleImportBatch,
+} from "./importBatchVersioning.js";
 import { OWNER_TYPES, SCENARIO_TYPES } from "../../domain/tracktozero/constants.js";
 import { FRIENDLY_SAVE_FAILURE, FRIENDLY_STALE_MESSAGE } from "./reviewCopy.js";
 
@@ -790,7 +799,21 @@ export const createTrackToZeroV2AsyncAppService = ({
     return context;
   };
 
-  const createImportBatch = async (workspaceId, { sourceType, sourceFilename = "", candidates = [], warnings = [], parserVersion = "1", nonDebtItems = [], scanSummary = {} } = {}) => {
+  const createImportBatch = async (
+    workspaceId,
+    {
+      sourceType,
+      sourceFilename = "",
+      candidates = [],
+      warnings = [],
+      parserVersion = IMPORT_BATCH_PARSER_VERSION,
+      classifierVersion = IMPORT_BATCH_CLASSIFIER_VERSION,
+      schemaVersion = IMPORT_BATCH_SCHEMA_VERSION,
+      sourceHash = "",
+      nonDebtItems = [],
+      scanSummary = {},
+    } = {}
+  ) => {
     assertInteractive();
     const { workspace, membership, members, people } = await getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot import debts into this workspace.");
@@ -844,7 +867,7 @@ export const createTrackToZeroV2AsyncAppService = ({
       // Import Review's "not debt" callout even across the existing
       // resumable-import reload flow, instead of only living in transient
       // React state and vanishing on resume.
-      metadata: { parserVersion, nonDebtItems, scanSummary },
+      metadata: createImportBatchMetadata({ parserVersion, classifierVersion, schemaVersion, sourceHash, nonDebtItems, scanSummary }),
       candidates: reconciledCandidates.map((candidate) => ({ ...candidate, importBatchId: batchId, workspaceId })),
     });
   };
@@ -866,6 +889,26 @@ export const createTrackToZeroV2AsyncAppService = ({
       rejectedCount: candidates.filter((c) => c.decision === "excluded").length,
       updatedAt: asOf,
       updatedBy: actorId,
+    });
+  };
+
+  const dismissStaleImportBatch = async (workspaceId, batchId) => {
+    assertInteractive();
+    const { membership } = await getWorkspaceContext(workspaceId);
+    if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot manage imports in this workspace.");
+    const batch = await repository.getImportBatch(workspaceId, batchId);
+    if (!batch) throw new Error("Import batch not found");
+    if (!isStaleImportBatch(batch)) throw new Error("Only stale import batches can be dismissed this way.");
+    return repository.saveImportBatch({
+      ...batch,
+      status: "cancelled",
+      updatedAt: asOf,
+      updatedBy: actorId,
+      metadata: {
+        ...(batch.metadata || {}),
+        staleDismissedAt: asOf,
+        staleDismissedBy: actorId,
+      },
     });
   };
 
@@ -1433,17 +1476,22 @@ export const createTrackToZeroV2AsyncAppService = ({
   const getReviewSnapshot = async (workspaceId) => {
     await getWorkspaceContext(workspaceId);
     const batches = await (repository.listImportBatches?.(workspaceId) || []);
+    const reviewBatches = getFreshReviewBatches(batches);
+    const staleBatches = getStaleImportSummaries(batches);
     return {
-      openItems: sortOpenReviewItems(getOpenReviewItems(batches)),
-      resolvedItems: getResolvedReviewItems(batches),
-      openCount: getOpenReviewCount(batches),
-      blockingCount: getBlockingReviewCount(batches),
+      openItems: sortOpenReviewItems(getOpenReviewItems(reviewBatches)),
+      resolvedItems: getResolvedReviewItems(reviewBatches),
+      openCount: getOpenReviewCount(reviewBatches),
+      blockingCount: getBlockingReviewCount(reviewBatches),
       // REVIEW-1C: actionableCount excludes items the user already chose to
       // defer - the ONE source the nav badge and batch-review progress both
       // read from, so they can never disagree (Part 32).
-      actionableCount: getActionableOpenCount(batches),
-      deferredBlockingCount: getDeferredBlockingCount(batches),
-      countsByType: getReviewCountsByType(batches),
+      actionableCount: getActionableOpenCount(reviewBatches),
+      deferredBlockingCount: getDeferredBlockingCount(reviewBatches),
+      countsByType: getReviewCountsByType(reviewBatches),
+      staleBatches,
+      staleBatchCount: staleBatches.length,
+      staleCandidateCount: staleBatches.reduce((sum, batch) => sum + Number(batch.candidateCount || 0), 0),
     };
   };
 
@@ -2007,6 +2055,7 @@ export const createTrackToZeroV2AsyncAppService = ({
       await getWorkspaceContext(workspaceId);
       return repository.getImportBatch(workspaceId, batchId);
     },
+    dismissStaleImportBatch,
     decideImportCandidate,
     resolveImportCandidateMatch,
     commitImportBatch,

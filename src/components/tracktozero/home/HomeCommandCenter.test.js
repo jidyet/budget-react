@@ -119,7 +119,7 @@ describe("UX-2.1 Home redesign", () => {
       },
       reviewSnapshot: { openCount: 0, blockingCount: 0 },
     }));
-    expect(noPlanHtml).toContain("Choose a plan");
+    expect(noPlanHtml).toContain("You have $3,300.00 in confirmed debt.");
     expect(noPlanHtml).toContain("2 active debts");
     expect(noPlanHtml).toContain("Your debt trend");
   });
@@ -144,8 +144,8 @@ describe("UX-2.1 Home redesign", () => {
       portfolioSummary: { totalWorkspaceDebt: 1000, includedDebt: 1000 },
     };
     const html = render(h(HomeCommandCenter, { ...baseProps, snapshot, reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
-    expect(html).toContain("No active payoff plan");
-    expect(html).toContain("Compare strategies");
+    expect(html).toContain("Your next move");
+    expect(html).toContain("Compare Snowball vs Avalanche");
     expect(html).not.toContain("Current target");
   });
 
@@ -192,7 +192,7 @@ describe("UX-2.1 Home redesign", () => {
       },
     });
     const html = render(h(HomeCommandCenter, { ...baseProps, snapshot, reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
-    expect(html).toContain("Household snapshot");
+    expect(html).toContain("Debt by owner");
     expect(html).toContain("Kristina");
     expect(html).toContain("Babajide");
     expect(html).toContain("Joint");
@@ -285,4 +285,42 @@ describe("UX-2.1 Home redesign", () => {
     expect(resultHtml).toContain("4 months sooner");
     expect(resultHtml).toContain("$120.50 less interest");
   });
+});
+
+describe("UX-8.1: Home money typography handles the full realistic range without throwing", () => {
+  // Each case drives progress.openingBalance/latestBalance/eliminated and the
+  // primary "debt remaining" figure through a real, differently-scaled debt -
+  // proves the tabular-nums/body-font/clamp() treatment (HomeCommandCenter's
+  // responsiveMetricValueStyle/responsiveHeroValueStyle/moneySmStyle) renders
+  // every amount from $0 up through seven figures without an exception, and
+  // that formatMoney's exact output text is present (never truncated/NaN).
+  const amounts = [0, 999.99, 17434.45, 999999.99, 1234567.89];
+
+  for (const opening of amounts) {
+    it(`renders cleanly with a starting balance of ${opening}`, () => {
+      const latest = opening > 0 ? Math.round(opening * 0.6 * 100) / 100 : 0;
+      const snapshot = activePlanSnapshot({
+        debts: [debt({ currentBalance: opening })],
+        includedDebts: [debt({ currentBalance: opening })],
+        latestSnapshotsByDebt: { d1: { balance: latest, observedAt: "2026-08-01T00:00:00.000Z" } },
+        activeContext: {
+          version: {
+            id: "v1",
+            startingDebtSnapshot: [startingItem("d1", opening)],
+            strategy: "avalanche",
+            extraMonthlyPayment: 100,
+            asOf: "2026-07-01T00:00:00.000Z",
+          },
+        },
+        portfolioSummary: { totalWorkspaceDebt: opening, includedDebt: opening, excludedDebt: 0 },
+      });
+      const html = render(h(HomeCommandCenter, { ...baseProps, snapshot, reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
+      const expectedOpening = opening.toLocaleString("en-US", { style: "currency", currency: "USD" });
+      const expectedLatest = latest.toLocaleString("en-US", { style: "currency", currency: "USD" });
+      expect(html).toContain(expectedOpening);
+      expect(html).toContain(expectedLatest);
+      // Never falls back to a raw/NaN/undefined render for any of these amounts.
+      expect(html).not.toMatch(/NaN|undefined|\[object/);
+    });
+  }
 });

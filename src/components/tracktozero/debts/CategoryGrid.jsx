@@ -64,7 +64,7 @@ function CategoryTile({ entry, breakdown, onSelect }) {
           >
             <Icon size={20} aria-hidden="true" />
           </span>
-          {breakdown.reviewCount > 0 ? <Badge tone="warning">{breakdown.reviewCount} needs review</Badge> : null}
+          {breakdown.reviewCount > 0 ? <Badge tone="warning">{breakdown.reviewCount} need attention</Badge> : null}
         </div>
         <div>
           <div style={{ ...TYPE_SCALE.cardTitle, color: palette.tx }}>{entry.label}</div>

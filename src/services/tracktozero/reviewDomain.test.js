@@ -8,15 +8,18 @@ import {
   evaluateReviewSignals,
   flattenReviewItems,
   getBlockingReviewCount,
+  getFreshReviewBatches,
   getOpenReviewCount,
   getOpenReviewItems,
   getReviewCountsByType,
   getReviewItemStatus,
+  getStaleImportSummaries,
   isDebtStale,
   isReviewBlocking,
   sortOpenReviewItems,
   toReviewItem,
 } from "./reviewDomain.js";
+import { createImportBatchMetadata } from "./importBatchVersioning.js";
 import { parseStatement } from "../adapters/statementTextExtraction.js";
 import { statementResultToCandidate } from "../adapters/statementCandidateAdapter.js";
 import { US_BANK_CASH_PLUS_STATEMENT_TEXT } from "../adapters/__fixtures__/usBankCashPlusStatement.fixture.js";
@@ -240,6 +243,38 @@ describe("REVIEW-1A shared selectors (Part 9) - ONE source of review truth", () 
     ]);
     expect(items.find((item) => item.importCandidateId === "a").workspaceId).toBe("workspace-a");
     expect(items.find((item) => item.importCandidateId === "b").workspaceId).toBe("workspace-b");
+  });
+
+  it("stale excel review batches are excluded from live review counts and summarized separately", () => {
+    const staleExcel = batch(
+      [candidate({ candidateId: "stale-household", balanceStatus: "unresolved", currentBalance: 0, accountName: "HOUSEHOLD" })],
+      {
+        id: "stale-batch",
+        sourceType: "excel",
+        sourceFilename: "old.xlsx",
+        status: "review_required",
+        metadata: createImportBatchMetadata({
+          parserVersion: "1",
+          classifierVersion: "review-1",
+          schemaVersion: "0",
+        }),
+      }
+    );
+    const freshPdf = batch(
+      [candidate({ candidateId: "fresh-open", balanceStatus: "unresolved", currentBalance: 0 })],
+      {
+        id: "fresh-batch",
+        sourceType: "pdf",
+        status: "review_required",
+        metadata: createImportBatchMetadata(),
+      }
+    );
+    expect(getFreshReviewBatches([staleExcel, freshPdf]).map((item) => item.id)).toEqual(["fresh-batch"]);
+    expect(getOpenReviewCount([staleExcel, freshPdf])).toBe(1);
+    expect(getBlockingReviewCount([staleExcel, freshPdf])).toBe(1);
+    expect(getStaleImportSummaries([staleExcel, freshPdf])).toMatchObject([
+      { id: "stale-batch", sourceFilename: "old.xlsx", candidateCount: 1, parserVersion: "1" },
+    ]);
   });
 });
 

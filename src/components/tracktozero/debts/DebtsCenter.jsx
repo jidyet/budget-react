@@ -16,6 +16,16 @@ import { useIsTablet } from "../useViewport.js";
 // CategoryDetailPage, mirroring PlanSection.jsx's own pushState-based
 // sub-routing pattern (destination state + popstate listener) rather than
 // adding a router dependency.
+//
+// UX-6.2: the caller (TrackToZeroV2App.jsx) renders this with
+// `key={snapshot.workspace?.id}` - a real remount (not a useEffect reset) on
+// workspace switch. Without it, ownerFilter/destination (and any open Add
+// Debt/Import panel) silently carried over from one workspace into another -
+// e.g. an owner-scope filter set to a specific household member's uid stayed
+// set after switching to Personal (or a different household) where that uid
+// is meaningless, producing an empty/wrong category page with no visible
+// cause. A full remount is simpler and more robust than manually resetting
+// each piece of local state, and correctly closes any open modal too.
 export default function DebtsCenter({ snapshot, service, refresh, refreshReview, runAction, writeState, reviewSnapshot, onGoToReview }) {
   const [destination, setDestination] = useState(() => resolveDebtsDestination(typeof window !== "undefined" ? window.location.pathname : "/debts"));
   const [ownerFilter, setOwnerFilter] = useState("all");
@@ -31,6 +41,7 @@ export default function DebtsCenter({ snapshot, service, refresh, refreshReview,
     syncDestination();
     return () => window.removeEventListener("popstate", syncDestination);
   }, []);
+
 
   const navigate = (nextDestination) => {
     const path = buildDebtsPath(nextDestination);
@@ -87,6 +98,7 @@ export default function DebtsCenter({ snapshot, service, refresh, refreshReview,
     <>
       <PortfolioHeader
         portfolio={portfolio}
+        workspace={snapshot.workspace}
         canManage={canManage}
         onAddDebt={() => setAddDebtOpen(true)}
         onImportStatement={() => setImportOpen(true)}

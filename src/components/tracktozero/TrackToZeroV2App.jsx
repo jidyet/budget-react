@@ -16,6 +16,7 @@ import AppShell from "./layout/AppShell.jsx";
 import PageContainer from "./layout/PageContainer.jsx";
 import QaHarnessControls from "./layout/QaHarnessControls.jsx";
 import StatusBadge from "./ui/StatusBadge.jsx";
+import Badge from "./ui/Badge.jsx";
 import ReviewCenter from "./review/ReviewCenter.jsx";
 import HomeCommandCenter from "./home/HomeCommandCenter.jsx";
 import PlanSection from "./plan/PlanSection.jsx";
@@ -504,7 +505,14 @@ function Settings({ snapshot, repositoryMode, service, refresh, runAction, write
         </div>
         <div>
           <h3>Members</h3>
-          <ul>{snapshot.members.map((member) => <li key={member.uid}>{member.displayName || member.uid} · {member.role}</li>)}</ul>
+          <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 8 }}>
+            {snapshot.members.map((member) => (
+              <li key={member.uid} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span>{member.displayName || member.uid} · {member.role}</span>
+                <Badge tone="success">Verified member</Badge>
+              </li>
+            ))}
+          </ul>
         </div>
         <div>
           <h3>Privacy note</h3>
@@ -583,8 +591,13 @@ function Settings({ snapshot, repositoryMode, service, refresh, runAction, write
                 <div style={{ display: "grid", gap: 12 }}>
                   {snapshot.memberInvites.map((invite) => (
                     <article key={invite.id} style={{ border: "1px solid #d7e7f5", borderRadius: 16, padding: 12, background: "#fff" }}>
-                      <p style={{ margin: 0, fontWeight: 800 }}>{invite.emailNormalized}</p>
-                      <p style={{ margin: "6px 0", color: "#4d6a82" }}>{invite.role} · {invite.derivedStatus} · expires {new Date(invite.expiresAt).toLocaleDateString()}</p>
+                      <p style={{ margin: 0, fontWeight: 800, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        {invite.emailNormalized}
+                        <Badge tone={invite.derivedStatus === "pending" ? "warning" : invite.derivedStatus === "accepted" ? "success" : "neutral"}>
+                          {invite.derivedStatus === "pending" ? "Pending invitation" : invite.derivedStatus === "accepted" ? "Accepted" : invite.derivedStatus === "canceled" ? "Canceled" : "Expired"}
+                        </Badge>
+                      </p>
+                      <p style={{ margin: "6px 0", color: "#4d6a82" }}>{invite.role} · expires {new Date(invite.expiresAt).toLocaleDateString()}</p>
                       {invite.derivedStatus === "pending" ? (
                         <button
                           type="button"
@@ -609,8 +622,11 @@ function Settings({ snapshot, repositoryMode, service, refresh, runAction, write
                 <div style={{ display: "grid", gap: 12 }}>
                   {unlinkedPeople.map((person) => (
                     <article key={person.id} style={{ border: "1px solid #d7e7f5", borderRadius: 16, padding: 12, background: "#fff" }}>
-                      <p style={{ margin: 0, fontWeight: 800 }}>{person.displayName}</p>
-                      <p style={{ margin: "6px 0", color: "#4d6a82" }}>This financial profile is still separate from a member account.</p>
+                      <p style={{ margin: 0, fontWeight: 800, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        {person.displayName}
+                        <Badge tone="neutral">Financial profile</Badge>
+                      </p>
+                      <p style={{ margin: "6px 0", color: "#4d6a82" }}>Not connected to a TrackToZero account.</p>
                       {canManageMembers ? (
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                           <select
@@ -742,6 +758,7 @@ export default function TrackToZeroV2App() {
   const [authForm, setAuthForm] = useState({ mode: "signup", email: "", password: "" });
   const [authBusy, setAuthBusy] = useState(false);
   const [workspaceId, setWorkspaceId] = useState(usesRealAuthUi ? "" : "personal-seed");
+  const lastWorkspaceIdRef = useRef(workspaceId);
   const [actorId, setActorId] = useState(usesRealAuthUi ? "" : V2_TEST_ACTOR_ID);
   const [tab, setTab] = useState("home");
   const [scenario, setScenario] = useState(null);
@@ -1030,6 +1047,24 @@ export default function TrackToZeroV2App() {
     };
   }, [refresh, refreshReview, workspaceId]);
 
+  // UX-6.2: a genuine workspace SWITCH (not the initial mount) resets a
+  // stale /debts/<category> URL back to the portfolio root - DebtsCenter
+  // remounts via `key={snapshot.workspace?.id}` on switch (resetting its own
+  // local ownerFilter/destination state), but a full remount alone still
+  // reads whatever the CURRENT URL says, so a category slug left over from
+  // the previous workspace would otherwise reopen (showing an empty/wrong
+  // category) instead of the portfolio grid. Guarded on lastWorkspaceIdRef
+  // so this never fights the intentional refresh-safe direct-navigation
+  // behavior on first page load (e.g. opening a bookmarked /debts/mortgage
+  // link should still resolve to that category, not bounce to "/debts").
+  useEffect(() => {
+    if (lastWorkspaceIdRef.current === workspaceId) return;
+    lastWorkspaceIdRef.current = workspaceId;
+    if (typeof window !== "undefined" && window.location.pathname.startsWith("/debts") && window.location.pathname !== "/debts") {
+      window.history.pushState({}, "", "/debts");
+    }
+  }, [workspaceId]);
+
   // UX-4.1/UX-6.1: the top-level tab was never synced with the URL, so a
   // fresh load or refresh at /plan/<destination> (or /debts/<category>)
   // silently rendered Home instead (tab defaults to "home" and never reads
@@ -1252,7 +1287,7 @@ export default function TrackToZeroV2App() {
             onRefreshReview={() => Promise.all([refreshReview(workspaceId), refresh(workspaceId)])}
           />
         )}
-        {tab === "debts" && <DebtsCenter snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} refreshReview={() => refreshReview(workspaceId)} runAction={runAction} writeState={writeState} reviewSnapshot={reviewState.snapshot} onGoToReview={() => navigateTab("review")} />}
+        {tab === "debts" && <DebtsCenter key={snapshot.workspace?.id} snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} refreshReview={() => refreshReview(workspaceId)} runAction={runAction} writeState={writeState} reviewSnapshot={reviewState.snapshot} onGoToReview={() => navigateTab("review")} />}
         {tab === "plan" && <Plan snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} />}
         {tab === "settings" && <Settings snapshot={snapshot} repositoryMode={runtime.mode} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} latestInvite={latestInvite} setLatestInvite={setLatestInvite} />}
       </PageContainer>

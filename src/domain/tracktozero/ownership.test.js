@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   effectiveBalanceStatus,
+  getAssignableDebtOwners,
   isBalanceUnresolved,
   isConfirmedZero,
   isDebtNeedsReview,
@@ -132,6 +133,42 @@ describe("resolveDebtOwnership", () => {
   });
 });
 
+describe("getAssignableDebtOwners (UX-6.2)", () => {
+  const members = [
+    { uid: "owner-uid", status: "active", displayName: "Jidye" },
+    { uid: "removed-uid", status: "removed", displayName: "Former Member" },
+  ];
+  const people = [
+    { id: "person-1", status: "active", displayName: "Babajide Yusuf" },
+    { id: "person-merged", status: "merged", displayName: "Old Person" },
+  ];
+
+  it("separates verified members from financial profiles into two distinct groups", () => {
+    const result = getAssignableDebtOwners({ members, people });
+    expect(result.verifiedMembers.map((m) => m.uid)).toEqual(["owner-uid"]);
+    expect(result.financialProfiles.map((p) => p.id)).toEqual(["person-1"]);
+  });
+
+  it("excludes removed members and merged financial profiles from both groups", () => {
+    const result = getAssignableDebtOwners({ members, people });
+    expect(result.verifiedMembers.some((m) => m.uid === "removed-uid")).toBe(false);
+    expect(result.financialProfiles.some((p) => p.id === "person-merged")).toBe(false);
+  });
+
+  it("a pending invitation is never returned as an assignable owner - only real members/people are read", () => {
+    // getAssignableDebtOwners doesn't even accept an invites argument - a
+    // pending invite can never leak into either group regardless of what's
+    // passed, since nothing here ever reads a memberInvites list.
+    const result = getAssignableDebtOwners({ members, people, memberInvites: [{ emailNormalized: "pending@example.test", status: "pending" }] });
+    expect(result.verifiedMembers).toHaveLength(1);
+    expect(result.financialProfiles).toHaveLength(1);
+  });
+
+  it("returns empty groups (not an error) when called with no members/people", () => {
+    expect(getAssignableDebtOwners({})).toEqual({ verifiedMembers: [], financialProfiles: [] });
+  });
+});
+
 describe("matchMemberByName", () => {
   it("matches a suggestion with a middle initial the member profile doesn't have (first + last name match)", () => {
     const match = matchMemberByName("Kristina K Davis", [
@@ -234,6 +271,18 @@ describe("looksLikeJunkOwnerLabel", () => {
     expect(looksLikeJunkOwnerLabel("Kristina Davis")).toBe(false);
     expect(looksLikeJunkOwnerLabel("Baba")).toBe(false);
     expect(looksLikeJunkOwnerLabel("")).toBe(false);
+  });
+
+  // UX-6.2 §50: defense in depth against workspace/scope-noise leaking into
+  // a stored ownerLabel.
+  it("flags workspace-scope-noise phrases", () => {
+    expect(looksLikeJunkOwnerLabel("Personal workspace")).toBe(true);
+    expect(looksLikeJunkOwnerLabel("Household workspace")).toBe(true);
+    expect(looksLikeJunkOwnerLabel("Everyone")).toBe(true);
+  });
+
+  it("REGRESSION: never flags the legitimate 'Joint / Household' ownerLabel resolveDebtOwnership itself produces for a real joint debt", () => {
+    expect(looksLikeJunkOwnerLabel("Joint / Household")).toBe(false);
   });
 });
 

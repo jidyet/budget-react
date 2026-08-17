@@ -5,6 +5,7 @@ import Input from "../ui/Input.jsx";
 import Button from "../ui/Button.jsx";
 import Badge from "../ui/Badge.jsx";
 import { TYPE_SCALE, ttzPalette } from "../theme.js";
+import { getAssignableDebtOwners } from "../../../domain/tracktozero/ownership.js";
 
 // Token-based rewrite of the monolith's OwnerField (same contract, same
 // behavior) - workspace-aware owner selector shared by manual debt entry
@@ -17,6 +18,13 @@ import { TYPE_SCALE, ttzPalette } from "../theme.js";
 // caller add a genuinely new household financial identity inline - it never
 // creates an Auth account or a WorkspaceMembership, only a Workspace-scoped
 // person another debt's owner can also reference.
+//
+// UX-6.2: verified members and financial profiles ("not connected to an
+// account") were previously one flat, undifferentiated <option> list - a
+// user could not tell a real authenticated member from an unconnected
+// financial profile when picking an owner. Now grouped via the shared
+// getAssignableDebtOwners derivation (never a pending invite - nothing here
+// ever reads memberInvites) into two labeled <optgroup>s.
 export default function OwnerField({ workspace, members = [], people = [], ownerType, ownerId, onChange, onCreatePerson, disabled }) {
   const [addingPerson, setAddingPerson] = useState(false);
   const [newPersonName, setNewPersonName] = useState("");
@@ -26,7 +34,7 @@ export default function OwnerField({ workspace, members = [], people = [], owner
   if (workspace?.type !== "household") {
     return <Field label="Owner"><Badge tone="success">You</Badge></Field>;
   }
-  const activePeople = people.filter((person) => person.status !== "merged");
+  const { verifiedMembers, financialProfiles } = getAssignableDebtOwners({ members, people });
   const value = ownerType === "member" && ownerId ? `member:${ownerId}`
     : ownerType === "person" && ownerId ? `person:${ownerId}`
     : (ownerType || "unassigned");
@@ -62,12 +70,20 @@ export default function OwnerField({ workspace, members = [], people = [], owner
       >
         <option value="unassigned">Unassigned</option>
         <option value="joint">Joint / Household</option>
-        {members.filter((member) => member.status !== "removed").map((member) => (
-          <option key={member.uid} value={`member:${member.uid}`}>{member.displayName || member.uid}</option>
-        ))}
-        {activePeople.map((person) => (
-          <option key={person.id} value={`person:${person.id}`}>{person.displayName}</option>
-        ))}
+        {verifiedMembers.length ? (
+          <optgroup label="Verified members">
+            {verifiedMembers.map((member) => (
+              <option key={member.uid} value={`member:${member.uid}`}>{member.displayName || member.uid}</option>
+            ))}
+          </optgroup>
+        ) : null}
+        {financialProfiles.length ? (
+          <optgroup label="Financial profiles (not connected to an account)">
+            {financialProfiles.map((person) => (
+              <option key={person.id} value={`person:${person.id}`}>{person.displayName}</option>
+            ))}
+          </optgroup>
+        ) : null}
       </Select>
       {onCreatePerson && !disabled ? (
         addingPerson ? (

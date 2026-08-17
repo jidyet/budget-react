@@ -3,6 +3,7 @@ import * as XLSX from "xlsx";
 import { discoverWorkbookDebtCandidates, EVIDENCE_TRUTH, CLASSIFICATIONS, SCOPE_SUGGESTIONS } from "./workbookDebtDiscovery.js";
 import { readExcelFileToCandidates } from "./excelImportReader.js";
 import { FINANCIAL_ITEM_TYPES } from "../../domain/tracktozero/financialItemTaxonomy.js";
+import { HOUSEHOLD_BUDGET_LARGE_ROWS } from "./__fixtures__/householdBudgetLarge.fixture.js";
 
 const addSheet = (wb, name, rows) => {
   const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -311,6 +312,101 @@ describe("DATA-1A workbook debt discovery", () => {
     // never confirmed truth, never a fabricated observed value.
     expect(candidate.balanceStatus).toBe("unresolved");
     expect(candidate.currentBalance).toBe(0);
+  });
+
+  // REVIEW-2: a real household budget import produced a review queue with a
+  // literal "HOUSEHOLD" candidate ("HOUSEHOLD - is this a loan you're paying
+  // down to $0?") - a bare section-label row with zero balance/APR/category
+  // evidence that fell through classifyRow's old fallback into `uncertain`
+  // (review-blocking) instead of `not_debt` (silently excluded/counted).
+  it("REVIEW-2: a standalone 'HOUSEHOLD' section-heading row is recognized as a header, never a debt candidate or review item", () => {
+    const wb = XLSX.utils.book_new();
+    addSheet(wb, "Sheet1", [
+      ["Account / Cardholder", "Payment", "Balance"],
+      ["HOUSEHOLD", null, null],
+      ["CREDIT CARDS", null, null],
+      ["Capital One", 65, 2000],
+    ]);
+    const { candidates, nonDebtItems } = discoverWorkbookDebtCandidates({ workbook: wb, XLSX, fileName: "household.xlsx", importBatchId: "batch" });
+    expect(candidates.some((c) => c.accountName === "HOUSEHOLD")).toBe(false);
+    expect(nonDebtItems.some((item) => item.label === "HOUSEHOLD")).toBe(false);
+    // The bogus "HOUSEHOLD" header doesn't corrupt the real "CREDIT CARDS"
+    // section context that follows it - Capital One still resolves correctly.
+    expect(candidates.find((c) => c.accountName === "Capital One")).toMatchObject({ debtType: "credit_card" });
+  });
+
+  it("REVIEW-2: classifyRow's structural zero-evidence fallback excludes ANY unrecognized bare label, not just a whitelisted section-heading word", () => {
+    // "TBD" is deliberately NOT in SECTION_HEADING_MATCHERS's whitelist, and
+    // a non-empty Debt type column means the row is never even offered to
+    // matchSectionHeading (categoryText is present) - this exercises the
+    // classifyRow fallback specifically, proving the fix is structural
+    // (works for evidence-free rows generally), not just a bigger word list.
+    const wb = XLSX.utils.book_new();
+    addSheet(wb, "Sheet1", [
+      ["Account / Cardholder", "Debt type", "Payment", "Balance"],
+      ["Random Line Item", "TBD", null, null],
+    ]);
+    const { candidates, nonDebtItems } = discoverWorkbookDebtCandidates({ workbook: wb, XLSX, fileName: "zero-evidence.xlsx", importBatchId: "batch" });
+    expect(candidates).toHaveLength(0);
+    const item = nonDebtItems.find((entry) => entry.label === "Random Line Item");
+    expect(item).toMatchObject({ financialItemType: FINANCIAL_ITEM_TYPES.unknown });
+  });
+
+  it("REVIEW-2: a genuinely ambiguous row with real (if unrecognized-category) evidence still enters review - the fix must not over-exclude", () => {
+    // "Fingerhut" matches no debt-category vocabulary, but a real balance
+    // number is credible debt evidence a human filled in - this must stay
+    // reviewable (possibleDebt), never silently dropped alongside the truly
+    // evidence-free rows above (task's explicit "fail closed" requirement).
+    const wb = XLSX.utils.book_new();
+    addSheet(wb, "Sheet1", [
+      ["Account / Cardholder", "Payment", "Balance"],
+      ["Fingerhut", null, 3200],
+    ]);
+    const { candidates } = discoverWorkbookDebtCandidates({ workbook: wb, XLSX, fileName: "ambiguous.xlsx", importBatchId: "batch" });
+    const fingerhut = candidates.find((c) => c.accountName === "Fingerhut");
+    expect(fingerhut).toBeTruthy();
+    expect(fingerhut.evidence.classification).toBe(CLASSIFICATIONS.possibleDebt);
+  });
+
+  // REVIEW-2: locks in the real, measured before/after counts for the
+  // realistic large fixture (31 rows: 10 real debts, 9 real bills, 2
+  // genuinely ambiguous items, 7 bare section-heading rows, 3 unrecognized
+  // placeholder labels). Verified by hand via `git stash` against the
+  // pre-fix code: before this phase, 22 rows became candidates (12 of them
+  // review-blocking, 10 of which were the fake header/placeholder rows).
+  // After the fix: 12 candidates, only the 2 genuinely ambiguous items
+  // blocking, and every real bill keeps its correct specific type.
+  it("REVIEW-2: realistic large fixture - exact candidate/non-debt counts, no fake header candidates, no bill-type corruption", () => {
+    const wb = XLSX.utils.book_new();
+    addSheet(wb, "Household Budget", HOUSEHOLD_BUDGET_LARGE_ROWS);
+    const { candidates, nonDebtItems } = discoverWorkbookDebtCandidates({ workbook: wb, XLSX, fileName: "large.xlsx", importBatchId: "batch" });
+
+    expect(candidates).toHaveLength(12);
+    const blocking = candidates.filter((c) => c.evidence.classification === CLASSIFICATIONS.uncertain || c.evidence.classification === CLASSIFICATIONS.possibleDebt);
+    expect(blocking.map((c) => c.accountName).sort()).toEqual(["Car Payment", "Fingerhut"]);
+
+    // None of the 7 bare section-heading rows ever became a candidate or a
+    // non-debt item - pure structural noise, correctly invisible.
+    for (const heading of ["HOUSEHOLD", "MISC", "OTHER", "GENERAL", "SUMMARY", "NOTES", "OVERVIEW"]) {
+      expect(candidates.some((c) => c.accountName === heading)).toBe(false);
+      expect(nonDebtItems.some((item) => item.label === heading)).toBe(false);
+    }
+
+    expect(nonDebtItems).toHaveLength(12);
+    const byLabel = (label) => nonDebtItems.find((item) => item.label === label);
+    // Unrecognized placeholder labels are honestly UNKNOWN, not miscategorized as a bill.
+    expect(byLabel("TBD").financialItemType).toBe(FINANCIAL_ITEM_TYPES.unknown);
+    expect(byLabel("Review later").financialItemType).toBe(FINANCIAL_ITEM_TYPES.unknown);
+    expect(byLabel("Placeholder").financialItemType).toBe(FINANCIAL_ITEM_TYPES.unknown);
+    // Real bills keep their correct specific type - the generic section
+    // headings above them (SUMMARY/NOTES/OVERVIEW) must never overwrite a
+    // row's own more-specific category.
+    expect(byLabel("Electricity").financialItemType).toBe(FINANCIAL_ITEM_TYPES.utility);
+    expect(byLabel("Netflix").financialItemType).toBe(FINANCIAL_ITEM_TYPES.subscription);
+    expect(byLabel("Auto Insurance").financialItemType).toBe(FINANCIAL_ITEM_TYPES.insurance);
+    expect(byLabel("Storage bill").financialItemType).toBe(FINANCIAL_ITEM_TYPES.storageExpense);
+    expect(byLabel("Monthly Savings").financialItemType).toBe(FINANCIAL_ITEM_TYPES.savings);
+    expect(byLabel("EagleView income").financialItemType).toBe(FINANCIAL_ITEM_TYPES.income);
   });
 });
 

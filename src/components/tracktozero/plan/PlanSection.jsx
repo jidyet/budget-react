@@ -14,6 +14,7 @@ import { ttzPalette, TYPE_SCALE } from "../theme.js";
 import { formatMoney as money, formatPercent as percent } from "../formatting.js";
 import { presentedOwnerLabel } from "../../../domain/tracktozero/ownership.js";
 import { PLAN_DESTINATIONS, resolvePlanDestination, buildPlanPath, navigateToPlanDestination } from "./planRouting.js";
+import { getWorkspacePresentation } from "../workspacePresentation.js";
 
 const GAP = "var(--ttz-space-4, 16px)";
 
@@ -959,9 +960,18 @@ export default function PlanSection({ snapshot, service, refresh, runAction, wri
     default: currentView = <MyPlanView {...viewProps} />;
   }
 
+  // UX-6.2: workspace-aware voice ("My payoff plan" / "Household payoff
+  // plan") as a small overline above the existing "Your path to $0" title -
+  // adds intentional Personal/Household distinction without discarding the
+  // established page title.
+  const { planHeading } = getWorkspacePresentation(snapshot.workspace);
+
   return (
     <div style={{ display: "grid", gap: 10 }}>
-      <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>Your path to $0</div>
+      <div>
+        <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>{planHeading}</div>
+        <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx, marginTop: 4 }}>Your path to $0</div>
+      </div>
 
       <div role="tablist" aria-label="Plan sections" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         {PLAN_DESTINATIONS.map((item) => {

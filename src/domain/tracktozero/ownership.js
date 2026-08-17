@@ -58,6 +58,25 @@ export const resolveDebtOwnership = ({ workspaceType, members = [], people = [],
   return { ownerType: "unassigned", ownerId: "", ownerLabel: "Unassigned" };
 };
 
+// UX-6.2/SEC-INVITE: the ONE shared derivation of "who can be selected as a
+// debt owner in this household" - every owner-selection UI (Add Debt, Quick
+// Update, Import Review, the category owner-scope selector, the Review
+// Center's owner sub-section) must consume this instead of independently
+// merging members+people into one flat, undifferentiated list. Two things
+// are durable identities eligible for real ownership: a verified
+// WorkspaceMembership (a real authenticated account) and a WorkspacePerson
+// "financial profile" (DATA-HH1 - no account required, but still a real,
+// durable household-scoped identity a human explicitly created/confirmed).
+// A PENDING INVITATION IS NOT A MEMBER (no active membership exists yet -
+// nothing in this function ever reads memberInvites) and is never returned
+// here. Both groups are filtered to active/non-merged, matching
+// resolveDebtOwnership's own verification rules, so nothing this returns can
+// ever be an id resolveDebtOwnership would reject.
+export const getAssignableDebtOwners = ({ members = [], people = [] } = {}) => ({
+  verifiedMembers: members.filter((member) => member.status !== "removed"),
+  financialProfiles: people.filter((person) => person.status !== "merged"),
+});
+
 export const nameTokens = (value) => String(value || "")
   .toLowerCase()
   .split(/[^a-z]+/)
@@ -142,7 +161,16 @@ export const isMinimumPaymentContaminated = (debt) => {
 // before the parser-level fixes (HOLDER_NAME_BAD_PHRASE_RE) existed - it
 // never mutates stored data, it only stops already-written junk from being
 // rendered as if it were a real person.
-const JUNK_OWNER_LABEL_RE = /\b(?:undeliverable|service requested|current resident|current occupant|postal customer|boxholder|visa signature|visa platinum|visa infinite|mastercard|world elite|signature card|platinum card|business card)\b/i;
+// UX-6.2: extended with workspace/scope-name-shaped tokens - defense in
+// depth so a stray scope-noise value that somehow ends up in a stored
+// ownerLabel (e.g. a future parser regression) is treated as junk rather
+// than rendered as if it were a real person's name. Deliberately does NOT
+// include a bare "household" or "joint" token - "Joint / Household" is
+// resolveDebtOwnership's own LEGITIMATE ownerLabel for a real joint-owned
+// debt, and a bare-word match here would misfire on it, silently hiding
+// every joint debt's owner as "Unassigned". Only phrases that could never
+// legitimately be a real ownerLabel are safe to add.
+const JUNK_OWNER_LABEL_RE = /\b(?:undeliverable|service requested|current resident|current occupant|postal customer|boxholder|visa signature|visa platinum|visa infinite|mastercard|world elite|signature card|platinum card|business card|personal workspace|household workspace|everyone)\b/i;
 export const looksLikeJunkOwnerLabel = (label) => JUNK_OWNER_LABEL_RE.test(String(label || ""));
 
 // A Debt's material financial truth is unresolved if its balance was never

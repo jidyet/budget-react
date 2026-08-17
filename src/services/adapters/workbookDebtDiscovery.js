@@ -320,6 +320,24 @@ const classifyRow = ({ accountText, categoryText, sheetName, hasBalanceEvidence,
   if (debtSignals.length === 1 || hasBalanceEvidence || hasAprEvidence) {
     return { classification: CLASSIFICATIONS.possibleDebt, debtSignals, billSignals, reason: "Some debt/payoff evidence exists, but the workbook did not prove enough fields." };
   }
+  // REVIEW-2: reaching here means debtSignals AND billSignals are BOTH empty
+  // and there's no balance/APR evidence either - i.e. genuinely zero
+  // evidence of any kind, not merely ambiguous evidence. A real, partially-
+  // filled-in debt row almost always carries at least one signal (its own
+  // vocabulary, or inherited section-heading vocabulary threaded in via
+  // effectiveCategoryText) by the time it reaches this function - a row with
+  // truly nothing to go on is structurally indistinguishable from a section
+  // label/blank-row artifact that matchSectionHeading's whitelist didn't
+  // happen to recognize by name (e.g. "HOUSEHOLD"). Classifying this as
+  // uncertain (review-queue-blocking) rather than notDebt (silently
+  // excluded/counted) is exactly what let bare labels flood Needs Review -
+  // this is the structural, whitelist-independent fix; SECTION_HEADING_MATCHERS
+  // above is the direct fix for the specific reported case. Genuinely
+  // ambiguous rows (SOME evidence, just not enough to prove which type) are
+  // unaffected - they still hit `possibleDebt` two branches up.
+  if (!debtSignals.length && !billSignals.length) {
+    return { classification: CLASSIFICATIONS.notDebt, debtSignals, billSignals, reason: "No creditor/balance/APR/category evidence found - likely a section label, header, or blank row rather than a debt or bill." };
+  }
   return { classification: CLASSIFICATIONS.uncertain, debtSignals, billSignals, reason: "Workbook row has financial-looking data but not enough semantic evidence." };
 };
 
@@ -479,7 +497,18 @@ const extractRowsFromSheet = ({ topologySheet, sheet, XLSX, fileName }) => {
         // Subtotal/total rows end the current section's data without
         // themselves becoming a new section label; a genuine heading
         // (CREDIT CARDS, UTILITIES, BUSINESS, ...) becomes the new context.
-        if (sectionMatch.financialItemType !== FINANCIAL_ITEM_TYPES.subtotalOrSummary) currentSectionLabel = strippedLabel;
+        // REVIEW-2: a generic HEADER_OR_SECTION match (HOUSEHOLD/MISC/OTHER/
+        // GENERAL/SUMMARY/OVERVIEW/NOTES) carries no real category
+        // information - unlike UTILITIES/SUBSCRIPTIONS/etc., propagating it
+        // as the new section context would let financialItemTypeForNonDebt's
+        // sectionHint (which takes priority over a row's OWN more-specific
+        // category text) overwrite a real bill's correct type with a
+        // meaningless placeholder. Skip it exactly like subtotal/summary -
+        // whatever real section context existed before simply carries
+        // forward unchanged.
+        if (sectionMatch.financialItemType !== FINANCIAL_ITEM_TYPES.subtotalOrSummary && sectionMatch.financialItemType !== FINANCIAL_ITEM_TYPES.headerOrSection) {
+          currentSectionLabel = strippedLabel;
+        }
         continue;
       }
       const effectiveCategoryText = categoryText || currentSectionLabel;
@@ -525,9 +554,20 @@ const extractRowsFromSheet = ({ topologySheet, sheet, XLSX, fileName }) => {
         hasMinimumEvidence: minimumPayment != null,
       });
       const sectionHeadingContext = currentSectionLabel ? matchSectionHeading(currentSectionLabel) : null;
-      const financialItemType = classification.classification === CLASSIFICATIONS.notDebt
-        ? financialItemTypeForNonDebt({ accountText, categoryText, sectionHint: sectionHeadingContext?.financialItemType })
-        : FINANCIAL_ITEM_TYPES.debt;
+      // REVIEW-2: a notDebt classification reached via classifyRow's true
+      // zero-evidence fallback (no debt AND no bill vocabulary at all) is
+      // honestly labeled UNKNOWN rather than run through
+      // financialItemTypeForNonDebt, whose own fallback is the generic
+      // BILL_OR_RECURRING_EXPENSE bucket - a bare unrecognized label like
+      // "HOUSEHOLD" isn't a bill, it's unclear, and the non-debt callout
+      // should say so rather than mislabeling it.
+      const isZeroEvidenceNotDebt = classification.classification === CLASSIFICATIONS.notDebt
+        && !classification.debtSignals.length && !classification.billSignals.length;
+      const financialItemType = classification.classification !== CLASSIFICATIONS.notDebt
+        ? FINANCIAL_ITEM_TYPES.debt
+        : isZeroEvidenceNotDebt
+          ? FINANCIAL_ITEM_TYPES.unknown
+          : financialItemTypeForNonDebt({ accountText, categoryText, sectionHint: sectionHeadingContext?.financialItemType });
       const accountReferenceSafe = getSafeAccountReference(accountText);
       records.push({
         key: entityKeyFor({ label: strippedLabel, ownerSuggestion, accountReferenceSafe }),

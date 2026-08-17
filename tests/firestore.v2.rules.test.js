@@ -242,6 +242,124 @@ test("invite acceptance is blocked when the authenticated email does not match t
   await assertFails(batch.commit());
 });
 
+// SEC-INVITE: the rule logic for these four cases (expiresAt > request.time,
+// resource.data.status == "pending", and the get-only/no-list scoping on
+// member_invites) already existed before this phase - these tests close a
+// real coverage gap (confirmed via grep: no prior test exercised any of
+// them), they do not change the rules themselves.
+test("expired invite cannot be accepted", async () => {
+  await seedWorkspace();
+  await seed(async (db) => {
+    await db.doc("workspaces/w1/member_invites/invite-expired").set({
+      ...invite("w1", "invite-expired", "owner"),
+      expiresAt: new Date("2020-01-01T00:00:00.000Z"),
+    });
+  });
+  const invitee = testEnv.authenticatedContext("future-user", { email: "future@example.test" }).firestore();
+  const batch = invitee.batch();
+  batch.set(invitee.doc("workspaces/w1/members/future-user"), {
+    workspaceId: "w1", uid: "future-user", role: "viewer", status: "active",
+    displayName: "Future User", email: "future@example.test", acceptedInviteId: "invite-expired",
+    createdAt: now(), createdBy: "future-user",
+  });
+  batch.update(invitee.doc("workspaces/w1/member_invites/invite-expired"), {
+    workspaceId: "w1", id: "invite-expired", workspaceName: "Test household",
+    emailNormalized: "future@example.test", role: "viewer", status: "accepted",
+    tokenHash: "invite-expired", invitedByUserId: "owner", invitedByName: "Owner",
+    createdAt: now(), createdBy: "owner", expiresAt: new Date("2020-01-01T00:00:00.000Z"),
+    acceptedAt: now(), acceptedByUserId: "future-user",
+  });
+  await assertFails(batch.commit());
+});
+
+test("canceled invite cannot be accepted", async () => {
+  await seedWorkspace();
+  await seed(async (db) => {
+    await db.doc("workspaces/w1/member_invites/invite-canceled").set({
+      ...invite("w1", "invite-canceled", "owner"),
+      status: "canceled",
+      canceledAt: now(),
+      canceledByUserId: "owner",
+    });
+  });
+  const invitee = testEnv.authenticatedContext("future-user", { email: "future@example.test" }).firestore();
+  const batch = invitee.batch();
+  batch.set(invitee.doc("workspaces/w1/members/future-user"), {
+    workspaceId: "w1", uid: "future-user", role: "viewer", status: "active",
+    displayName: "Future User", email: "future@example.test", acceptedInviteId: "invite-canceled",
+    createdAt: now(), createdBy: "future-user",
+  });
+  batch.update(invitee.doc("workspaces/w1/member_invites/invite-canceled"), {
+    workspaceId: "w1", id: "invite-canceled", workspaceName: "Test household",
+    emailNormalized: "future@example.test", role: "viewer", status: "accepted",
+    tokenHash: "invite-canceled", invitedByUserId: "owner", invitedByName: "Owner",
+    createdAt: now(), createdBy: "owner", expiresAt: inviteExpiry(),
+    acceptedAt: now(), acceptedByUserId: "future-user",
+  });
+  await assertFails(batch.commit());
+});
+
+test("replaying an already-accepted invite is denied, including by a different attacker uid", async () => {
+  await seedWorkspace();
+  await seed(async (db) => {
+    // Simulates the invite having already been legitimately accepted once
+    // (status is already "accepted", not "pending").
+    await db.doc("workspaces/w1/member_invites/invite-used").set({
+      ...invite("w1", "invite-used", "owner"),
+      status: "accepted",
+      acceptedAt: now(),
+      acceptedByUserId: "original-user",
+    });
+  });
+  // The original invitee trying to "accept" a second time.
+  const original = testEnv.authenticatedContext("original-user", { email: "future@example.test" }).firestore();
+  const replayBatch = original.batch();
+  replayBatch.set(original.doc("workspaces/w1/members/original-user-2"), {
+    workspaceId: "w1", uid: "original-user-2", role: "viewer", status: "active",
+    displayName: "Replay", email: "future@example.test", acceptedInviteId: "invite-used",
+    createdAt: now(), createdBy: "original-user-2",
+  });
+  replayBatch.update(original.doc("workspaces/w1/member_invites/invite-used"), {
+    workspaceId: "w1", id: "invite-used", workspaceName: "Test household",
+    emailNormalized: "future@example.test", role: "viewer", status: "accepted",
+    tokenHash: "invite-used", invitedByUserId: "owner", invitedByName: "Owner",
+    createdAt: now(), createdBy: "owner", expiresAt: inviteExpiry(),
+    acceptedAt: now(), acceptedByUserId: "original-user-2",
+  });
+  await assertFails(replayBatch.commit());
+
+  // A different attacker uid attempting to claim the same already-used invite.
+  const attacker = testEnv.authenticatedContext("attacker", { email: "future@example.test" }).firestore();
+  const attackBatch = attacker.batch();
+  attackBatch.set(attacker.doc("workspaces/w1/members/attacker"), {
+    workspaceId: "w1", uid: "attacker", role: "viewer", status: "active",
+    displayName: "Attacker", email: "future@example.test", acceptedInviteId: "invite-used",
+    createdAt: now(), createdBy: "attacker",
+  });
+  attackBatch.update(attacker.doc("workspaces/w1/member_invites/invite-used"), {
+    workspaceId: "w1", id: "invite-used", workspaceName: "Test household",
+    emailNormalized: "future@example.test", role: "viewer", status: "accepted",
+    tokenHash: "invite-used", invitedByUserId: "owner", invitedByName: "Owner",
+    createdAt: now(), createdBy: "owner", expiresAt: inviteExpiry(),
+    acceptedAt: now(), acceptedByUserId: "attacker",
+  });
+  await assertFails(attackBatch.commit());
+});
+
+test("a single invite is readable by id (unauthenticated join-preview) but the collection cannot be enumerated by a non-member", async () => {
+  await seedWorkspace();
+  await seed(async (db) => {
+    await db.doc("workspaces/w1/member_invites/invite-preview").set(invite("w1", "invite-preview", "owner"));
+  });
+  // The intentional public-preview path: get by exact id, no auth required.
+  await assertSucceeds(testEnv.unauthenticatedContext().firestore().doc("workspaces/w1/member_invites/invite-preview").get());
+  // The permissive branch must NOT extend to listing/enumerating invites -
+  // that stays scoped to workspace members, for both unauthenticated and
+  // authenticated non-member readers.
+  await assertFails(testEnv.unauthenticatedContext().firestore().collection("workspaces/w1/member_invites").get());
+  await assertFails(testEnv.authenticatedContext("outsider").firestore().collection("workspaces/w1/member_invites").get());
+});
+
 test("cross-workspace member insertion is denied", async () => {
   await seedWorkspace();
   const owner = testEnv.authenticatedContext("owner").firestore();

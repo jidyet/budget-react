@@ -7,12 +7,15 @@ import InfoCallout from "../ui/InfoCallout.jsx";
 import WarningCallout from "../ui/WarningCallout.jsx";
 import ConfirmationDialog from "../ui/ConfirmationDialog.jsx";
 import ReviewSessionCard from "./ReviewSessionCard.jsx";
+import ReviewQueueList from "./ReviewQueueList.jsx";
 import ResolvedHistory from "./ResolvedHistory.jsx";
 import Button from "../ui/Button.jsx";
 import Badge from "../ui/Badge.jsx";
 import Field from "../ui/Field.jsx";
 import Select from "../ui/Select.jsx";
+import Card from "../ui/Card.jsx";
 import { ttzPalette, TYPE_SCALE } from "../theme.js";
+import { useIsTablet } from "../useViewport.js";
 import { formatMoney } from "../formatting.js";
 import {
   FRIENDLY_SAVE_FAILURE,
@@ -102,6 +105,7 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
   // full workspace snapshot reload.
   const [newlyCreatedPeople, setNewlyCreatedPeople] = useState([]);
   const isHousehold = snapshot.workspace.type === "household";
+  const isTablet = useIsTablet();
   const people = [...(snapshot.people || []), ...newlyCreatedPeople.filter((person) => !(snapshot.people || []).some((existing) => existing.id === person.id))];
 
   const openItems = sortOpenReviewItems(reviewSnapshot?.openItems || []);
@@ -311,25 +315,32 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
                   <WarningCallout style={{ marginBottom: 12 }} title={laterItemBlockingNote()} />
                 ) : null}
 
-                {currentItem ? (
-                  <ReviewSessionCard
-                    key={currentItem.id}
-                    item={currentItem}
-                    isHousehold={isHousehold}
-                    members={snapshot.members}
-                    people={people}
-                    debts={snapshot.debts}
-                    latestSnapshotsByDebt={snapshot.latestSnapshotsByDebt}
-                    stagedForItem={staged[currentItem.id] || {}}
-                    onStage={(subtype, entry) => handleStage(currentItem, subtype, entry)}
-                    onLeaveForLater={() => handleLeaveForLater(currentItem)}
-                    onSaveItem={() => handleSaveItem(currentItem)}
-                    onCreatePerson={handleCreatePerson}
-                    busy={saving}
-                    resultMessage={itemResults[currentItem.id]?.message}
-                    resultTone={itemResults[currentItem.id]?.tone}
-                  />
-                ) : null}
+                <div style={{ display: "grid", gridTemplateColumns: isTablet ? "1fr" : "minmax(220px, 280px) 1fr", gap: 16, alignItems: "start" }}>
+                  {!isTablet ? (
+                    <Card variant="default" style={{ maxHeight: 640, overflowY: "auto" }}>
+                      <ReviewQueueList items={queue} currentItemId={currentItem?.id} onSelect={setCursorId} />
+                    </Card>
+                  ) : null}
+                  {currentItem ? (
+                    <ReviewSessionCard
+                      key={currentItem.id}
+                      item={currentItem}
+                      isHousehold={isHousehold}
+                      members={snapshot.members}
+                      people={people}
+                      debts={snapshot.debts}
+                      latestSnapshotsByDebt={snapshot.latestSnapshotsByDebt}
+                      stagedForItem={staged[currentItem.id] || {}}
+                      onStage={(subtype, entry) => handleStage(currentItem, subtype, entry)}
+                      onLeaveForLater={() => handleLeaveForLater(currentItem)}
+                      onSaveItem={() => handleSaveItem(currentItem)}
+                      onCreatePerson={handleCreatePerson}
+                      busy={saving}
+                      resultMessage={itemResults[currentItem.id]?.message}
+                      resultTone={itemResults[currentItem.id]?.tone}
+                    />
+                  ) : null}
+                </div>
               </>
             ) : (
               <EmptyState

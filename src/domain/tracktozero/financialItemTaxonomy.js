@@ -99,6 +99,15 @@ export const SECTION_HEADING_MATCHERS = Object.freeze([
   { re: /^storage$/i, financialItemType: FINANCIAL_ITEM_TYPES.storageExpense },
   { re: /^savings?$/i, financialItemType: FINANCIAL_ITEM_TYPES.savings },
   { re: /^income$/i, financialItemType: FINANCIAL_ITEM_TYPES.income },
+  // REVIEW-2: generic top-level workbook/section words that carry no debt or
+  // bill category of their own - a bare "HOUSEHOLD" row (or "MISC"/"OTHER"/
+  // "GENERAL"/"SUMMARY"/"OVERVIEW"/"NOTES") is a section label, not a
+  // financial record. Tagged HEADER_OR_SECTION (not any specific bill type)
+  // since there's nothing here to categorize. This directly fixes the
+  // reported "HOUSEHOLD" false-candidate case; classifyRow's zero-evidence
+  // fallback (workbookDebtDiscovery.js) is the structural backstop for any
+  // OTHER unrecognized bare label this whitelist doesn't anticipate.
+  { re: /^(household|misc(?:ellaneous)?|other|general|summary|overview|notes?)$/i, financialItemType: FINANCIAL_ITEM_TYPES.headerOrSection },
   { re: /^business$/i, financialItemType: null, isBusinessSection: true },
 ]);
 

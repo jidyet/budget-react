@@ -253,7 +253,12 @@ export const createTrackToZeroV2AsyncAppService = ({
     if (!hasPermission(membership, "manageMembers")) throw new Error("Your role cannot manage household invitations.");
     if (!["admin", "contributor", "viewer"].includes(role)) throw new Error("Owners cannot be invited or transferred in this beta flow.");
     const normalizedEmail = normalizeEmail(email);
-    if (!normalizedEmail || !normalizedEmail.includes("@")) throw new Error("Enter a valid invite email.");
+    // SEC-INVITE: a real (if permissive) format check, not just "contains an
+    // @" - this is input hygiene, not the security boundary. The actual
+    // protection against a wrong-recipient acceptance is the Firestore
+    // rules' server-verified auth-email match at acceptance time
+    // (inviteMatchesSignedInEmail), which this cannot weaken or replace.
+    if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) throw new Error("Enter a valid invite email.");
     if (typeof repository.saveMemberInvite !== "function") throw new Error("Invitation storage is unavailable.");
     if (members.some((memberDoc) => normalizeEmail(memberDoc.email) === normalizedEmail && memberDoc.status === "active")) {
       throw new Error("They're already in this household.");

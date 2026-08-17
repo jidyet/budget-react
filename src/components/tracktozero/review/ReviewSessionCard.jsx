@@ -10,6 +10,7 @@ import { ttzPalette, TYPE_SCALE } from "../theme.js";
 import { formatMoney, formatPercent } from "../formatting.js";
 import { REVIEW_TYPES } from "../../../services/tracktozero/reviewDomain.js";
 import { matchImportedOwnerToIdentity } from "../../../domain/tracktozero/personIdentity.js";
+import { getAssignableDebtOwners } from "../../../domain/tracktozero/ownership.js";
 import {
   REVIEW_TYPE_LABEL,
   addAsNewDebtLabel,
@@ -223,6 +224,18 @@ function BalanceSubSection({ item, staged, onStage }) {
   );
 }
 
+// REVIEW-2: matches import/AprCandidatesField.jsx's balance-type labeling
+// (Purchases / Cash advance / Balance transfer / Penalty rate) - this
+// component previously showed bare percentages with no context, a real
+// double-implementation gap relative to the already-enhanced Import Review
+// component for the same underlying evidence shape.
+const APR_BALANCE_TYPE_LABELS = {
+  purchase: "Purchases",
+  cash_advance: "Cash advance",
+  balance_transfer: "Balance transfer",
+  penalty: "Penalty rate",
+};
+
 function AprSubSection({ item, staged, onStage }) {
   const palette = ttzPalette;
   const candidate = item.candidate;
@@ -241,13 +254,17 @@ function AprSubSection({ item, staged, onStage }) {
       <div style={{ ...TYPE_SCALE.cardTitle, color: palette.tx, marginBottom: 4 }}>{knownCandidates.length > 1 ? "Which APR applies?" : "What's the APR?"}</div>
       {knownCandidates.length > 1 ? (
         <div role="radiogroup" aria-label="Possible APR values" style={{ display: "grid", gap: 6, marginTop: 8 }}>
-          {knownCandidates.map((entry) => (
-            <label key={entry.apr} style={{ display: "flex", alignItems: "center", gap: 8, ...TYPE_SCALE.body, color: palette.tx }}>
-              <input type="radio" name={`apr-${item.id}`} checked={!useManual && staged?.args?.apr === entry.apr} onChange={() => { setUseManual(false); stageApr(entry.apr); }} />
-              {formatPercent(entry.apr)}
-              {entry === strongest ? <Badge tone="info">Most likely</Badge> : null}
-            </label>
-          ))}
+          {knownCandidates.map((entry) => {
+            const balanceTypeLabel = APR_BALANCE_TYPE_LABELS[entry.provenance?.matchedText];
+            return (
+              <label key={entry.apr} style={{ display: "flex", alignItems: "center", gap: 8, ...TYPE_SCALE.body, color: palette.tx }}>
+                <input type="radio" name={`apr-${item.id}`} checked={!useManual && staged?.args?.apr === entry.apr} onChange={() => { setUseManual(false); stageApr(entry.apr); }} />
+                {formatPercent(entry.apr)}
+                {balanceTypeLabel ? <span style={{ ...TYPE_SCALE.caption, color: palette.tx2 }}>— {balanceTypeLabel}</span> : null}
+                {entry === strongest ? <Badge tone="info">Most likely</Badge> : null}
+              </label>
+            );
+          })}
           <label style={{ display: "flex", alignItems: "center", gap: 8, ...TYPE_SCALE.body, color: palette.tx }}>
             <input type="radio" name={`apr-${item.id}`} checked={useManual} onChange={() => setUseManual(true)} />
             Enter another APR
@@ -328,8 +345,7 @@ function DueDaySubSection({ staged, onStage }) {
 function OwnerSubSection({ item, members, people = [], staged, onStage, onCreatePerson }) {
   const palette = ttzPalette;
   const candidate = item.candidate;
-  const activeMembers = members.filter((member) => member.status !== "removed");
-  const activePeople = people.filter((person) => person.status !== "merged");
+  const { verifiedMembers: activeMembers, financialProfiles: activePeople } = getAssignableDebtOwners({ members, people });
   const [value, setValue] = useState(
     staged?.args
       ? staged.args.ownerType === "member" ? `member:${staged.args.ownerId}`
@@ -398,8 +414,16 @@ function OwnerSubSection({ item, members, people = [], staged, onStage, onCreate
           <option value="">Choose an owner</option>
           <option value="unassigned">Unassigned</option>
           <option value="joint">Joint / Household</option>
-          {activeMembers.map((member) => <option key={member.uid} value={`member:${member.uid}`}>{member.displayName || member.uid}</option>)}
-          {activePeople.map((person) => <option key={person.id} value={`person:${person.id}`}>{person.displayName}</option>)}
+          {activeMembers.length ? (
+            <optgroup label="Verified members">
+              {activeMembers.map((member) => <option key={member.uid} value={`member:${member.uid}`}>{member.displayName || member.uid}</option>)}
+            </optgroup>
+          ) : null}
+          {activePeople.length ? (
+            <optgroup label="Financial profiles (not connected to an account)">
+              {activePeople.map((person) => <option key={person.id} value={`person:${person.id}`}>{person.displayName}</option>)}
+            </optgroup>
+          ) : null}
         </Select>
       </Field>
       {candidate.ownerSuggestion && onCreatePerson ? (
@@ -445,9 +469,47 @@ function DebtClassificationSubSection({ item, staged, onStage }) {
   );
 }
 
+// REVIEW-2: what's ALREADY resolved for this candidate, collapsed into a
+// compact checklist instead of getting zero visual acknowledgment - the
+// inverse of item.types (a field only appears here when its corresponding
+// REVIEW_TYPES flag is NOT present, i.e. nothing about it needs a decision).
+function ConfirmedEvidenceSummary({ item }) {
+  const palette = ttzPalette;
+  const candidate = item.candidate;
+  const rows = [];
+  if (candidate.creditorName || candidate.accountName) rows.push(["Creditor", candidate.creditorName || candidate.accountName]);
+  if (!item.types.includes(REVIEW_TYPES.balanceConfirmation) && candidate.currentBalance != null) rows.push(["Balance", formatMoney(candidate.currentBalance)]);
+  if (!item.types.includes(REVIEW_TYPES.aprConfirmation) && candidate.aprStatus === "known") rows.push(["APR", formatPercent(candidate.apr)]);
+  if (!item.types.includes(REVIEW_TYPES.minimumPaymentConfirmation) && candidate.minimumPayment != null) rows.push(["Minimum due", formatMoney(candidate.minimumPayment)]);
+  if (!item.types.includes(REVIEW_TYPES.dueDateConfirmation) && candidate.dueDate) rows.push(["Due date", candidate.dueDate]);
+  if (candidate.debtType && candidate.debtType !== "other") rows.push(["Debt type", candidate.debtType.replace(/_/g, " ")]);
+  if (!rows.length) return null;
+  return (
+    <Card variant="default" padding="var(--ttz-space-3, 12px)">
+      <div style={{ ...TYPE_SCALE.overline, color: palette.go, marginBottom: 6 }}>Confirmed</div>
+      <div style={{ display: "grid", gap: 4 }}>
+        {rows.map(([label, value]) => (
+          <div key={label} style={{ display: "flex", gap: 8, ...TYPE_SCALE.supporting, color: palette.tx }}>
+            <span aria-hidden="true" style={{ color: palette.go }}>✓</span>
+            <span style={{ color: palette.tx2 }}>{label}:</span>
+            <span>{value}</span>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 // One card per open review item - every applicable section renders inline,
 // stacked, so the user answers whatever they know in one continuous scroll
 // instead of a modal per field (Part 2/34).
+//
+// REVIEW-2: the root card no longer amber-washes the whole item just
+// because SOMETHING inside it is unresolved - the unresolved sub-section(s)
+// below already carry their own warning styling; doubling that onto the
+// container too was the "orange on orange" this phase was asked to fix. A
+// small blocking/non-blocking badge in the header carries that signal
+// instead, cheaply and honestly, without dominating the whole card.
 export default function ReviewSessionCard({ item, isHousehold, members, people = [], debts, latestSnapshotsByDebt, stagedForItem = {}, onStage, onLeaveForLater, onSaveItem, onCreatePerson, busy, resultMessage, resultTone }) {
   const palette = ttzPalette;
   const candidate = item.candidate;
@@ -457,10 +519,13 @@ export default function ReviewSessionCard({ item, isHousehold, members, people =
   const hasNothingStaged = !Object.keys(stagedForItem).length;
 
   return (
-    <Card variant={item.blocking ? "warning" : "default"}>
+    <Card variant="default">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 12 }}>
         <div>
-          <div style={{ ...TYPE_SCALE.cardTitle, color: palette.tx }}>{title}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ ...TYPE_SCALE.cardTitle, color: palette.tx }}>{title}</div>
+            <Badge tone={item.blocking ? "warning" : "neutral"}>{item.blocking ? "Affects your plan" : "Can wait"}</Badge>
+          </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
             {item.types.map((type) => <Badge key={type} tone={item.blocking ? "warning" : "neutral"}>{REVIEW_TYPE_LABEL[type] || type}</Badge>)}
           </div>
@@ -477,7 +542,9 @@ export default function ReviewSessionCard({ item, isHousehold, members, people =
         </div>
       ) : null}
 
-      <div style={{ display: "grid", gap: 10 }}>
+      <ConfirmedEvidenceSummary item={item} />
+
+      <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
         {hasMatch ? (
           <MatchSubSection item={item} staged={stagedForItem.match} onStage={onStage} debts={debts} latestSnapshotsByDebt={latestSnapshotsByDebt} />
         ) : hasDuplicate ? (

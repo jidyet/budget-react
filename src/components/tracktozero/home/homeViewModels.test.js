@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveConfirmedProgress, deriveHomeContext, deriveProjectedTrajectory } from "./homeViewModels.js";
+import { deriveConfirmedProgress, deriveHomeContext, deriveNextMove, deriveProjectedTrajectory } from "./homeViewModels.js";
 
 const debt = (overrides = {}) => ({
   id: "d1",
@@ -169,6 +169,129 @@ const monthLabelAt = (startIndex, offset) => {
   const total = startIndex + offset;
   return `${MONTH_LABELS[total % 12]} ${2026 + Math.floor(total / 12)}`;
 };
+
+describe("UX-7: deriveNextMove is a deterministic, ordered priority chain", () => {
+  const reforecastDebt = (id, name) => ({ id, name });
+
+  it("tier 1 (blocking review) wins over every lower tier at once", () => {
+    const move = deriveNextMove({}, {
+      hasBlockingReview: true,
+      planHealth: { code: "critical" },
+      debtsAwaitingReforecast: [reforecastDebt("d2", "New Card")],
+      dataFreshness: { isStale: true },
+      monthlyStatus: { shouldRecordPayment: true },
+    });
+    expect(move.action).toBe("review");
+  });
+
+  it("tier 2 (critical plan warning) wins over reforecast/stale/payment when review isn't blocking", () => {
+    const move = deriveNextMove({}, {
+      hasBlockingReview: false,
+      planHealth: { code: "critical" },
+      debtsAwaitingReforecast: [reforecastDebt("d2", "New Card")],
+      dataFreshness: { isStale: true },
+      monthlyStatus: { shouldRecordPayment: true },
+    });
+    expect(move.label).toBe("Review your plan");
+    expect(move.action).toBe("plan");
+  });
+
+  it("tier 3 (debt awaiting reforecast) wins over stale balance and payment-due when review/critical are clear", () => {
+    const move = deriveNextMove({}, {
+      hasBlockingReview: false,
+      planHealth: { code: "on_track" },
+      debtsAwaitingReforecast: [reforecastDebt("d2", "New Card")],
+      dataFreshness: { isStale: true },
+      monthlyStatus: { shouldRecordPayment: true },
+    });
+    expect(move.label).toBe("Reforecast your plan");
+    expect(move.action).toBe("plan");
+  });
+
+  it("tier 3 copy pluralizes correctly for exactly one debt vs. more than one", () => {
+    const one = deriveNextMove({}, { planHealth: {}, debtsAwaitingReforecast: [reforecastDebt("d2", "New Card")], monthlyStatus: {} });
+    expect(one.body).toContain("New Card was added");
+    expect(one.body).toContain("it isn't reflected");
+
+    const two = deriveNextMove({}, {
+      planHealth: {},
+      debtsAwaitingReforecast: [reforecastDebt("d2", "New Card"), reforecastDebt("d3", "Old Loan")],
+      monthlyStatus: {},
+    });
+    expect(two.body).toContain("New Card, Old Loan were added");
+    expect(two.body).toContain("they aren't reflected");
+  });
+
+  it("tier 4 (stale balance) wins over payment-due when reforecast isn't needed", () => {
+    const move = deriveNextMove({}, {
+      hasBlockingReview: false,
+      planHealth: { code: "on_track" },
+      debtsAwaitingReforecast: [],
+      dataFreshness: { isStale: true },
+      monthlyStatus: { shouldRecordPayment: true },
+    });
+    expect(move.action).toBe("debts");
+    expect(move.label).toBe("Update your balances");
+  });
+
+  it("tier 5 (payment confirmation) wins over tier 6 (balance update) when both could apply", () => {
+    const move = deriveNextMove({}, {
+      dataFreshness: { isStale: false },
+      currentTarget: { name: "Chase Freedom" },
+      monthlyStatus: { shouldRecordPayment: true, shouldUpdateBalance: true, supporting: "Go pay it." },
+    });
+    expect(move.label).toBe("Record your Chase Freedom payment");
+  });
+
+  it("tier 6 (balance update after a recorded payment) fires when payment confirmation isn't needed", () => {
+    const move = deriveNextMove({}, {
+      dataFreshness: { isStale: false },
+      currentTarget: { name: "Chase Freedom" },
+      monthlyStatus: { shouldRecordPayment: false, balanceRefreshNeeded: true },
+    });
+    expect(move.label).toBe("Update your Chase Freedom balance");
+  });
+
+  it("tier 7 (no active plan) fires when nothing above applies and there is genuinely no plan yet", () => {
+    const move = deriveNextMove({}, {
+      hasBlockingReview: false,
+      planHealth: undefined,
+      debtsAwaitingReforecast: [],
+      dataFreshness: null,
+      monthlyStatus: { state: "no_plan", shouldRecordPayment: false, shouldUpdateBalance: false },
+      homeState: "no-plan",
+    });
+    expect(move.label).toBe("Pick your payoff strategy");
+    expect(move.action).toBe("compare");
+  });
+
+  it("tier 8 (all confirmed paid off) fires once every earlier tier is clear and a plan exists", () => {
+    const move = deriveNextMove({}, {
+      hasBlockingReview: false,
+      planHealth: { code: "on_track" },
+      debtsAwaitingReforecast: [],
+      dataFreshness: { isStale: false },
+      monthlyStatus: { shouldRecordPayment: false, shouldUpdateBalance: false },
+      homeState: "all-paid-off",
+      allDebtsArePaidOff: true,
+    });
+    expect(move.label).toBe("You've confirmed $0");
+  });
+
+  it("tier 9 fallback (stay on target) fires only when every higher tier is genuinely clear", () => {
+    const move = deriveNextMove({}, {
+      hasBlockingReview: false,
+      planHealth: { code: "on_track" },
+      debtsAwaitingReforecast: [],
+      dataFreshness: { isStale: false },
+      monthlyStatus: { shouldRecordPayment: false, shouldUpdateBalance: false },
+      homeState: "active-plan",
+      allDebtsArePaidOff: false,
+    });
+    expect(move.label).toBe("Stay on this month's target");
+    expect(move.action).toBe("debts");
+  });
+});
 
 describe("UX-2.1 fix: deriveProjectedTrajectory / sampleEvenly must terminate for any real plan length", () => {
   it("REGRESSION: never hangs for a real plan's expectedCheckpoints (24+ months), and returns at most 8 sampled points with valid dates", () => {

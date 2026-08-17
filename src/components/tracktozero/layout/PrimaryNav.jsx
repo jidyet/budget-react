@@ -6,14 +6,15 @@ import { ttzPalette, TYPE_SCALE } from "../theme.js";
 // not a raw <button> group with form-button styling - real <nav> landmark,
 // aria-current for the active tab, keyboard-focusable, no icon library
 // dependency added. Review sits right after Home since it directly affects
-// how much the Debts/Plan numbers can be trusted. "Activity" is a known
-// future destination - not added here since it has no screen yet (Part 5:
-// don't build components with no consumer).
+// how much the Debts/Plan numbers can be trusted. Activity (UX-7) sits after
+// Plan, before Settings - a history/trust-building surface, not part of the
+// primary Home -> Review -> Debts -> Plan action flow.
 const ITEMS = [
   { key: "home", label: "Home" },
   { key: "review", label: "Review" },
   { key: "debts", label: "Debts" },
   { key: "plan", label: "Plan" },
+  { key: "activity", label: "Activity" },
   { key: "settings", label: "Settings" },
 ];
 

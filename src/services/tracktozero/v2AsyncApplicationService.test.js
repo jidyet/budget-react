@@ -23,6 +23,42 @@ describe("TrackToZero v2 async application service", () => {
     expect(snapshot.status.code).toBe("needs_review");
   });
 
+  it("returns bounded, workspace-scoped raw records for the Activity feed (UX-7)", async () => {
+    const { service } = makeService();
+    const page = await service.getActivityFeed("personal-seed", { limit: 2 });
+    expect(page.records.balanceSnapshots.length).toBeGreaterThan(0);
+    // Bounded per-debt, not unbounded: no single debt's snapshot history in
+    // this page can exceed (cursor + limit) even though the seed carries
+    // more history than that for personal-capital-one.
+    const perDebtCounts = page.records.balanceSnapshots.reduce((counts, snap) => {
+      counts[snap.debtId] = (counts[snap.debtId] || 0) + 1;
+      return counts;
+    }, {});
+    expect(Object.values(perDebtCounts).every((count) => count <= 2)).toBe(true);
+    expect(page.members.length).toBeGreaterThan(0);
+    expect(page.limit).toBe(2);
+    expect(page.cursor).toBe(0);
+    // personal-capital-one has more than 2 balance snapshots in the seed, so
+    // a limit:2 page must NOT claim it already has everything.
+    expect(page.exhausted).toBe(false);
+
+    const bigPage = await service.getActivityFeed("personal-seed", { limit: 100 });
+    expect(bigPage.exhausted).toBe(true);
+  });
+
+  it("persists a real projectedZeroDate on newly created and reforecast PlanVersions (UX-7)", async () => {
+    const { repository, service } = makeService();
+    await service.createNewDebt("personal-seed", {
+      name: "Fresh Card", ownerType: "member", currentBalance: 1000, apr: 0.2, minimumRequiredPayment: 50,
+    });
+    const { version } = await service.createDraftPlan("personal-seed", { strategy: "avalanche", extraMonthlyPayment: 50 });
+    expect(version.projectedZeroDate).toBeTruthy();
+
+    const reforecast = await service.applyReforecast("personal-seed", { extraMonthlyPayment: 75 });
+    expect(reforecast.version.projectedZeroDate).toBeTruthy();
+    expect(repository.getPlanVersion("personal-seed", "personal-plan", reforecast.version.id).projectedZeroDate).toBe(reforecast.version.projectedZeroDate);
+  });
+
   it("keeps legacy preview mode read-only in async runtime", async () => {
     const repository = new InMemoryTrackToZeroRepository(createTrackToZeroV2Seed());
     const service = createTrackToZeroV2AsyncAppService({

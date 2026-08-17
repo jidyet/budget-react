@@ -7,6 +7,15 @@ import Card from "../ui/Card.jsx";
 import StatusBadge from "../ui/StatusBadge.jsx";
 import { deriveHomeContext } from "./homeViewModels.js";
 import { PERIOD_STATES } from "./homeMonthlyStatus.js";
+import { deriveMilestones } from "./milestones.js";
+import NextMoveHero from "./NextMoveHero.jsx";
+import MilestoneBanner from "./MilestoneBanner.jsx";
+import ActivityPreviewCard from "./ActivityPreviewCard.jsx";
+
+// Below this many observed points, a full-size trend chart would just be a
+// near-empty frame with one or two dots - a compact callout is more honest
+// about "there isn't a trend yet" than dressing up sparse data as a chart.
+const MIN_TRAJECTORY_POINTS_FOR_CHART = 3;
 
 const GAP = "var(--ttz-space-5, 24px)";
 const GAP_SM = "var(--ttz-space-4, 16px)";
@@ -225,8 +234,8 @@ function DebtSnapshotCard({ homeContext, onGoToDebts }) {
   );
 }
 
-function ThisMonthCard({ homeContext, onRecordPayment, onViewDetails, onCompareStrategies }) {
-  const { currentTarget, strategy, activeVersion, monthlyStatus, planHealth, nextMove } = homeContext;
+function ThisMonthCard({ homeContext, onViewDetails, onCompareStrategies }) {
+  const { currentTarget, activeVersion, monthlyStatus, planHealth } = homeContext;
   if (!activeVersion) return null;
 
   const toneKey = monthlyStatus?.state === PERIOD_STATES.recorded
@@ -256,12 +265,6 @@ function ThisMonthCard({ homeContext, onRecordPayment, onViewDetails, onCompareS
     );
   }
 
-  const primaryAction = monthlyStatus.shouldUpdateBalance
-    ? { label: "Update balance", onClick: onViewDetails }
-    : monthlyStatus.shouldRecordPayment
-      ? { label: monthlyStatus.ctaLabel || "Record payment", onClick: onRecordPayment }
-      : { label: monthlyStatus.ctaLabel || "View debt", onClick: onViewDetails };
-
   return (
     <Card variant="elevated" style={{ padding: 24, borderLeft: `4px solid ${tone.fg}` }}>
       <div style={{ display: "grid", gap: 14 }}>
@@ -289,15 +292,7 @@ function ThisMonthCard({ homeContext, onRecordPayment, onViewDetails, onCompareS
           {dueDayLabel(currentTarget.dueDay) ? <MetricBlock label="Timing" value={dueDayLabel(currentTarget.dueDay)} /> : null}
         </div>
 
-        <div style={{ padding: 14, borderRadius: RADIUS, background: ttzPalette.surf2, border: `1px solid ${ttzPalette.border}` }}>
-          <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Your next move</div>
-          <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, margin: "8px 0 0" }}>
-            <strong>{nextMove?.label || monthlyStatus.headline}</strong> {nextMove?.body || monthlyStatus.supporting} Your active {strategyLabel(strategy).toLowerCase()} plan is currently aiming extra money at <strong>{currentTarget.name}</strong>.
-          </p>
-        </div>
-
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <Button variant="primary" onClick={primaryAction.onClick}>{primaryAction.label}</Button>
           <Button variant="secondary" onClick={onViewDetails}>View debt details</Button>
         </div>
       </div>
@@ -346,12 +341,34 @@ function ActivePlanCard({ homeContext, onViewMyPlan, onCompareStrategies, onTryW
   );
 }
 
+function NotEnoughHistoryCard({ observed }) {
+  return (
+    <Card variant="default" style={{ padding: 24 }}>
+      <div style={{ display: "grid", gap: 10 }}>
+        <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Your debt trend</div>
+        <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>Not enough history yet</div>
+        <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>
+          {observed.length
+            ? `Your starting confirmed balance is ${money(observed[0]?.balance || 0)}. A couple more confirmed balance updates will unlock your trend chart.`
+            : "Add a confirmed balance update to start building your debt trend."}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function TrajectoryChart({ homeContext }) {
   const observed = homeContext.trajectory?.observed || [];
   const projected = homeContext.trajectory?.projected || [];
   const allPoints = [...observed, ...projected];
-  if (!allPoints.length) return null;
   const hasProjection = projected.length > 1;
+  // A real projected path is still worth showing even with sparse observed
+  // history (e.g. right after activating a plan) - the gate only replaces
+  // the chart with a compact callout when there's neither a meaningful
+  // observed trend NOR a projection to show.
+  if (!allPoints.length || (!hasProjection && observed.length < MIN_TRAJECTORY_POINTS_FOR_CHART)) {
+    return <NotEnoughHistoryCard observed={observed} />;
+  }
   const hasObservedTrend = observed.length > 1;
 
   const width = 780;
@@ -734,20 +751,23 @@ export default function HomeCommandCenter({
   onGoToReview,
   onUploadBudget,
   onAddDebt,
-  onRecordPayment,
   onViewDetails,
   onPreviewScenario,
   onViewMyPlan,
   onCompareStrategies,
   onTryWhatIf,
   onGoToDebts,
+  activityPage,
+  onViewAllActivity,
 }) {
   const homeContext = useMemo(() => deriveHomeContext(snapshot, reviewSnapshot, scenario), [snapshot, reviewSnapshot, scenario]);
+  const milestones = useMemo(() => deriveMilestones(homeContext), [homeContext]);
 
   const goToMyPlan = onViewMyPlan || onGoToPlan;
   const goToCompare = onCompareStrategies || onGoToPlan;
   const goToWhatIf = onTryWhatIf || (() => onPreviewScenario?.(100));
   const goToDebts = onGoToDebts || onViewDetails || onAddDebt || onGoToPlan;
+  const nextMoveActions = { review: onGoToReview, plan: goToMyPlan, compare: goToCompare, debts: goToDebts };
 
   if (!snapshot) {
     return (
@@ -800,12 +820,13 @@ export default function HomeCommandCenter({
 
   return (
     <main style={{ display: "grid", gap: GAP }}>
+      <NextMoveHero homeContext={homeContext} actions={nextMoveActions} />
+      <MilestoneBanner workspaceId={homeContext.workspace?.id} milestones={milestones} />
       <DebtFreedomHero homeContext={homeContext} />
 
       <div style={gridColumns(320)}>
         <ThisMonthCard
           homeContext={homeContext}
-          onRecordPayment={onRecordPayment || goToDebts}
           onViewDetails={goToDebts}
           onCompareStrategies={goToCompare}
         />
@@ -834,6 +855,7 @@ export default function HomeCommandCenter({
         {homeContext.isHousehold ? <HouseholdBreakdownCard homeContext={homeContext} onGoToDebts={goToDebts} /> : null}
         <MomentumCard homeContext={homeContext} />
         <NextMilestoneCard homeContext={homeContext} onViewMyPlan={goToMyPlan} />
+        <ActivityPreviewCard activityPage={activityPage} onViewAllActivity={onViewAllActivity} />
         <WhatIfCard homeContext={homeContext} onTryWhatIf={goToWhatIf} />
       </div>
 

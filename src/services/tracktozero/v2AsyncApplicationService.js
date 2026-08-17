@@ -518,6 +518,60 @@ export const createTrackToZeroV2AsyncAppService = ({
     };
   };
 
+  // Bounded, paginated raw records for the Activity feed - deliberately
+  // returns raw records (not the derived, human-readable entries) so the
+  // pure derivation (deriveActivityFeed, components/tracktozero/home/
+  // activityFeed.js) stays a view-layer concern, not a service concern.
+  //
+  // No dedicated activity/audit collection exists in this schema (confirmed:
+  // grepped the whole codebase and firestore.v2.rules, nothing matches) -
+  // this assembles the feed from records that already exist for other
+  // reasons. Firestore rules cannot secure a collectionGroup query across
+  // this workspace's balance_snapshots/payment_events (they sit two levels
+  // of wildcard below workspaces/{workspaceId}, the exact shape that broke
+  // collectionGroup security during SEC-INVITE's member_index work), so this
+  // fans out one bounded, limit()-qualified query per debt instead of one
+  // unbounded/unsecurable cross-debt query.
+  //
+  // `cursor` is a plain offset (items already shown), not a timestamp -
+  // fetching (cursor + limit) records from each bounded per-debt source is
+  // always sufficient to assemble the true globally-most-recent page of
+  // `limit` items starting at that offset (no single source can contribute
+  // more than (cursor + limit) items to a merged top-(cursor + limit) list).
+  // Every query stays limit()-qualified; the bound only grows with how deep
+  // the caller has actually paged, the normal cost shape of offset
+  // pagination - this is never an unbounded full-history read.
+  const getActivityFeed = async (workspaceId, { limit = 20, cursor = 0 } = {}) => {
+    const context = await getWorkspaceContext(workspaceId);
+    const debts = await repository.listDebts(workspaceId);
+    const perSourceCap = cursor + limit;
+    const [balanceSnapshotLists, paymentEventLists, planVersions] = await Promise.all([
+      Promise.all(debts.map((debt) => repository.listBalanceSnapshots(workspaceId, debt.id, { limit: perSourceCap }))),
+      typeof repository.listPaymentEvents === "function"
+        ? Promise.all(debts.map((debt) => repository.listPaymentEvents(workspaceId, debt.id, { limit: perSourceCap })))
+        : Promise.resolve([]),
+      (async () => {
+        const workspace = await repository.getWorkspace(workspaceId);
+        if (!workspace?.activePlanId) return [];
+        const versions = await repository.listPlanVersions(workspaceId, workspace.activePlanId);
+        return versions.slice(-perSourceCap);
+      })(),
+    ]);
+    // True once every bounded per-debt source came back under its cap - i.e.
+    // this page already contains everything that exists, so "Load more"
+    // would just re-fetch the same records rather than reveal older ones.
+    const exhausted = [...balanceSnapshotLists, ...paymentEventLists].every((list) => list.length < perSourceCap)
+      && planVersions.length < perSourceCap;
+    return {
+      records: { debts, balanceSnapshots: balanceSnapshotLists.flat(), paymentEvents: paymentEventLists.flat(), planVersions },
+      members: context.members,
+      people: context.people,
+      limit,
+      cursor,
+      exhausted,
+    };
+  };
+
   const renameWorkspace = async (workspaceId, name) => {
     assertInteractive();
     const { workspace, membership } = await getWorkspaceContext(workspaceId);
@@ -694,7 +748,7 @@ export const createTrackToZeroV2AsyncAppService = ({
       ? debts.filter((debt) => debtIds.includes(debt.id))
       : debts.filter((debt) => debt.includedInCorePayoffPlan !== false && debt.status === "active");
     const plan = await repository.savePlan({ id: id("plan"), workspaceId, status: "draft", createdAt: asOf, createdBy: actorId });
-    const version = await repository.savePlanVersion({
+    const versionInput = {
       id: id("version"),
       planId: plan.id,
       workspaceId,
@@ -707,6 +761,17 @@ export const createTrackToZeroV2AsyncAppService = ({
       createdAt: asOf,
       createdBy: actorId,
       createdBecause: "activation",
+    };
+    // UX-7: persist what this version projected AT CREATION TIME, so a later
+    // reforecast can honestly compare "old projected $0 date vs new" by
+    // reading two persisted facts instead of re-simulating history off
+    // today's live balances (which would silently substitute current data
+    // for what the plan actually projected back then).
+    const { month, year } = parseAsOf(asOf);
+    const { projection } = buildProjectionWithWarnings({ debts: included, planVersion: versionInput, startMonth: month, startYear: year });
+    const version = await repository.savePlanVersion({
+      ...versionInput,
+      projectedZeroDate: projection.at(-1)?.month || "",
     });
     return { plan, version };
   };
@@ -1564,7 +1629,7 @@ export const createTrackToZeroV2AsyncAppService = ({
     // never actually joined the payoff queue no matter how many times you
     // reforecasted.
     const included = snapshot.debts.filter((debt) => debt.includedInCorePayoffPlan !== false && debt.status === "active");
-    const nextVersion = {
+    const nextVersionInput = {
       ...snapshot.activeContext.version,
       startingDebtSnapshot: included.map(createStartingDebtSnapshotItem),
       ...overrides,
@@ -1574,6 +1639,16 @@ export const createTrackToZeroV2AsyncAppService = ({
       createdAt: asOf,
       createdBy: actorId,
       createdBecause: "reforecast",
+    };
+    // UX-7: same reasoning as createDraftPlan - persist this version's
+    // projected $0 date at creation time so reforecast feedback can later
+    // diff two real persisted facts (this version's vs. the outgoing one's)
+    // instead of re-deriving history from today's live balances.
+    const { month: reforecastMonth, year: reforecastYear } = parseAsOf(asOf);
+    const { projection: reforecastProjection } = buildProjectionWithWarnings({ debts: included, planVersion: nextVersionInput, startMonth: reforecastMonth, startYear: reforecastYear });
+    const nextVersion = {
+      ...nextVersionInput,
+      projectedZeroDate: reforecastProjection.at(-1)?.month || "",
     };
     const context = await repository.reforecastActivePlan({
       workspaceId,
@@ -1914,6 +1989,7 @@ export const createTrackToZeroV2AsyncAppService = ({
     getWorkspaceContext,
     getWorkspaceSnapshot,
     getActivePlanContext,
+    getActivityFeed,
     renameWorkspace,
     connectWorkspacePersonToMember,
     createNewDebt,

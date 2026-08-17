@@ -5,13 +5,16 @@
 // competing workspace-mode flag and not a layout/structural change - the
 // existing `workspace.type === "household"` checks scattered through the
 // codebase (already confirmed correct everywhere they're used - owner
-// badges, scope selectors, breakdown cards) are untouched. Home is
-// deliberately NOT wired to this (reserved for UX-7's fuller Home redesign).
+// badges, scope selectors, breakdown cards) are untouched.
+//
+// UX-7: extended with Home's Next Move hero eyebrow - Home was deliberately
+// left out of this contract in UX-6.2 pending its fuller redesign.
 export const getWorkspacePresentation = (workspace) => {
   const isHousehold = workspace?.type === "household";
   return {
     isHousehold,
     debtHeading: isHousehold ? "Our debt" : "My debt",
     planHeading: isHousehold ? "Household payoff plan" : "My payoff plan",
+    nextMoveEyebrow: isHousehold ? "What's next for your household" : "Your next move",
   };
 };

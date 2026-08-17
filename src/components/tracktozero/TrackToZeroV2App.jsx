@@ -19,6 +19,7 @@ import StatusBadge from "./ui/StatusBadge.jsx";
 import Badge from "./ui/Badge.jsx";
 import ReviewCenter from "./review/ReviewCenter.jsx";
 import HomeCommandCenter from "./home/HomeCommandCenter.jsx";
+import ActivityCenter from "./activity/ActivityCenter.jsx";
 import PlanSection from "./plan/PlanSection.jsx";
 import { navigateToPlanDestination } from "./plan/planRouting.js";
 import { formatMoney as money, formatPercent as percent } from "./formatting.js";
@@ -374,6 +375,8 @@ function Home({
   onCompareStrategies,
   onTryWhatIf,
   onGoToDebts,
+  activityPage,
+  onViewAllActivity,
 }) {
   return (
     <HomeCommandCenter
@@ -392,6 +395,8 @@ function Home({
       onCompareStrategies={onCompareStrategies}
       onTryWhatIf={onTryWhatIf}
       onGoToDebts={onGoToDebts}
+      activityPage={activityPage}
+      onViewAllActivity={onViewAllActivity}
     />
   );
 }
@@ -777,8 +782,10 @@ export default function TrackToZeroV2App() {
   const [runtimeState, setRuntimeState] = useState({ status: "idle", snapshot: null, workspaces: [], error: "" });
   const [writeState, setWriteState] = useState({ inProgress: false, action: "", error: "", success: "", errorAction: "" });
   const [reviewState, setReviewState] = useState({ status: "idle", snapshot: null });
+  const [activityState, setActivityState] = useState({ status: "idle", page: null });
   const requestSeq = useRef(0);
   const reviewRequestSeq = useRef(0);
+  const activityRequestSeq = useRef(0);
   const asOf = useMemo(() => usesRealAuthUi ? new Date().toISOString() : V2_TEST_NOW, [usesRealAuthUi]);
   const isFreshLocalBetaSignup = Boolean(
     isLocalBetaRuntime
@@ -944,6 +951,32 @@ export default function TrackToZeroV2App() {
       setReviewState({ status: "error", snapshot: null });
     }
   }, [service, workspaceId]);
+
+  // UX-7: Activity is intentionally NOT fetched alongside the main
+  // snapshot/review load (see the effect below, gated on tab) - its bounded
+  // per-debt reads (see v2AsyncApplicationService.js's getActivityFeed) are
+  // cheap in isolation, but there is no reason to pay them on every
+  // workspace load when the user may never open Home's activity preview or
+  // the Activity tab this session.
+  const refreshActivity = useCallback(async (nextWorkspaceId = workspaceId, options = {}) => {
+    if (!nextWorkspaceId) return;
+    const requestId = activityRequestSeq.current + 1;
+    activityRequestSeq.current = requestId;
+    setActivityState((state) => ({ ...state, status: "loading" }));
+    try {
+      const page = await service.getActivityFeed(nextWorkspaceId, options);
+      if (activityRequestSeq.current !== requestId) return;
+      setActivityState({ status: "loaded", page });
+    } catch {
+      if (activityRequestSeq.current !== requestId) return;
+      setActivityState({ status: "error", page: null });
+    }
+  }, [service, workspaceId]);
+
+  useEffect(() => {
+    if (tab !== "home" && tab !== "activity") return;
+    refreshActivity(workspaceId, { limit: tab === "activity" ? 20 : 5 });
+  }, [tab, workspaceId, refreshActivity]);
 
   const runAction = async (action, callback, { write = true } = {}) => {
     setWriteState({ inProgress: write, action, error: "", success: "", errorAction: "" });
@@ -1276,7 +1309,17 @@ export default function TrackToZeroV2App() {
           onScenario={(extra) => runAction("preview scenario", async () => {
             setScenario(await service.previewScenario(workspaceId, { extraMonthlyPayment: extra }));
           }, { write: false })}
+          activityPage={activityState.page}
+          onViewAllActivity={() => navigateTab("activity")}
         />}
+        {tab === "activity" && (
+          <ActivityCenter
+            workspace={snapshot.workspace}
+            page={activityState.page}
+            loading={activityState.status === "loading" && !activityState.page}
+            onLoadMore={(cursor, limit) => refreshActivity(workspaceId, { cursor, limit })}
+          />
+        )}
         {tab === "review" && (
           <ReviewCenter
             snapshot={snapshot}

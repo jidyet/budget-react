@@ -7,6 +7,7 @@ describe("getWorkspacePresentation (UX-6.2)", () => {
       isHousehold: false,
       debtHeading: "My debt",
       planHeading: "My payoff plan",
+      nextMoveEyebrow: "Your next move",
     });
   });
 
@@ -15,6 +16,7 @@ describe("getWorkspacePresentation (UX-6.2)", () => {
       isHousehold: true,
       debtHeading: "Our debt",
       planHeading: "Household payoff plan",
+      nextMoveEyebrow: "What's next for your household",
     });
   });
 

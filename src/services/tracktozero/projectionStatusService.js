@@ -65,6 +65,19 @@ export const sortDebtsForStrategy = (debts = [], strategy = "avalanche") =>
     ? Number(a.currentBalance || 0) - Number(b.currentBalance || 0)
     : (b.aprStatus === "unknown" ? -1 : Number(b.apr || 0)) - (a.aprStatus === "unknown" ? -1 : Number(a.apr || 0)));
 
+// A live, active-plan-included debt that isn't in the active version's
+// frozen payoffQueue (built from startingDebtSnapshot at the last
+// activation/reforecast - see getIncludedDebts). Deliberately a set
+// difference over already-trusted data, not new payoff math - lets Plan and
+// Home both honestly surface "this debt exists but isn't reflected in your
+// plan yet" instead of one of them going quiet about it. Shared here so
+// both surfaces can never drift into two different definitions of the same
+// fact.
+export const deriveDebtsAwaitingReforecast = ({ debts = [], payoffQueue = [] } = {}) => {
+  const queuedIds = new Set(payoffQueue.map((debt) => debt.id));
+  return debts.filter((debt) => debt.status === "active" && debt.includedInCorePayoffPlan !== false && !queuedIds.has(debt.id));
+};
+
 export const evaluateProjectionWarnings = ({
   debts = [],
   planVersion = null,

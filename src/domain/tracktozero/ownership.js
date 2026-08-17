@@ -113,6 +113,23 @@ export const namesTokenMatch = (rawName, candidateName) => {
 export const matchMemberByName = (suggestion, members = []) =>
   members.find((member) => member.status !== "removed" && namesTokenMatch(suggestion, member.displayName)) || null;
 
+// Resolves a raw createdBy/actor uid (from a BalanceSnapshot, PaymentEvent,
+// or PlanVersion - all append-only records that only ever store the acting
+// uid, never a denormalized name) to a real display name via the workspace's
+// own members/people lists. Deliberately takes ONLY a uid, never a debt or
+// its owner - an activity feed must show who actually performed an action,
+// and the person who owns a debt is not necessarily who acted on it. Falls
+// back to a neutral, non-invented label when the uid no longer resolves
+// (e.g. a removed member) rather than guessing.
+export const resolveActorName = (uid, { members = [], people = [] } = {}) => {
+  if (!uid) return "A workspace member";
+  const member = members.find((candidate) => candidate.uid === uid);
+  if (member?.displayName) return member.displayName;
+  const person = people.find((candidate) => candidate.id === uid);
+  if (person?.displayName) return person.displayName;
+  return "A workspace member";
+};
+
 // ── Balance truth (UX-0) ──────────────────────────────────────────────────
 //
 // Debts written before balanceStatus existed (same backward-compatibility

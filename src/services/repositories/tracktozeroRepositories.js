@@ -233,11 +233,12 @@ export class InMemoryTrackToZeroRepository {
     const key = this.key(`${workspaceId}/${debtId}`, eventId);
     return this.paymentEvents.has(key) ? clone(this.paymentEvents.get(key)) : null;
   }
-  listPaymentEvents(workspaceId, debtId) {
-    return [...this.paymentEvents.values()]
+  listPaymentEvents(workspaceId, debtId, { limit } = {}) {
+    const events = [...this.paymentEvents.values()]
       .filter((e) => e.workspaceId === workspaceId && e.debtId === debtId)
       .sort((a, b) => Date.parse(b.paidAt) - Date.parse(a.paidAt) || String(b.id).localeCompare(String(a.id)))
       .map(clone);
+    return Number.isFinite(limit) ? events.slice(0, limit) : events;
   }
   updatePaymentEvent() { throw new Error("PaymentEvent core facts are append-only; create a correction record"); }
 
@@ -247,11 +248,12 @@ export class InMemoryTrackToZeroRepository {
     return snapshot;
   }
   updateBalanceSnapshot() { throw new Error("BalanceSnapshot core facts are append-only; create a correction record"); }
-  listBalanceSnapshots(workspaceId, debtId) {
-    return [...this.balanceSnapshots.values()]
+  listBalanceSnapshots(workspaceId, debtId, { limit } = {}) {
+    const snapshots = [...this.balanceSnapshots.values()]
       .filter((s) => s.workspaceId === workspaceId && s.debtId === debtId)
       .sort((a, b) => Date.parse(b.observedAt) - Date.parse(a.observedAt) || String(b.id).localeCompare(String(a.id)))
       .map(clone);
+    return Number.isFinite(limit) ? snapshots.slice(0, limit) : snapshots;
   }
 
   createExpectedCheckpoint(input) {

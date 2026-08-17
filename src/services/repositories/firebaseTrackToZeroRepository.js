@@ -4,6 +4,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit as fsLimit,
   orderBy,
   query,
   runTransaction,
@@ -321,9 +322,11 @@ export class FirebaseTrackToZeroRepository {
     const snap = await getDoc(doc(this.db, v2Paths.paymentEvent(workspaceId, debtId, eventId)));
     return snap.exists() ? fromFirestoreDoc("paymentEvent", snap.data()) : null;
   }
-  async listPaymentEvents(workspaceId, debtId) {
+  async listPaymentEvents(workspaceId, debtId, { limit } = {}) {
     const colRef = collection(this.db, "workspaces", workspaceId, "debts", debtId, "payment_events");
-    const snap = await getDocs(query(colRef, orderBy("paidAt", "desc"), orderBy("id", "desc")));
+    const clauses = [orderBy("paidAt", "desc"), orderBy("id", "desc")];
+    if (Number.isFinite(limit)) clauses.push(fsLimit(limit));
+    const snap = await getDocs(query(colRef, ...clauses));
     return snap.docs.map((d) => fromFirestoreDoc("paymentEvent", d.data()));
   }
   updatePaymentEvent() {
@@ -342,9 +345,11 @@ export class FirebaseTrackToZeroRepository {
   updateBalanceSnapshot() {
     throw new Error("BalanceSnapshot core facts are append-only; create a correction record");
   }
-  async listBalanceSnapshots(workspaceId, debtId) {
+  async listBalanceSnapshots(workspaceId, debtId, { limit } = {}) {
     const colRef = collection(this.db, "workspaces", workspaceId, "debts", debtId, "balance_snapshots");
-    const snap = await getDocs(query(colRef, orderBy("observedAt", "desc"), orderBy("id", "desc")));
+    const clauses = [orderBy("observedAt", "desc"), orderBy("id", "desc")];
+    if (Number.isFinite(limit)) clauses.push(fsLimit(limit));
+    const snap = await getDocs(query(colRef, ...clauses));
     return snap.docs.map((d) => fromFirestoreDoc("balanceSnapshot", d.data()));
   }
 

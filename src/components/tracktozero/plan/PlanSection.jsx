@@ -13,6 +13,7 @@ import ConfirmationDialog from "../ui/ConfirmationDialog.jsx";
 import { ttzPalette, TYPE_SCALE } from "../theme.js";
 import { formatMoney as money, formatPercent as percent } from "../formatting.js";
 import { presentedOwnerLabel } from "../../../domain/tracktozero/ownership.js";
+import { deriveDebtsAwaitingReforecast } from "../../../services/tracktozero/projectionStatusService.js";
 import { PLAN_DESTINATIONS, resolvePlanDestination, buildPlanPath, navigateToPlanDestination } from "./planRouting.js";
 import { getWorkspacePresentation } from "../workspacePresentation.js";
 
@@ -131,15 +132,7 @@ function MyPlanView({ snapshot, service, refresh, runAction, writeState }) {
   }
 
   const strategyLabel = activeVersion.strategy === "snowball" ? "Snowball" : "Avalanche";
-  // The active plan's payoff queue reflects activeVersion.startingDebtSnapshot,
-  // frozen at the last activation/reforecast - deliberately, so an activated
-  // plan never silently absorbs a newly added debt without an explicit
-  // reforecast. Comparing today's live, still-included debts against that
-  // frozen queue is presentation-only (a set difference, not new payoff
-  // math) so My Plan can honestly say a debt exists outside the plan
-  // instead of just going quiet about it.
-  const queuedIds = new Set((snapshot.payoffQueue || []).map((debt) => debt.id));
-  const debtsAwaitingReforecast = (snapshot.debts || []).filter((debt) => debt.status === "active" && debt.includedInCorePayoffPlan !== false && !queuedIds.has(debt.id));
+  const debtsAwaitingReforecast = deriveDebtsAwaitingReforecast({ debts: snapshot.debts || [], payoffQueue: snapshot.payoffQueue || [] });
 
   return (
     <div style={{ display: "grid", gap: GAP }}>

@@ -448,7 +448,7 @@ export const createTrackToZeroV2AppService = ({
     const debts = repository.listDebts(workspaceId);
     const included = debtIds.length ? debts.filter((debt) => debtIds.includes(debt.id)) : debts.filter((debt) => debt.includedInCorePayoffPlan !== false && debt.status === "active");
     const plan = repository.savePlan({ id: id("plan"), workspaceId, status: "draft", createdAt: asOf, createdBy: actorId });
-    const version = repository.savePlanVersion({
+    const versionInput = {
       id: id("version"),
       planId: plan.id,
       workspaceId,
@@ -461,6 +461,15 @@ export const createTrackToZeroV2AppService = ({
       createdAt: asOf,
       createdBy: actorId,
       createdBecause: "activation",
+    };
+    // UX-7: persist what this version projected at creation time (kept in
+    // parity with the async service's createDraftPlan) - see the matching
+    // comment there for why.
+    const { month: draftMonth, year: draftYear } = parseAsOf(asOf);
+    const draftProjection = buildProjectionWithWarnings({ debts: included, planVersion: versionInput, startMonth: draftMonth, startYear: draftYear }).projection;
+    const version = repository.savePlanVersion({
+      ...versionInput,
+      projectedZeroDate: draftProjection.at(-1)?.month || "",
     });
     return { plan, version };
   };
@@ -525,7 +534,7 @@ export const createTrackToZeroV2AppService = ({
     // never actually join the plan no matter how many times it was
     // reforecasted.
     const included = snapshot.debts.filter((debt) => debt.includedInCorePayoffPlan !== false && debt.status === "active");
-    const nextVersion = repository.savePlanVersion({
+    const nextVersionInput = {
       ...snapshot.activeContext.version,
       startingDebtSnapshot: included.map(createStartingDebtSnapshotItem),
       ...overrides,
@@ -535,6 +544,14 @@ export const createTrackToZeroV2AppService = ({
       createdAt: asOf,
       createdBy: actorId,
       createdBecause: "reforecast",
+    };
+    // UX-7: persist this version's projected $0 date (kept in parity with
+    // the async service's applyReforecast) - see the matching comment there.
+    const { month: reforecastMonth, year: reforecastYear } = parseAsOf(asOf);
+    const reforecastProjection = buildProjectionWithWarnings({ debts: included, planVersion: nextVersionInput, startMonth: reforecastMonth, startYear: reforecastYear }).projection;
+    const nextVersion = repository.savePlanVersion({
+      ...nextVersionInput,
+      projectedZeroDate: reforecastProjection.at(-1)?.month || "",
     });
     return activatePlan(workspaceId, snapshot.activeContext.plan.id, nextVersion.id);
   };

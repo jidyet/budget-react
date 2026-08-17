@@ -8,6 +8,7 @@
 
 import { isBalanceUnresolved, isConfirmedZero } from "../../../domain/tracktozero/ownership.js";
 import { deriveCurrentPlanPeriodStatus } from "./homeMonthlyStatus.js";
+import { TRACKTOZERO_STATUS_THRESHOLDS, deriveDebtsAwaitingReforecast } from "../../../services/tracktozero/projectionStatusService.js";
 
 const MAX_TRAJECTORY_POINTS = 8;
 const HOME_REFERENCE_MONTH = "Aug 2026";
@@ -408,7 +409,7 @@ export const deriveDataFreshness = (snapshot, asOf = new Date()) => {
 
   const lastUpdate = new Date(oldest.snapshot.observedAt);
   const daysOld = Math.floor((asOf.getTime() - lastUpdate.getTime()) / (1000 * 60 * 60 * 24));
-  const isStale = daysOld >= 45;
+  const isStale = daysOld >= TRACKTOZERO_STATUS_THRESHOLDS.staleBalanceDays;
 
   const staleDebts = debtsWithSnapshots
     .map((item) => ({
@@ -536,7 +537,75 @@ export const deriveMomentum = (snapshot, progress, trajectory) => {
   };
 };
 
+// The single deterministic priority chain behind Home's "Next Move" hero.
+// Exactly one state wins - the first branch whose condition is true, in this
+// fixed order. Tiers 2-6 all structurally no-op before a plan exists
+// (planHealth can't be "critical" pre-plan, debtsAwaitingReforecast is
+// always empty pre-plan since there's no frozen queue to lag behind,
+// dataFreshness/monthlyStatus are null/no-plan-shaped pre-plan) - so in
+// practice only blocking review can ever preempt the no-plan state, which
+// matches the product intent: resolve bad imported data before committing
+// to a plan built on it.
 export const deriveNextMove = (snapshot, context) => {
+  if (context.hasBlockingReview) {
+    return {
+      label: "Resolve a review item",
+      body: "A review item is blocking full plan trust. Clean that up before relying on the projection.",
+      ctaLabel: "Open Review",
+      action: "review",
+    };
+  }
+
+  if (context.planHealth?.code === "critical") {
+    return {
+      label: "Review your plan",
+      body: "Your active plan has a critical warning (for example, a projected balance that isn't shrinking). Review it before trusting this plan's status.",
+      ctaLabel: "View My Plan",
+      action: "plan",
+    };
+  }
+
+  const debtsAwaitingReforecast = context.debtsAwaitingReforecast || [];
+  if (debtsAwaitingReforecast.length > 0) {
+    const names = debtsAwaitingReforecast.map((debt) => debt.name).join(", ");
+    return {
+      label: "Reforecast your plan",
+      body: `${names} ${debtsAwaitingReforecast.length === 1 ? "was" : "were"} added after this plan was last set, so ${debtsAwaitingReforecast.length === 1 ? "it isn't" : "they aren't"} reflected yet. Reforecast to include ${debtsAwaitingReforecast.length === 1 ? "it" : "them"}.`,
+      ctaLabel: "View My Plan",
+      action: "plan",
+    };
+  }
+
+  if (context.dataFreshness?.isStale) {
+    return {
+      label: "Update your balances",
+      body: "Your latest confirmed balances are stale, so Home can't compare reality to your plan with confidence.",
+      ctaLabel: "Update balances",
+      action: "debts",
+    };
+  }
+
+  const monthlyStatus = context.monthlyStatus;
+  const targetName = context.currentTarget?.name || "this target debt";
+
+  if (monthlyStatus?.shouldRecordPayment) {
+    return {
+      label: `Record your ${targetName} payment`,
+      body: monthlyStatus.supporting,
+      ctaLabel: monthlyStatus.ctaLabel || "Record payment",
+      action: "debts",
+    };
+  }
+
+  if (monthlyStatus?.shouldUpdateBalance || monthlyStatus?.balanceRefreshNeeded) {
+    return {
+      label: `Update your ${targetName} balance`,
+      body: "Payment history is recorded, but confirmed progress only moves after a new balance snapshot.",
+      ctaLabel: "Update balance",
+      action: "debts",
+    };
+  }
+
   if (context.homeState === "no-plan") {
     return {
       label: "Pick your payoff strategy",
@@ -546,41 +615,21 @@ export const deriveNextMove = (snapshot, context) => {
     };
   }
 
-  if (context.hasBlockingReview || context.planHealth?.code === "critical") {
+  if (context.allDebtsArePaidOff) {
     return {
-      label: "Review your plan",
-      body: "A review item is blocking full plan trust. Clean that up before relying on the projection.",
-      ctaLabel: "Open Review",
-      action: "review",
+      label: "You've confirmed $0",
+      body: "Your included debts are confirmed paid off. TrackToZero is preserving this journey rather than pointing you to a next payoff step.",
+      ctaLabel: "View debts",
+      action: "debts",
     };
   }
 
-  const monthlyStatus = context.monthlyStatus;
-  const targetName = context.currentTarget?.name || "this target debt";
   if (!monthlyStatus) {
     return {
       label: "Check your plan",
       body: "Open your plan and debts so TrackToZero can refresh your current target.",
       ctaLabel: "View My Plan",
       action: "plan",
-    };
-  }
-
-  if (monthlyStatus.shouldRecordPayment) {
-    return {
-      label: `Record your ${targetName} payment`,
-      body: monthlyStatus.supporting,
-      ctaLabel: monthlyStatus.ctaLabel || "Record payment",
-      action: "debts",
-    };
-  }
-
-  if (monthlyStatus.shouldUpdateBalance || monthlyStatus.balanceRefreshNeeded) {
-    return {
-      label: `Update your ${targetName} balance`,
-      body: "Payment history is recorded, but confirmed progress only moves after a new balance snapshot.",
-      ctaLabel: "Update balance",
-      action: "debts",
     };
   }
 
@@ -672,6 +721,10 @@ export const deriveHomeContext = (snapshot, reviewSnapshot, scenario) => {
   const paidOffDebts = derivePaidOffDebts(snapshot);
   const trajectory = deriveTrajectory(snapshot);
 
+  const debtsAwaitingReforecast = hasActivePlan
+    ? deriveDebtsAwaitingReforecast({ debts: snapshot.debts || [], payoffQueue: snapshot.payoffQueue || [] })
+    : [];
+
   const openReviewCount = reviewSnapshot?.actionableCount ?? reviewSnapshot?.openCount ?? 0;
   const blockingReviewCount = reviewSnapshot?.blockingCount || 0;
   const deferredBlockingCount = reviewSnapshot?.deferredBlockingCount || 0;
@@ -722,6 +775,7 @@ export const deriveHomeContext = (snapshot, reviewSnapshot, scenario) => {
     blockingReviewCount,
     deferredBlockingCount,
     hasBlockingReview,
+    debtsAwaitingReforecast,
     householdBreakdown,
     members: snapshot.members,
     dataFreshness,

@@ -840,6 +840,17 @@ service cloud.firestore {
         && request.resource.data.createdBy == resource.data.createdBy;
     }
 
+    // UX-8.2: mirrors firestore.v2.rules' debtIdentityUnchanged() exactly -
+    // see that file for the full rationale. This is the file that
+    // `firebase deploy` actually ships, so the guard must live here too.
+    function v2DebtIdentityUnchanged() {
+      return request.resource.data.id == resource.data.id
+        && request.resource.data.workspaceId == resource.data.workspaceId
+        && request.resource.data.openingBalanceSnapshotId == resource.data.openingBalanceSnapshotId
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.createdAt == resource.data.createdAt;
+    }
+
     function v2OpeningSnapshotPath(workspaceId, debtId, snapshotId) {
       return /databases/$(database)/documents/workspaces/$(workspaceId)/debts/$(debtId)/balance_snapshots/$(snapshotId);
     }
@@ -964,7 +975,8 @@ service cloud.firestore {
           && request.resource.data.createdBy == request.auth.uid
           && v2OpeningSnapshotCreatedWithDebt(workspaceId, debtId);
         allow update: if v2AdminPlus(workspaceId)
-          && request.resource.data.workspaceId == workspaceId;
+          && request.resource.data.workspaceId == workspaceId
+          && v2DebtIdentityUnchanged();
         allow delete: if v2AdminPlus(workspaceId)
           && resource.data.workspaceId == workspaceId;
 

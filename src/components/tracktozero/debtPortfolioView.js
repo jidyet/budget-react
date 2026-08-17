@@ -1,12 +1,19 @@
-import { effectiveOwnerType, isConfirmedZero, isDebtNeedsReview, looksLikeJunkOwnerLabel } from "../../domain/tracktozero/ownership.js";
+import { describeDebtReviewReasons, effectiveOwnerType, isConfirmedZero } from "../../domain/tracktozero/ownership.js";
 import { debtCategoryGroupFor } from "../../domain/tracktozero/financialItemTaxonomy.js";
 
 const normalizeBalance = (value) => Number(value ?? 0) || 0;
 
 export const deriveDebtPortfolioView = (snapshot = {}) => {
   const debts = Array.isArray(snapshot.debts) ? snapshot.debts : [];
+  const isHousehold = snapshot.workspace?.type === "household";
   const activeDebts = debts.filter((debt) => debt?.status === "active");
-  const reviewDebts = activeDebts.filter((debt) => isDebtNeedsReview(debt) || looksLikeJunkOwnerLabel(debt?.ownerLabel));
+  // UX-8.2: uses the same describeDebtReviewReasons union DebtBadges shows,
+  // so a debt whose card displays "Needs review" (e.g. missing APR, junk
+  // owner label) always lands in this same reviewDebts bucket - previously
+  // this filter was narrower than the badge, so a debt could show "Needs
+  // review" on its card yet never appear under the Debts page's own
+  // "Needs review" filter/count.
+  const reviewDebts = activeDebts.filter((debt) => describeDebtReviewReasons(debt, isHousehold).length > 0);
   const reviewDebtIds = new Set(reviewDebts.map((debt) => debt.id));
   const paidOffDebts = activeDebts.filter((debt) => isConfirmedZero(debt) && !reviewDebtIds.has(debt.id));
   const actionableDebts = activeDebts.filter((debt) => !isConfirmedZero(debt) && !reviewDebtIds.has(debt.id));

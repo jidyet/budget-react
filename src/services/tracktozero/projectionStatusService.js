@@ -1,6 +1,17 @@
 import { MAX_SIMULATION_MONTHS, payoffSimulate } from "../calc/payoffEngine.js";
 import { debtToEngineAccount } from "../adapters/tracktozeroCalcAdapter.js";
-import { isConfirmedZero, isDebtNeedsReview } from "../../domain/tracktozero/ownership.js";
+import { disambiguationSuffixForDebt, isConfirmedZero, isDebtNeedsReview } from "../../domain/tracktozero/ownership.js";
+
+// UX-8.2: a debt-name label for a warning message - appends a last-four
+// suffix when two debts in this workspace share a display name, so a
+// warning naming one debt can never be misread as describing a different,
+// same-named one. Owner-based disambiguation (the more common case for
+// duplicate names) is applied one layer up, in the UI, where the workspace
+// type is already known - this only has access to the debt list itself.
+const warningDebtLabel = (debt, debts) => {
+  const suffix = disambiguationSuffixForDebt(debt, debts, { isHousehold: false });
+  return suffix.startsWith("…") ? `${debt.name} (${suffix})` : debt.name;
+};
 
 export const TRACKTOZERO_STATUS_THRESHOLDS = Object.freeze({
   staleBalanceDays: 45,
@@ -54,6 +65,14 @@ export const getIncludedDebts = (debts = [], planVersion = null) => {
 export const getEligiblePlanDebts = (debts, planVersion) =>
   getIncludedDebts(debts, planVersion).filter((debt) => !isDebtNeedsReview(debt));
 
+// UX-8.2: the exact complement of getEligiblePlanDebts - every included
+// debt that is NOT safe to drive real plan math. This is what a Plan
+// preview's "excluded from this preview" section must show (never a
+// separately-iterated debt list), so it can never disagree with which
+// debts payoffOrder/payoffQueue actually contain.
+export const getExcludedPlanDebts = (debts, planVersion) =>
+  getIncludedDebts(debts, planVersion).filter((debt) => isDebtNeedsReview(debt));
+
 // The single shared definition of "payoff order" for a strategy - used
 // anywhere a numbered queue is shown (plan preview, active plan) so the
 // displayed order can never drift from what payoffSimulate actually pays
@@ -73,9 +92,26 @@ export const sortDebtsForStrategy = (debts = [], strategy = "avalanche") =>
 // plan yet" instead of one of them going quiet about it. Shared here so
 // both surfaces can never drift into two different definitions of the same
 // fact.
-export const deriveDebtsAwaitingReforecast = ({ debts = [], payoffQueue = [] } = {}) => {
+// UX-8.2: extends the original presence-based check (a new debt not yet
+// reflected in the active plan's payoffQueue) with a field-level staleness
+// check - an EXISTING plan debt whose current apr/minimumRequiredPayment/
+// includedInCorePayoffPlan no longer matches what was frozen into the
+// active PlanVersion's startingDebtSnapshot at last activation/reforecast.
+// startingDebtSnapshot defaults to [] so a caller that doesn't pass it (or
+// has no active plan) gets exactly the original new-debt-only behavior -
+// this is additive, not a behavior change for existing callers.
+export const deriveDebtsAwaitingReforecast = ({ debts = [], payoffQueue = [], startingDebtSnapshot = [] } = {}) => {
   const queuedIds = new Set(payoffQueue.map((debt) => debt.id));
-  return debts.filter((debt) => debt.status === "active" && debt.includedInCorePayoffPlan !== false && !queuedIds.has(debt.id));
+  const frozenById = new Map(startingDebtSnapshot.map((item) => [item.debtId, item]));
+  return debts.filter((debt) => {
+    if (debt.status !== "active") return false;
+    const frozen = frozenById.get(debt.id);
+    if (!frozen) return debt.includedInCorePayoffPlan !== false && !queuedIds.has(debt.id);
+    const effectiveApr = debt.aprStatus === "unknown" ? null : debt.apr;
+    return frozen.effectiveApr !== effectiveApr
+      || frozen.minimumRequiredPayment !== debt.minimumRequiredPayment
+      || frozen.includedInCorePayoffPlan !== !!debt.includedInCorePayoffPlan;
+  });
 };
 
 export const evaluateProjectionWarnings = ({
@@ -96,7 +132,7 @@ export const evaluateProjectionWarnings = ({
         code: "needs_review_excluded",
         debtId: debt.id,
         severity: WARNING_SEVERITY.critical,
-        message: `${debt.name} has unresolved or contaminated financial data and is excluded from this plan's calculations until reviewed.`,
+        message: `${warningDebtLabel(debt, debts)} has unresolved or contaminated financial data and is excluded from this plan's calculations until reviewed.`,
       });
       continue;
     }
@@ -108,7 +144,7 @@ export const evaluateProjectionWarnings = ({
         code: "unknown_apr",
         debtId: debt.id,
         severity: WARNING_SEVERITY.warning,
-        message: `${debt.name} has an unknown APR, so interest and payoff-date estimates are lower-confidence planning estimates.`,
+        message: `${warningDebtLabel(debt, debts)} has an unknown APR, so interest and payoff-date estimates are lower-confidence planning estimates.`,
       });
     }
     if (Number(debt.minimumRequiredPayment || 0) <= 0 && Number(debt.currentBalance || 0) > 0) {
@@ -116,7 +152,7 @@ export const evaluateProjectionWarnings = ({
         code: "missing_minimum_payment",
         debtId: debt.id,
         severity: WARNING_SEVERITY.critical,
-        message: `${debt.name} is missing a required payment. Add one before trusting the payoff plan.`,
+        message: `${warningDebtLabel(debt, debts)} is missing a required payment. Add one before trusting the payoff plan.`,
       });
     }
   }

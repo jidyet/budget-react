@@ -28,6 +28,7 @@ import {
   requireString,
   requireTimestamp,
 } from "./validation.js";
+import { isDebtNeedsReview } from "./ownership.js";
 
 const nowOr = (value) => requireTimestamp(value || new Date("2026-01-01T00:00:00.000Z").toISOString(), "timestamp");
 
@@ -331,12 +332,22 @@ export const createImportCandidate = (input = {}) => deepFreezeClone({
   targetDebtId: optionalString(input.targetDebtId),
 });
 
+// UX-8.2: a needs-review debt (unresolved balance, contaminated minimum
+// payment - see isDebtNeedsReview) is never actually counted in real plan
+// math on any live read (getEligiblePlanDebts re-filters isDebtNeedsReview
+// on every read, regardless of what's frozen here). Before this fix, every
+// caller (createDraftPlan/applyReforecast/previewDraftPlan) still froze
+// includedInCorePayoffPlan: true for such a debt, so the historical
+// PlanVersion record falsely claimed it was included. Forcing it false here
+// changes no computed math (it was already excluded on every read) - it
+// only makes the frozen snapshot honestly reflect what was actually true at
+// freeze time.
 export const createStartingDebtSnapshotItem = (debt) => deepFreezeClone({
   debtId: debt.id,
   balance: debt.currentBalance,
   aprStatus: debt.aprStatus,
   effectiveApr: debt.aprStatus === "unknown" ? null : debt.apr,
   minimumRequiredPayment: debt.minimumRequiredPayment,
-  includedInCorePayoffPlan: !!debt.includedInCorePayoffPlan,
+  includedInCorePayoffPlan: !!debt.includedInCorePayoffPlan && !isDebtNeedsReview(debt),
   debtType: debt.debtType,
 });

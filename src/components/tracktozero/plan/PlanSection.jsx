@@ -12,7 +12,7 @@ import LoadingState from "../ui/LoadingState.jsx";
 import ConfirmationDialog from "../ui/ConfirmationDialog.jsx";
 import { ttzPalette, TYPE_SCALE } from "../theme.js";
 import { formatMoney as money, formatPercent as percent } from "../formatting.js";
-import { presentedOwnerLabel } from "../../../domain/tracktozero/ownership.js";
+import { describeDebtReviewReasons, disambiguationSuffixForDebt, presentedOwnerLabel } from "../../../domain/tracktozero/ownership.js";
 import { deriveDebtsAwaitingReforecast } from "../../../services/tracktozero/projectionStatusService.js";
 import { PLAN_DESTINATIONS, resolvePlanDestination, buildPlanPath, navigateToPlanDestination } from "./planRouting.js";
 import { getWorkspacePresentation } from "../workspacePresentation.js";
@@ -58,29 +58,93 @@ function monthLabelDeltaText(fromLabel, toLabel) {
   return months < 0 ? `${count} ${unit} sooner than your current plan` : `${count} ${unit} later than your current plan`;
 }
 
+// UX-8.2: the "payoff journey" - a numbered, card-like sequence rather than
+// a dense text list. Deliberately shows no per-debt payoff date: the engine
+// (payoffEngine.js's payoffSimulate) only tracks aggregate balance/interest
+// per month, never a per-account zero-crossing, so a per-debt date here
+// would be fabricated. debts must always be exactly payoffOrder/payoffQueue
+// (never a separately-iterated debt list) - see getEligiblePlanDebts.
 function PayoffOrderList({ debts = [], isHousehold = false, highlightFirst = false }) {
   if (!debts.length) return <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>No debts included in this preview.</p>;
 
   return (
-    <ol style={{ display: "grid", gap: 10, paddingLeft: 20, margin: 0 }}>
-      {debts.map((debt, index) => (
-        <li key={debt.id} style={{ display: "grid", gap: 4, fontWeight: highlightFirst && index === 0 ? 700 : 500 }}>
-          <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx }}>
-            <span style={{ fontWeight: 700 }}>{index + 1}.</span> {debt.name}
-          </div>
-          <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>
-            {money(debt.currentBalance || 0)}
-            {debt.aprStatus === "unknown" ? " · Unknown APR" : ` · ${percent(debt.apr)}`}
-            {isHousehold ? ` · ${presentedOwnerLabel(debt)}` : ""}
-            {debt.projectedZeroDate ? ` · ${formatMonthLabel(debt.projectedZeroDate)}` : ""}
-          </div>
-        </li>
-      ))}
+    <ol style={{ display: "grid", gap: 8, padding: 0, margin: 0, listStyle: "none" }}>
+      {debts.map((debt, index) => {
+        const isFirst = highlightFirst && index === 0;
+        const suffix = disambiguationSuffixForDebt(debt, debts, { isHousehold });
+        return (
+          <li
+            key={debt.id}
+            style={{
+              display: "flex",
+              gap: 12,
+              alignItems: "center",
+              padding: "10px 12px",
+              borderRadius: 10,
+              border: `1px solid ${isFirst ? ttzPalette.ac : ttzPalette.border}`,
+              background: isFirst ? ttzPalette.acS : "transparent",
+            }}
+          >
+            <div
+              aria-hidden="true"
+              style={{
+                width: 26, height: 26, borderRadius: 999, flexShrink: 0,
+                display: "grid", placeItems: "center",
+                background: isFirst ? ttzPalette.ac : ttzPalette.surf2,
+                color: isFirst ? "#fff" : ttzPalette.tx2,
+                fontWeight: 700, fontSize: 13,
+              }}
+            >
+              {index + 1}
+            </div>
+            <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
+              <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: isFirst ? 700 : 500 }}>
+                {debt.name}{suffix ? ` (${suffix})` : ""}
+              </div>
+              <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                <span>{money(debt.currentBalance || 0)}</span>
+                <span>{debt.aprStatus === "unknown" ? "Unknown APR" : percent(debt.apr)}</span>
+                {isHousehold ? <Badge tone="neutral">{presentedOwnerLabel(debt)}</Badge> : null}
+              </div>
+            </div>
+          </li>
+        );
+      })}
     </ol>
   );
 }
 
-function StrategyHeader({ title, subtitle, isActive, status }) {
+// UX-8.2: the complement to PayoffOrderList - every included debt that
+// isn't safe to drive real plan math, shown with its concrete reason(s) and
+// a way to fix it. Never implies these debts receive payments. debts here
+// must always be exactly result.excludedDebts/snapshot.excludedDebts (the
+// same getExcludedPlanDebts complement of payoffOrder/payoffQueue), never a
+// separately-filtered debt list.
+function ExcludedDebtsSection({ debts = [], isHousehold = false, onGoToDebts }) {
+  if (!debts.length) return null;
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted }}>Excluded from this preview</div>
+      {debts.map((debt) => (
+        <div key={debt.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "10px 12px", borderRadius: 10, border: `1px solid ${ttzPalette.border}` }}>
+          <div style={{ display: "grid", gap: 2 }}>
+            <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 500 }}>{debt.name}{isHousehold ? ` · ${presentedOwnerLabel(debt)}` : ""}</div>
+            <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>
+              {describeDebtReviewReasons(debt, isHousehold).filter((reason) => reason.blocksPlan).map((reason) => reason.label).join(" · ") || "Needs review"}
+            </div>
+          </div>
+          {onGoToDebts ? <Button variant="secondary" size="sm" onClick={onGoToDebts}>Review & edit</Button> : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// UX-8.2: shows every critical warning, not just warnings[0] - the prior
+// index-0-only truncation could hide or misattribute the real exclusion
+// warning whenever more than one warning existed for a preview.
+function StrategyHeader({ title, subtitle, isActive, warnings = [] }) {
+  const criticalMessages = warnings.filter((warning) => warning.severity === "critical").map((warning) => warning.message);
   return (
     <div style={{ display: "grid", gap: 6 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
@@ -90,12 +154,18 @@ function StrategyHeader({ title, subtitle, isActive, status }) {
         </div>
         {isActive ? <Badge tone="success">Active strategy</Badge> : <Badge tone="neutral">Preview</Badge>}
       </div>
-      {status ? <WarningCallout title="Watch this">{status}</WarningCallout> : null}
+      {criticalMessages.length ? (
+        <WarningCallout title="Watch this">
+          <div style={{ display: "grid", gap: 4 }}>
+            {criticalMessages.map((message) => <div key={message}>{message}</div>)}
+          </div>
+        </WarningCallout>
+      ) : null}
     </div>
   );
 }
 
-function MyPlanView({ snapshot, service, refresh, runAction, writeState }) {
+function MyPlanView({ snapshot, service, refresh, runAction, writeState, onGoToDebts }) {
   const activeVersion = snapshot?.activeContext?.version;
   const targetDebt = snapshot.targetDebt || snapshot.payoffQueue?.[0];
   const goTo = navigateToPlanDestination;
@@ -133,13 +203,26 @@ function MyPlanView({ snapshot, service, refresh, runAction, writeState }) {
   }
 
   const strategyLabel = activeVersion.strategy === "snowball" ? "Snowball" : "Avalanche";
-  const debtsAwaitingReforecast = deriveDebtsAwaitingReforecast({ debts: snapshot.debts || [], payoffQueue: snapshot.payoffQueue || [] });
+  // UX-8.2: also catches an existing plan debt whose APR/required payment/
+  // inclusion changed via the new debt-edit surface since the plan was last
+  // set, not just a brand-new debt (see deriveDebtsAwaitingReforecast).
+  const debtsAwaitingReforecast = deriveDebtsAwaitingReforecast({
+    debts: snapshot.debts || [],
+    payoffQueue: snapshot.payoffQueue || [],
+    startingDebtSnapshot: activeVersion.startingDebtSnapshot || [],
+  });
+  const scrollToReforecast = () => document.getElementById("ux82-reforecast-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
 
   return (
     <div style={{ display: "grid", gap: GAP }}>
       {debtsAwaitingReforecast.length ? (
-        <WarningCallout title="New debts aren't in this plan yet">
-          {debtsAwaitingReforecast.map((debt) => debt.name).join(", ")} {debtsAwaitingReforecast.length === 1 ? "was" : "were"} added after this plan was last set, so {debtsAwaitingReforecast.length === 1 ? "it isn't" : "they aren't"} reflected below yet. Reforecast to include {debtsAwaitingReforecast.length === 1 ? "it" : "them"}.
+        <WarningCallout title="This plan may be out of date">
+          <div style={{ display: "grid", gap: 8 }}>
+            <div>
+              {debtsAwaitingReforecast.map((debt) => debt.name).join(", ")} {debtsAwaitingReforecast.length === 1 ? "has" : "have"} changed since this plan was last set, so the numbers below may not reflect {debtsAwaitingReforecast.length === 1 ? "it" : "them"} yet.
+            </div>
+            <Button variant="secondary" size="sm" onClick={scrollToReforecast} style={{ justifySelf: "start" }}>Reforecast plan</Button>
+          </div>
         </WarningCallout>
       ) : null}
       <Card variant="default" style={{ padding: 20 }}>
@@ -157,6 +240,10 @@ function MyPlanView({ snapshot, service, refresh, runAction, writeState }) {
           <PlanMetric label="Monthly commitment" value={money(activeVersion.extraMonthlyPayment || 0)} />
           <PlanMetric label="Current target" value={targetDebt?.name || "n/a"} />
         </div>
+        <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 10 }}>
+          Based on {snapshot.payoffQueue?.length || 0} included debt{(snapshot.payoffQueue?.length || 0) === 1 ? "" : "s"}.
+          {snapshot.excludedDebts?.length ? ` ${snapshot.excludedDebts.length} debt${snapshot.excludedDebts.length === 1 ? " is" : "s are"} excluded until reviewed.` : ""}
+        </div>
       </Card>
 
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.6fr) minmax(260px, 0.8fr)", gap: GAP }}>
@@ -168,7 +255,7 @@ function MyPlanView({ snapshot, service, refresh, runAction, writeState }) {
                 <div style={{ width: 16, height: 16, borderRadius: 999, background: index === 0 ? ttzPalette.ac : ttzPalette.border, margin: "0 auto 8px", border: `2px solid ${ttzPalette.surf}` }} />
                 <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx, fontWeight: 700 }}>{debt.name}</div>
                 <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted }}>
-                  {debt.projectedZeroDate ? formatMonthLabel(debt.projectedZeroDate) : index === 0 ? "Current target" : "Up next"}
+                  {index === 0 ? "Current target" : "Up next"}
                 </div>
               </div>
             )) || <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>No payoff order yet.</div>}
@@ -192,6 +279,12 @@ function MyPlanView({ snapshot, service, refresh, runAction, writeState }) {
           <PayoffOrderList debts={snapshot.payoffQueue || []} isHousehold={snapshot.workspace.type === "household"} highlightFirst />
         </div>
       </Card>
+
+      {snapshot.excludedDebts?.length ? (
+        <Card variant="default">
+          <ExcludedDebtsSection debts={snapshot.excludedDebts} isHousehold={snapshot.workspace.type === "household"} onGoToDebts={onGoToDebts} />
+        </Card>
+      ) : null}
 
       {snapshot.warnings?.length ? (
         <WarningCallout title="Plan status">{snapshot.warnings.map((warning) => warning.message || warning.code).join(" ")}</WarningCallout>
@@ -235,7 +328,7 @@ function ManagePlanCard({ snapshot, service, refresh, runAction, writeState, act
   });
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: GAP }}>
+    <div id="ux82-reforecast-card" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: GAP }}>
       <Card variant="default">
         <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Reforecast</div>
         <p style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted, marginTop: 4 }}>Adjust your monthly extra payment. Preview before you apply.</p>
@@ -264,6 +357,11 @@ function ManagePlanCard({ snapshot, service, refresh, runAction, writeState, act
           {preview ? (
             <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 8 }}>
               Estimated payoff moves from <strong>{preview.oldProjectedZeroDate || "n/a"}</strong> to <strong>{preview.proposedZeroDate || "n/a"}</strong>.
+            </p>
+          ) : null}
+          {snapshot.excludedDebts?.length ? (
+            <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 8 }}>
+              {snapshot.excludedDebts.length} debt{snapshot.excludedDebts.length === 1 ? "" : "s"} ({snapshot.excludedDebts.map((debt) => debt.name).join(", ")}) will not be part of this plan until reviewed.
             </p>
           ) : null}
         </ConfirmationDialog>
@@ -311,9 +409,11 @@ function ManagePlanCard({ snapshot, service, refresh, runAction, writeState, act
 // before/after figure - never an implicit apply-on-click. The confirm step
 // lives here, once, so Snowball/Avalanche (and anything else that reaches
 // this component) can't accidentally skip it.
-function StrategyExperience({ title, subtitle, result, isActive, isHousehold, onApply, onInspect, useLabel, applyActionLabel, runAction, writeState, currentZeroDate }) {
+function StrategyExperience({ title, subtitle, result, isActive, isHousehold, onApply, onInspect, useLabel, applyActionLabel, runAction, writeState, currentZeroDate, onGoToDebts }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const canUse = !!onApply && !isActive;
+  const excludedDebts = result?.excludedDebts || [];
+  const includedCount = result?.payoffOrder?.length || 0;
 
   const confirmApply = () => runAction(applyActionLabel, async () => {
     await onApply();
@@ -322,7 +422,11 @@ function StrategyExperience({ title, subtitle, result, isActive, isHousehold, on
 
   return (
     <Card variant={isActive ? "highlight" : "default"}>
-      <StrategyHeader title={title} subtitle={subtitle} isActive={isActive} status={result?.warnings?.length ? result.warnings[0]?.message : ""} />
+      <StrategyHeader title={title} subtitle={subtitle} isActive={isActive} warnings={result?.warnings || []} />
+
+      <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 6 }}>
+        Based on {includedCount} included debt{includedCount === 1 ? "" : "s"}.{excludedDebts.length ? ` ${excludedDebts.length} debt${excludedDebts.length === 1 ? " is" : "s are"} excluded until reviewed.` : ""}
+      </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: GAP, marginTop: GAP }}>
         <PlanMetric label="Projected $0" value={result?.projectedZeroDate || "n/a"} tone="accent" />
@@ -335,6 +439,12 @@ function StrategyExperience({ title, subtitle, result, isActive, isHousehold, on
         <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted, marginBottom: 6 }}>Payoff order</div>
         <PayoffOrderList debts={result?.payoffOrder || []} isHousehold={isHousehold} highlightFirst />
       </div>
+
+      {excludedDebts.length ? (
+        <div style={{ marginTop: GAP }}>
+          <ExcludedDebtsSection debts={excludedDebts} isHousehold={isHousehold} onGoToDebts={onGoToDebts} />
+        </div>
+      ) : null}
 
       {onApply && !isActive ? (
         <div style={{ marginTop: GAP, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -362,13 +472,18 @@ function StrategyExperience({ title, subtitle, result, isActive, isHousehold, on
           <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 8 }}>
             Estimated payoff moves from <strong>{currentZeroDate || "n/a"}</strong> to <strong>{result?.projectedZeroDate || "n/a"}</strong>.
           </p>
+          {excludedDebts.length ? (
+            <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 8 }}>
+              {excludedDebts.length} debt{excludedDebts.length === 1 ? "" : "s"} ({excludedDebts.map((debt) => debt.name).join(", ")}) will not be part of this plan until reviewed.
+            </p>
+          ) : null}
         </ConfirmationDialog>
       ) : null}
     </Card>
   );
 }
 
-function SnowballView({ snapshot, service, refresh, runAction, writeState }) {
+function SnowballView({ snapshot, service, refresh, runAction, writeState, onGoToDebts }) {
   const [result, setResult] = useState(null);
   const workspaceId = snapshot.workspace.id;
 
@@ -397,6 +512,7 @@ function SnowballView({ snapshot, service, refresh, runAction, writeState }) {
       runAction={runAction}
       writeState={writeState}
       currentZeroDate={snapshot.projectedZeroDate}
+      onGoToDebts={onGoToDebts}
       onApply={async () => {
         await service.applyReforecast(workspaceId, { strategy: "snowball" });
         await refresh();
@@ -405,7 +521,7 @@ function SnowballView({ snapshot, service, refresh, runAction, writeState }) {
   );
 }
 
-function AvalancheView({ snapshot, service, refresh, runAction, writeState }) {
+function AvalancheView({ snapshot, service, refresh, runAction, writeState, onGoToDebts }) {
   const [result, setResult] = useState(null);
   const workspaceId = snapshot.workspace.id;
 
@@ -434,6 +550,7 @@ function AvalancheView({ snapshot, service, refresh, runAction, writeState }) {
       runAction={runAction}
       writeState={writeState}
       currentZeroDate={snapshot.projectedZeroDate}
+      onGoToDebts={onGoToDebts}
       onApply={async () => {
         await service.applyReforecast(workspaceId, { strategy: "avalanche" });
         await refresh();
@@ -442,7 +559,7 @@ function AvalancheView({ snapshot, service, refresh, runAction, writeState }) {
   );
 }
 
-function CompareStrategiesView({ snapshot, service }) {
+function CompareStrategiesView({ snapshot, service, onGoToDebts }) {
   const [result, setResult] = useState(null);
   const workspaceId = snapshot.workspace.id;
 
@@ -473,8 +590,8 @@ function CompareStrategiesView({ snapshot, service }) {
       </Card>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: GAP }}>
-        <StrategyExperience title="Snowball" subtitle="Smallest balance first" result={result.snowball} isActive={result.activeStrategy === "snowball"} isHousehold={snapshot.workspace.type === "household"} useLabel="Inspect Snowball" onInspect={() => navigateToPlanDestination("snowball")} />
-        <StrategyExperience title="Avalanche" subtitle="Highest APR first" result={result.avalanche} isActive={result.activeStrategy === "avalanche"} isHousehold={snapshot.workspace.type === "household"} useLabel="Inspect Avalanche" onInspect={() => navigateToPlanDestination("avalanche")} />
+        <StrategyExperience title="Snowball" subtitle="Smallest balance first" result={result.snowball} isActive={result.activeStrategy === "snowball"} isHousehold={snapshot.workspace.type === "household"} useLabel="Inspect Snowball" onInspect={() => navigateToPlanDestination("snowball")} onGoToDebts={onGoToDebts} />
+        <StrategyExperience title="Avalanche" subtitle="Highest APR first" result={result.avalanche} isActive={result.activeStrategy === "avalanche"} isHousehold={snapshot.workspace.type === "household"} useLabel="Inspect Avalanche" onInspect={() => navigateToPlanDestination("avalanche")} onGoToDebts={onGoToDebts} />
       </div>
 
       <InfoCallout>
@@ -914,7 +1031,7 @@ function ScenarioCard({ scenario, service, workspaceId, currentZeroDate, runActi
   );
 }
 
-export default function PlanSection({ snapshot, service, refresh, runAction, writeState }) {
+export default function PlanSection({ snapshot, service, refresh, runAction, writeState, onGoToDebts }) {
   const [destination, setDestination] = useState(() => resolvePlanDestination(typeof window !== "undefined" ? window.location.pathname : "/plan/my-plan"));
 
   useEffect(() => {
@@ -936,7 +1053,7 @@ export default function PlanSection({ snapshot, service, refresh, runAction, wri
     setDestination(nextDestination);
   };
 
-  const viewProps = { snapshot, service, refresh, runAction, writeState };
+  const viewProps = { snapshot, service, refresh, runAction, writeState, onGoToDebts };
   let currentView;
   switch (destination) {
     case "snowball": currentView = <SnowballView {...viewProps} />; break;

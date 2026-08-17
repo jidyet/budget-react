@@ -11,7 +11,7 @@ const now = () => new Date("2026-01-01T00:00:00.000Z");
 const inviteExpiry = () => new Date("2027-01-08T00:00:00.000Z");
 const ws = (id = "w1", createdBy = "owner") => ({ id, type: "household", status: "active", activePlanId: "", createdAt: now(), createdBy });
 const member = (workspaceId, uid, role) => ({ workspaceId, uid, role, status: "active", createdAt: now(), createdBy: "owner" });
-const debt = (workspaceId = "w1", id = "d1", createdBy = "owner") => ({ id, workspaceId, name: "Card", status: "active", currentBalance: 100, minimumRequiredPayment: 10, createdBy, openingBalanceSnapshotId: `opening-${id}` });
+const debt = (workspaceId = "w1", id = "d1", createdBy = "owner") => ({ id, workspaceId, name: "Card", status: "active", currentBalance: 100, minimumRequiredPayment: 10, createdBy, createdAt: now(), openingBalanceSnapshotId: `opening-${id}` });
 const payment = (workspaceId = "w1", debtId = "d1", uid = "contrib") => ({ id: "p1", workspaceId, debtId, amount: 25, paidAt: now(), source: "manual", createdAt: now(), createdBy: uid });
 const snapshot = (workspaceId = "w1", debtId = "d1", uid = "contrib") => ({ id: "s1", workspaceId, debtId, balance: 75, observedAt: now(), source: "manual", createdAt: now(), createdBy: uid });
 const plan = (workspaceId = "w1", id = "plan1") => ({ id, workspaceId, status: "draft", activeVersionId: "", createdAt: now(), createdBy: "owner" });
@@ -151,6 +151,20 @@ test("admin can manage financial docs but cannot promote to owner or demote owne
   await assertFails(db.doc("workspaces/w1/members/contrib").update({ role: "owner" }));
   await assertFails(db.doc("workspaces/w1/members/owner").update({ role: "viewer" }));
   await assertFails(db.doc("workspaces/w1/members/owner").delete());
+});
+
+test("debt-metadata update cannot rewrite identity/system fields (UX-8.2 rules guard)", async () => {
+  await seedWorkspace();
+  const db = testEnv.authenticatedContext("admin").firestore();
+  // A legitimate metadata edit (name/APR/owner-shaped fields) still works.
+  await assertSucceeds(db.doc("workspaces/w1/debts/d1").update({ name: "Renamed card", workspaceId: "w1" }));
+  // Identity/system fields can never change via a debt update, regardless
+  // of role - only debt creation (with its atomic opening-snapshot proof)
+  // may set these.
+  await assertFails(db.doc("workspaces/w1/debts/d1").update({ workspaceId: "w1", id: "d1-forged" }));
+  await assertFails(db.doc("workspaces/w1/debts/d1").update({ workspaceId: "w1", createdBy: "admin" }));
+  await assertFails(db.doc("workspaces/w1/debts/d1").update({ workspaceId: "w1", createdAt: new Date("2026-02-01T00:00:00.000Z") }));
+  await assertFails(db.doc("workspaces/w1/debts/d1").update({ workspaceId: "w1", openingBalanceSnapshotId: "forged" }));
 });
 
 test("raw-email invite creates no access-granting membership", async () => {

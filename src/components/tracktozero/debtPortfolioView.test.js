@@ -8,7 +8,14 @@ describe("deriveDebtPortfolioView", () => {
       workspace: { type: "personal" },
       debts: [
         { id: "d1", name: "Chase", status: "active", currentBalance: 1200, minimumRequiredPayment: 50, aprStatus: "known", apr: 0.19, includedInCorePayoffPlan: true },
-        { id: "d2", name: "Needs review", status: "active", currentBalance: 0, minimumRequiredPayment: 0, aprStatus: "unknown", includedInCorePayoffPlan: true, ownerLabel: "undeliverable" },
+        // UX-8.2: currentBalance must be nonzero here - a confirmed $0 balance
+        // means this debt is actually paid off (isConfirmedZero), and a
+        // paid-off debt must never be flagged "needs review" just because of
+        // a junk owner label (matches DebtBadges' own established !paidOff
+        // guard - see describeDebtReviewReasons). This fixture is testing the
+        // junk-owner-label review reason specifically, which requires a debt
+        // that's still genuinely active/unpaid.
+        { id: "d2", name: "Needs review", status: "active", currentBalance: 500, minimumRequiredPayment: 0, aprStatus: "unknown", includedInCorePayoffPlan: true, ownerLabel: "undeliverable" },
         { id: "d3", name: "Paid off", status: "active", currentBalance: 0, minimumRequiredPayment: 0, aprStatus: "no_interest", includedInCorePayoffPlan: true },
       ],
       portfolioSummary: {
@@ -23,7 +30,7 @@ describe("deriveDebtPortfolioView", () => {
       },
       latestSnapshotsByDebt: {
         d1: { balance: 1200 },
-        d2: { balance: 0 },
+        d2: { balance: 500 },
         d3: { balance: 0 },
       },
     };

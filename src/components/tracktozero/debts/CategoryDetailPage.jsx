@@ -36,7 +36,7 @@ const resolveBalance = (debt, latestSnapshotsByDebt) => Number(latestSnapshotsBy
 // combination matrix. Owner scope is the SAME ScopeSelector/state as the
 // portfolio grid, so switching categories never forces the user to
 // re-pick their owner filter (context persists).
-export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, ownerFilter, onOwnerFilterChange, onBack, people = [] }) {
+export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, ownerFilter, onOwnerFilterChange, onBack, people = [], onReviewDebt }) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [planFilter, setPlanFilter] = useState("all");
   const [qualityFilter, setQualityFilter] = useState("all");
@@ -150,6 +150,7 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
                 Required payment: {money(debt.minimumRequiredPayment)} · Due day: {debt.dueDay || "not set"}
               </div>
               <DebtBadges debt={debt} isTarget={snapshot.targetDebt?.id === debt.id} isHousehold={isHousehold} />
+              <Button type="button" size="sm" variant="ghost" style={{ marginTop: 4 }} onClick={() => onReviewDebt?.(debt)}>Review & edit</Button>
             </Card>
           ))}
         </div>

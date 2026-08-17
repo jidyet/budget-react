@@ -10,6 +10,7 @@ import {
   buildProjectionWithWarnings,
   derivePlanHealth,
   getEligiblePlanDebts,
+  getExcludedPlanDebts,
   getIncludedDebts,
   monthKeyFromDate,
   sortDebtsForStrategy,
@@ -159,6 +160,10 @@ export const createTrackToZeroV2AppService = ({
       eligibleDebts.filter((debt) => debtBalance(debt) > 0),
       activeContext?.version?.strategy || "avalanche"
     );
+    // UX-8.2: complement of eligibleDebts, from the same debts/
+    // activeContext.version used for payoffQueue/warnings above - mirrors
+    // the async twin's getWorkspaceSnapshot exactly.
+    const excludedDebts = getExcludedPlanDebts(debts, activeContext?.version);
 
     return {
       ...context,
@@ -177,17 +182,43 @@ export const createTrackToZeroV2AppService = ({
       targetDebt,
       portfolioSummary,
       payoffQueue,
+      excludedDebts,
       projectedZeroDate: projectionWithWarnings.projection.at(-1)?.month || activeContext?.version?.projectedZeroDate || "",
     };
   };
 
-  const updateDebt = (workspaceId, debtId, patch) => {
+  // UX-8.2: mirrors the async twin's field allow-list exactly (see
+  // v2AsyncApplicationService.js's updateDebt for the full rationale) - the
+  // two runtimes must never drift on what a debt-metadata edit is allowed
+  // to touch.
+  const DEBT_EDITABLE_FIELDS = ["name", "debtType", "aprStatus", "apr", "minimumRequiredPayment", "dueDay", "ownerType", "ownerId", "includedInCorePayoffPlan"];
+
+  const updateDebt = (workspaceId, debtId, patch = {}) => {
     assertInteractive();
-    const { membership } = getWorkspaceContext(workspaceId);
+    const { workspace, membership, members, people } = getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "manageDebts")) throw new Error("Your role can view this debt, but cannot edit debt terms.");
     const current = repository.listDebts(workspaceId).find((debt) => debt.id === debtId);
     if (!current) throw new Error("Debt not found");
-    return repository.saveDebt({ ...current, ...patch, updatedAt: asOf, updatedBy: actorId });
+
+    const allowedPatch = {};
+    for (const field of DEBT_EDITABLE_FIELDS) {
+      if (field in patch) allowedPatch[field] = patch[field];
+    }
+
+    if ("ownerType" in allowedPatch || "ownerId" in allowedPatch) {
+      const resolved = resolveDebtOwnership({
+        workspaceType: workspace.type,
+        members,
+        people,
+        actorId,
+        requested: { ownerType: allowedPatch.ownerType ?? current.ownerType, ownerId: allowedPatch.ownerId ?? current.ownerId },
+      });
+      allowedPatch.ownerType = resolved.ownerType;
+      allowedPatch.ownerId = resolved.ownerId;
+      allowedPatch.ownerLabel = resolved.ownerLabel;
+    }
+
+    return repository.saveDebt({ ...current, ...allowedPatch, updatedAt: asOf, updatedBy: actorId });
   };
 
   const createNewDebt = (workspaceId, input) => {

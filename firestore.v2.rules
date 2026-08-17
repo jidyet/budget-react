@@ -176,6 +176,29 @@ service cloud.firestore {
         && request.resource.data.observedAt == resource.data.observedAt
         && request.resource.data.createdBy == resource.data.createdBy;
     }
+    // UX-8.2: a debt-metadata edit (name/APR/owner/etc.) must never be able
+    // to touch this debt's identity/system fields - those only ever change
+    // at creation, never on an update, by any known flow.
+    //
+    // currentBalance/startingBalance/balanceStatus are deliberately NOT
+    // locked here even though the new metadata-only updateDebt path never
+    // sends them (that's enforced application-side by its field allow-list,
+    // not here): updateDebtFromImportCandidate legitimately rewrites
+    // currentBalance/balanceStatus on this same document, atomically, as
+    // part of committing an import resolution against an existing debt
+    // (tracktozeroRepositories.js / firebaseTrackToZeroRepository.js) - a
+    // real, tested flow this guard must not break. Verifying that specific
+    // write is paired with its balance_snapshots doc would require adding a
+    // new referencing field to that flow's write shape, which risks
+    // altering BalanceSnapshot/reconciliation semantics - out of scope for
+    // this phase.
+    function debtIdentityUnchanged() {
+      return request.resource.data.id == resource.data.id
+        && request.resource.data.workspaceId == resource.data.workspaceId
+        && request.resource.data.openingBalanceSnapshotId == resource.data.openingBalanceSnapshotId
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.createdAt == resource.data.createdAt;
+    }
     function openingSnapshotPath(workspaceId, debtId, snapshotId) {
       return /databases/$(database)/documents/workspaces/$(workspaceId)/debts/$(debtId)/balance_snapshots/$(snapshotId);
     }
@@ -303,7 +326,8 @@ service cloud.firestore {
           && request.resource.data.createdBy == request.auth.uid
           && openingSnapshotCreatedWithDebt(workspaceId, debtId);
         allow update: if isAdminPlus(workspaceId)
-          && request.resource.data.workspaceId == workspaceId;
+          && request.resource.data.workspaceId == workspaceId
+          && debtIdentityUnchanged();
         allow delete: if isAdminPlus(workspaceId)
           && resource.data.workspaceId == workspaceId;
 

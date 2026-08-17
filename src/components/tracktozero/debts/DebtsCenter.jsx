@@ -5,6 +5,7 @@ import CategoryGrid from "./CategoryGrid.jsx";
 import CategoryDetailPage from "./CategoryDetailPage.jsx";
 import QuickUpdateRail from "./QuickUpdateRail.jsx";
 import AddDebtModal from "./AddDebtModal.jsx";
+import ReviewEditDebtDrawer from "./ReviewEditDebtDrawer.jsx";
 import ImportCenter from "../import/ImportCenter.jsx";
 import { deriveDebtPortfolioView } from "../debtPortfolioView.js";
 import { resolveDebtsDestination, buildDebtsPath } from "./debtsRouting.js";
@@ -39,6 +40,7 @@ export default function DebtsCenter({ snapshot, service, refresh, refreshReview,
   const [addDebtOpen, setAddDebtOpen] = useState(() => initialAction === "add-debt");
   const [addDebtPrefillName, setAddDebtPrefillName] = useState("");
   const [importOpen, setImportOpen] = useState(() => initialAction === "import-statement");
+  const [reviewDebtId, setReviewDebtId] = useState(null);
   const isTablet = useIsTablet();
 
   useEffect(() => {
@@ -103,8 +105,11 @@ export default function DebtsCenter({ snapshot, service, refresh, refreshReview,
       onOwnerFilterChange={setOwnerFilter}
       onBack={() => navigate("all")}
       people={people}
+      onReviewDebt={(debt) => setReviewDebtId(debt.id)}
     />
   );
+
+  const reviewDebt = (snapshot.debts || []).find((debt) => debt.id === reviewDebtId) || null;
 
   return (
     <>
@@ -130,6 +135,19 @@ export default function DebtsCenter({ snapshot, service, refresh, refreshReview,
         writeState={writeState}
         canManage={canManage}
         prefillName={addDebtPrefillName}
+      />
+      <ReviewEditDebtDrawer
+        key={reviewDebt?.id || "none"}
+        open={!!reviewDebt}
+        debt={reviewDebt}
+        onClose={() => setReviewDebtId(null)}
+        snapshot={snapshot}
+        service={service}
+        refresh={refresh}
+        runAction={runAction}
+        writeState={writeState}
+        canManage={canManage}
+        canObserve={canObserve}
       />
     </>
   );

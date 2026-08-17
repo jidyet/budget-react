@@ -460,8 +460,8 @@ function FirstPlanBuilder({ snapshot, service, refresh, runAction, writeState, c
   );
 }
 
-function Plan({ snapshot, service, refresh, runAction, writeState }) {
-  return <PlanSection snapshot={snapshot} service={service} refresh={refresh} runAction={runAction} writeState={writeState} />;
+function Plan({ snapshot, service, refresh, runAction, writeState, navigateTab }) {
+  return <PlanSection snapshot={snapshot} service={service} refresh={refresh} runAction={runAction} writeState={writeState} onGoToDebts={() => navigateTab?.("debts")} />;
 }
 
 function MigrationPanel() {
@@ -1126,6 +1126,11 @@ export default function TrackToZeroV2App() {
 
   const navigateTab = (nextTab) => {
     setTab(nextTab);
+    // A write-state banner (success/error) belongs to the tab that produced
+    // it - without this reset, an error like "apply finish by: No active
+    // plan to reforecast" raised on Plan stays visible after navigating to
+    // Debts, since writeState lives in this never-unmounted root component.
+    setWriteState({ inProgress: false, action: "", error: "", success: "", errorAction: "" });
     if (typeof window === "undefined") return;
     const path = window.location.pathname;
     const onPlanPath = path.startsWith("/plan");
@@ -1370,7 +1375,7 @@ export default function TrackToZeroV2App() {
           />
         )}
         {tab === "debts" && <DebtsCenter key={snapshot.workspace?.id} snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} refreshReview={() => refreshReview(workspaceId)} runAction={runAction} writeState={writeState} reviewSnapshot={reviewState.snapshot} onGoToReview={() => navigateTab("review")} initialAction={debtsInitialAction} onInitialActionHandled={() => setDebtsInitialAction(null)} />}
-        {tab === "plan" && <Plan snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} />}
+        {tab === "plan" && <Plan snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} navigateTab={navigateTab} />}
         {tab === "settings" && <Settings snapshot={snapshot} repositoryMode={runtime.mode} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} latestInvite={latestInvite} setLatestInvite={setLatestInvite} />}
       </PageContainer>
     </AppShell>

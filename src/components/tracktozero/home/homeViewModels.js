@@ -722,7 +722,11 @@ export const deriveHomeContext = (snapshot, reviewSnapshot, scenario) => {
   const trajectory = deriveTrajectory(snapshot);
 
   const debtsAwaitingReforecast = hasActivePlan
-    ? deriveDebtsAwaitingReforecast({ debts: snapshot.debts || [], payoffQueue: snapshot.payoffQueue || [] })
+    ? deriveDebtsAwaitingReforecast({
+        debts: snapshot.debts || [],
+        payoffQueue: snapshot.payoffQueue || [],
+        startingDebtSnapshot: snapshot.activeContext?.version?.startingDebtSnapshot || [],
+      })
     : [];
 
   const openReviewCount = reviewSnapshot?.actionableCount ?? reviewSnapshot?.openCount ?? 0;

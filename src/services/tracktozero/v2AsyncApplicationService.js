@@ -8,6 +8,7 @@ import {
   buildProjectionWithWarnings,
   derivePlanHealth,
   getEligiblePlanDebts,
+  getExcludedPlanDebts,
   getIncludedDebts,
   monthKeyFromDate,
   sortDebtsForStrategy,
@@ -499,6 +500,9 @@ export const createTrackToZeroV2AsyncAppService = ({
       eligibleDebts.filter((debt) => debtBalance(debt) > 0),
       activeContext?.version?.strategy || "avalanche"
     );
+    // UX-8.2: complement of eligibleDebts, from the same debts/
+    // activeContext.version used for payoffQueue/warnings above.
+    const excludedDebts = getExcludedPlanDebts(debts, activeContext?.version);
 
     return {
       ...context,
@@ -523,6 +527,7 @@ export const createTrackToZeroV2AsyncAppService = ({
       targetDebt,
       portfolioSummary,
       payoffQueue,
+      excludedDebts,
       projectedZeroDate: projectionWithWarnings.projection.at(-1)?.month || activeContext?.version?.projectedZeroDate || "",
     };
   };
@@ -662,13 +667,45 @@ export const createTrackToZeroV2AsyncAppService = ({
     return result.debt;
   };
 
-  const updateDebt = async (workspaceId, debtId, patch) => {
+  // UX-8.2: the only fields a debt-metadata edit may touch. currentBalance/
+  // startingBalance/balanceStatus/openingBalanceSnapshotId/id/workspaceId/
+  // createdBy/createdAt/paidOffAt are deliberately excluded - those are
+  // observed-truth/system fields that must only ever be set at creation or
+  // via a BalanceSnapshot (see recordBalanceSnapshot), never overwritten by
+  // a metadata edit. repository.saveDebt still re-runs createDebt's full
+  // schema validation on whatever this ends up passing it.
+  const DEBT_EDITABLE_FIELDS = ["name", "debtType", "aprStatus", "apr", "minimumRequiredPayment", "dueDay", "ownerType", "ownerId", "includedInCorePayoffPlan"];
+
+  const updateDebt = async (workspaceId, debtId, patch = {}) => {
     assertInteractive();
-    const { membership } = await getWorkspaceContext(workspaceId);
+    const { workspace, membership, members, people } = await getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "manageDebts")) throw new Error("Your role can view this debt, but cannot edit debt terms.");
     const current = (await repository.listDebts(workspaceId)).find((debt) => debt.id === debtId);
     if (!current) throw new Error("Debt not found");
-    return repository.saveDebt({ ...current, ...patch, updatedAt: asOf, updatedBy: actorId });
+
+    const allowedPatch = {};
+    for (const field of DEBT_EDITABLE_FIELDS) {
+      if (field in patch) allowedPatch[field] = patch[field];
+    }
+
+    // Owner is never trusted directly from the patch - re-verify against
+    // the real, current membership/person list the same way debt creation
+    // does, so a pending invite, cross-workspace uid, or arbitrary string
+    // can never become an owner.
+    if ("ownerType" in allowedPatch || "ownerId" in allowedPatch) {
+      const resolved = resolveDebtOwnership({
+        workspaceType: workspace.type,
+        members,
+        people,
+        actorId,
+        requested: { ownerType: allowedPatch.ownerType ?? current.ownerType, ownerId: allowedPatch.ownerId ?? current.ownerId },
+      });
+      allowedPatch.ownerType = resolved.ownerType;
+      allowedPatch.ownerId = resolved.ownerId;
+      allowedPatch.ownerLabel = resolved.ownerLabel;
+    }
+
+    return repository.saveDebt({ ...current, ...allowedPatch, updatedAt: asOf, updatedBy: actorId });
   };
 
   const recordPayment = async (workspaceId, debtId, { amount, paidAt = asOf, notes = "" } = {}) => {
@@ -1731,6 +1768,10 @@ export const createTrackToZeroV2AsyncAppService = ({
     const { projection, warnings } = buildProjectionWithWarnings({ debts, planVersion: planVersionLike, startMonth, startYear, customTargetOrder, ...(maxMonths ? { maxMonths } : {}) });
     const debtBalance = (debt) => Number(debt.currentBalance || 0);
     const eligibleForDisplay = getEligiblePlanDebts(debts, planVersionLike).filter((debt) => debtBalance(debt) > 0);
+    // UX-8.2: the exact complement, from the same debts/planVersionLike
+    // used for payoffOrder/warnings above - so a Plan preview's "excluded"
+    // section can never independently drift from what's actually excluded.
+    const excludedDebts = getExcludedPlanDebts(debts, planVersionLike);
     const payoffOrder = planVersionLike.strategy === "custom"
       ? [...eligibleForDisplay].sort((a, b) => {
           const rankA = customTargetOrder.indexOf(a.id);
@@ -1745,6 +1786,7 @@ export const createTrackToZeroV2AsyncAppService = ({
       strategy: planVersionLike.strategy,
       extraMonthlyPayment: Number(planVersionLike.extraMonthlyPayment || 0),
       payoffOrder,
+      excludedDebts,
       startingTotalBalance,
       monthsToZero: projection.length,
       projectedZeroDate: projection.at(-1)?.month || "",

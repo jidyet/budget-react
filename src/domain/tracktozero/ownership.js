@@ -200,3 +200,44 @@ export const looksLikeJunkOwnerLabel = (label) => JUNK_OWNER_LABEL_RE.test(Strin
 // correctness, so it is surfaced separately (see looksLikeJunkOwnerLabel)
 // rather than folded in here.
 export const isDebtNeedsReview = (debt) => isBalanceUnresolved(debt) || isMinimumPaymentContaminated(debt);
+
+// UX-8.2: a short, safe secondary label to distinguish two debts that share
+// the exact same display name (e.g. two debts both named "Capital One") so
+// a per-debt warning message or payoff-order list item is never ambiguous
+// about which debt it means - the reported "BOFA is excluded, yet BOFA is
+// still numbered in the payoff order" bug traced to exactly this: two
+// distinct debts sharing one name, not an engine/filter divergence (see
+// getEligiblePlanDebts). Prefers the owner (household only) or a stored
+// last-four reference over anything that could look like a real account
+// number; returns "" when the name is unique or nothing safe to show exists.
+export const disambiguationSuffixForDebt = (debt, allDebts = [], { isHousehold = false } = {}) => {
+  const name = debt?.name || "";
+  const duplicateCount = allDebts.filter((other) => (other?.name || "") === name).length;
+  if (duplicateCount < 2) return "";
+  if (debt?.accountReferenceSafe) return `…${debt.accountReferenceSafe}`;
+  if (isHousehold) {
+    const ownerLabel = presentedOwnerLabel(debt);
+    if (ownerLabel && ownerLabel !== "Unassigned") return ownerLabel;
+  }
+  return "";
+};
+
+// UX-8.2: the concrete, human-readable reasons behind DebtBadges' "Needs
+// review" badge - the exact same 6-condition union DebtBadges computes
+// inline, kept here as the single source both DebtBadges and the debt-edit/
+// excluded-plan-debt surfaces read, so the badge and the reason list can
+// never drift into two different definitions of "needs review." Only
+// balance_unresolved/minimum_payment_contaminated exclude a debt from plan
+// math (see isDebtNeedsReview) - the rest are presentation-only data-quality
+// issues and must never be described as blocking the plan.
+export const describeDebtReviewReasons = (debt, isHousehold = false) => {
+  if (isConfirmedZero(debt)) return [];
+  const reasons = [];
+  if (isBalanceUnresolved(debt)) reasons.push({ code: "balance_unresolved", label: "Balance not confirmed", blocksPlan: true });
+  if (isMinimumPaymentContaminated(debt)) reasons.push({ code: "minimum_payment_contaminated", label: "Required payment looks incorrect", blocksPlan: true });
+  if (debt?.aprStatus === "unknown") reasons.push({ code: "apr_unknown", label: "Missing APR", blocksPlan: false });
+  if (Number(debt?.minimumRequiredPayment || 0) <= 0) reasons.push({ code: "minimum_payment_missing", label: "Missing required payment", blocksPlan: false });
+  if (isHousehold && effectiveOwnerType(debt) === "unassigned") reasons.push({ code: "owner_unassigned", label: "Owner unassigned", blocksPlan: false });
+  if (looksLikeJunkOwnerLabel(debt?.ownerLabel)) reasons.push({ code: "owner_label_junk", label: "Owner needs review", blocksPlan: false });
+  return reasons;
+};

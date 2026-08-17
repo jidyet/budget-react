@@ -720,7 +720,7 @@ export const createTrackToZeroV2AsyncAppService = ({
     return context;
   };
 
-  const createImportBatch = async (workspaceId, { sourceType, sourceFilename = "", candidates = [], warnings = [], parserVersion = "1" } = {}) => {
+  const createImportBatch = async (workspaceId, { sourceType, sourceFilename = "", candidates = [], warnings = [], parserVersion = "1", nonDebtItems = [], scanSummary = {} } = {}) => {
     assertInteractive();
     const { workspace, membership, members, people } = await getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot import debts into this workspace.");
@@ -765,7 +765,16 @@ export const createTrackToZeroV2AsyncAppService = ({
       rejectedCount: 0,
       duplicateCount: reconciledCandidates.filter((candidate) => candidate.evidence?.reconciliation?.classification === MATCH_CLASSIFICATIONS.duplicateImport).length,
       warnings,
-      metadata: { parserVersion },
+      // UX-6.1: DATA-2's non-debt classification (items recognized but
+      // intentionally not imported as debt, e.g. utilities/subscriptions)
+      // was previously computed and silently discarded at the call site.
+      // Folding it into the existing metadata passthrough (already
+      // populated with parserVersion, already round-tripped as-is by both
+      // repositories with no schema change) keeps it available for the
+      // Import Review's "not debt" callout even across the existing
+      // resumable-import reload flow, instead of only living in transient
+      // React state and vanishing on resume.
+      metadata: { parserVersion, nonDebtItems, scanSummary },
       candidates: reconciledCandidates.map((candidate) => ({ ...candidate, importBatchId: batchId, workspaceId })),
     });
   };

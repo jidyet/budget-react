@@ -11,6 +11,10 @@ const budgets = [
   { name: "Settings page", match: /^SettingsPage-.*\.js$/, maxBytes: 60 * 1024 },
   { name: "Accounts page", match: /^AccountsPage-.*\.js$/, maxBytes: 60 * 1024 },
   { name: "Payoff page", match: /^PayoffPage-.*\.js$/, maxBytes: 60 * 1024 },
+  // UX-6.1: previously unbudgeted (TrackToZero V2 had no entry at all) - set
+  // generously above the post-redesign build (~330 kB) to catch a real
+  // regression without being byte-tuned.
+  { name: "TrackToZero V2", match: /^TrackToZeroV2App-.*\.js$/, maxBytes: 450 * 1024 },
 ];
 
 function formatKb(bytes) {

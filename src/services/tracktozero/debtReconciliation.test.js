@@ -109,6 +109,49 @@ describe("debt reconciliation", () => {
     expect(result.matches[0].diff.owner.state).toBe("changed");
   });
 
+  it("does not match a credit card candidate against an unrelated mortgage from weak evidence alone (UX-6.1 guardrail)", () => {
+    const result = matchImportCandidateToDebts({
+      candidate: candidate({
+        creditorName: "U.S. Bank Cash+",
+        accountName: "Cash+ Visa Signature",
+        accountReferenceSafe: "",
+        debtType: "credit_card",
+        currentBalance: 5119.1,
+        ownerType: "unassigned",
+        ownerId: "",
+      }),
+      debts: [debt({ name: "House Mortgage", accountReferenceSafe: "", debtType: "mortgage", currentBalance: 120700, ownerType: "joint", ownerId: "" })],
+    });
+    expect(result.classification).toBe(MATCH_CLASSIFICATIONS.noMatch);
+  });
+
+  it("lets an incompatible debt type sink an otherwise-crossing creditor+owner match below the possible threshold", () => {
+    // Pre-fix this scores 45 (creditor +35, owner +10) - comfortably over the
+    // 35 "possible" threshold - even though the types are incompatible. This
+    // is the scenario that actually exercises the new typeConflict penalty
+    // (unlike the test above, where creditorSame is already false).
+    const result = matchImportCandidateToDebts({
+      candidate: candidate({
+        creditorName: "Firstmark Services",
+        accountName: "Firstmark account",
+        accountReferenceSafe: "",
+        debtType: "credit_card",
+        ownerId: "owner-a",
+      }),
+      debts: [debt({ name: "Firstmark Services", accountReferenceSafe: "", debtType: "mortgage", ownerId: "owner-a" })],
+    });
+    expect(result.classification).toBe(MATCH_CLASSIFICATIONS.noMatch);
+  });
+
+  it("still surfaces a debt-type mismatch as a concern (not a veto) when account+creditor already match strongly", () => {
+    const result = matchImportCandidateToDebts({
+      candidate: candidate({ debtType: "credit_card" }),
+      debts: [debt({ debtType: "student_loan" })],
+    });
+    expect(result.classification).toBe(MATCH_CLASSIFICATIONS.strongMatch);
+    expect(result.matches[0].concerns).toContain("Debt type does not match");
+  });
+
   it("detects duplicate imports from prior ImportBatch fingerprints", () => {
     const prior = {
       id: "batch-old",

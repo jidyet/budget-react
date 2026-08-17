@@ -4,8 +4,8 @@ import WorkspaceIdentity from "./WorkspaceIdentity.jsx";
 import PrimaryNav from "./PrimaryNav.jsx";
 import EnvironmentBadge from "./EnvironmentBadge.jsx";
 import UserMenu from "./UserMenu.jsx";
-import { ttzPalette } from "../theme.js";
-import { useIsTablet } from "../useViewport.js";
+import { ttzPalette, ttzGutter } from "../theme.js";
+import { useIsMobile, useIsTablet } from "../useViewport.js";
 
 // The new app shell header (UX-1 Part 22-23) - replaces the old WorkspaceBar,
 // which put "TrackToZero 2.0 - Local beta workspace (emulator)", a raw
@@ -20,7 +20,9 @@ export default function TopBar({ workspace, repositoryMode, snapshotMode, active
   // desktop-style row at tablet widths - switching this to the tablet
   // breakpoint (not just mobile) keeps the brand wordmark from being
   // squeezed into wrapping across multiple lines (REVIEW-1B QA finding).
+  const isMobile = useIsMobile();
   const isCompact = useIsTablet();
+  const gutter = ttzGutter({ isMobile, isTablet: isCompact });
 
   return (
     <header
@@ -36,7 +38,7 @@ export default function TopBar({ workspace, repositoryMode, snapshotMode, active
         style={{
           maxWidth: "var(--ttz-container-max, 1180px)",
           margin: "0 auto",
-          padding: isCompact ? "10px 14px" : "10px 20px",
+          padding: `10px ${gutter}`,
           display: "flex",
           flexDirection: isCompact ? "column" : "row",
           alignItems: isCompact ? "stretch" : "center",

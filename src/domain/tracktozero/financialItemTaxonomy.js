@@ -56,6 +56,13 @@ const DEBT_TYPE_TO_CATEGORY_GROUP = {
 
 export const debtCategoryGroupFor = (debtType) => DEBT_TYPE_TO_CATEGORY_GROUP[debtType] || DEBT_CATEGORY_GROUPS.otherDebt;
 
+// UX-6.1: the "mortgage stays out of the core payoff plan by default" rule,
+// centralized. Previously duplicated ad hoc in 5 places (3 import adapters +
+// 2 inline JSX handlers) - this is the single source of truth for any NEW
+// call site; the 3 existing adapters that already inline this check are left
+// alone rather than refactored as a side effect of an unrelated UX phase.
+export const isDebtIncludedByDefault = (debtType) => debtType !== "mortgage";
+
 const safeString = (value) => String(value ?? "").trim();
 const normalizeText = (value) => safeString(value).toLowerCase().replace(/[•*]+/g, " ").replace(/[^a-z0-9]+/g, " ").trim();
 

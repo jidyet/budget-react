@@ -140,6 +140,7 @@ export const scoreCandidateAgainstDebt = ({ candidate = {}, debt = {}, latestSna
     || (!!candidate.ownerId && candidate.ownerId === debt.ownerId)
     || (!!ownerLabelFor(candidate) && ownerLabelFor(candidate) === ownerLabelFor(debt));
   const typeSame = !!candidate.debtType && !!debt.debtType && lower(candidate.debtType) === lower(debt.debtType);
+  const typeConflict = !!candidate.debtType && !!debt.debtType && lower(candidate.debtType) !== lower(debt.debtType);
   const balanceClose = money(candidate.currentBalance) !== null
     && money(latestSnapshot?.balance ?? debt.currentBalance) !== null
     && Math.abs(money(candidate.currentBalance) - money(latestSnapshot?.balance ?? debt.currentBalance)) <= Math.max(50, money(latestSnapshot?.balance ?? debt.currentBalance) * 0.03);
@@ -153,6 +154,14 @@ export const scoreCandidateAgainstDebt = ({ candidate = {}, debt = {}, latestSna
   if (typeSame) { score += 8; reasons.push("Debt type matches"); }
   if (balanceClose) { score += 6; reasons.push("Balance is close to existing latest balance"); }
   if (accountConflict) { score -= 80; concerns.push("Safe account references conflict"); }
+  // An incompatible debt type (e.g. credit_card vs. mortgage) is strong negative
+  // evidence for a weak (creditor/balance-only) match - large enough to keep a
+  // bare creditor-name match (score 35) from crossing the "possible" threshold.
+  // Deliberately NOT a veto like accountConflict: a genuine same-account match
+  // (accountSame && creditorSame -> "strong" below) still surfaces this as a
+  // concern rather than being blocked, mirroring how an owner mismatch on an
+  // otherwise-strong match is surfaced, not vetoed.
+  if (typeConflict) { score -= 40; concerns.push("Debt type does not match"); }
   if (candidate.ownerId && debt.ownerId && candidate.ownerId !== debt.ownerId) { score -= 12; concerns.push("Owner differs"); }
   if (!accountSame && creditorSame) concerns.push("Creditor match alone is not enough to update automatically");
   const strength = accountConflict

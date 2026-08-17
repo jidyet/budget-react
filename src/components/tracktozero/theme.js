@@ -82,7 +82,11 @@ export const ttzCssVars = (palette = ttzPalette) => ({
   "--ttz-space-6": "32px",
   "--ttz-space-8": "48px",
 
-  "--ttz-container-max": "1180px",
+  // UX-6.1: fluid width instead of a hard 1180px column - clamp() gives a
+  // continuous scale between the old minimum and a wide-desktop ceiling with
+  // no extra breakpoint tier, consistent with the clamp()-based fluid type
+  // already used in HomeCommandCenter.jsx.
+  "--ttz-container-max": "clamp(1180px, 92vw, 1600px)",
 
   "--ttz-z-sticky": "30",
   "--ttz-z-dropdown": "40",
@@ -112,3 +116,9 @@ export const TYPE_SCALE = Object.freeze({
 });
 
 export const BREAKPOINTS = Object.freeze({ mobile: 640, tablet: 960 });
+
+// UX-6.1: shared horizontal-gutter step so every shell piece (TopBar,
+// PageContainer) scales its side padding identically instead of each
+// picking its own numbers - matters more now that --ttz-container-max can
+// grow up to 1600px, where a fixed small gutter would look cramped.
+export const ttzGutter = ({ isMobile, isTablet }) => (isMobile ? "var(--ttz-space-4)" : isTablet ? "var(--ttz-space-5)" : "var(--ttz-space-6)");

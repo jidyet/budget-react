@@ -17,6 +17,9 @@ import {
   sortOpenReviewItems,
   toReviewItem,
 } from "./reviewDomain.js";
+import { parseStatement } from "../adapters/statementTextExtraction.js";
+import { statementResultToCandidate } from "../adapters/statementCandidateAdapter.js";
+import { US_BANK_CASH_PLUS_STATEMENT_TEXT } from "../adapters/__fixtures__/usBankCashPlusStatement.fixture.js";
 
 const candidate = (overrides = {}) => ({
   candidateId: "cand-1",
@@ -78,6 +81,13 @@ describe("REVIEW-1A scenarios (Part 42 A-L, pure-logic-testable subset)", () => 
     const singleUnknown = candidate({ aprStatus: "unknown" });
     expect(classifyReviewTypes(singleUnknown)).toContain(REVIEW_TYPES.aprConfirmation);
     expect(isReviewBlocking(singleUnknown)).toBe(false);
+  });
+
+  it("DATA-2: a real PDF-sourced candidate (not a hand-built fixture) now also blocks on multiple plausible APRs - this check previously only ever fired for Excel/workbook candidates, since PDF candidates never populated fieldEvidence.apr at all", () => {
+    const parsed = parseStatement(US_BANK_CASH_PLUS_STATEMENT_TEXT);
+    const pdfCandidate = statementResultToCandidate(parsed, { source: "pdf", importBatchId: "batch", fileName: "cash-plus.pdf" });
+    expect(classifyReviewTypes(pdfCandidate)).toContain(REVIEW_TYPES.aprConfirmation);
+    expect(isReviewBlocking(pdfCandidate)).toBe(true);
   });
 
   it("F: a formula-derived/projected balance is blocking BALANCE_CONFIRMATION even when balanceStatus looks confirmed", () => {

@@ -1,5 +1,17 @@
 import { normalizeAprField, normalizeCurrency, normalizeDateField, normalizeDebtType } from "./importCandidateAdapter.js";
 import { stableHash } from "./legacyTrackToZeroAdapter.js";
+import {
+  FINANCIAL_ITEM_TYPES,
+  HOME_EXPENSE_RE,
+  INCOME_RE,
+  INSURANCE_RE,
+  SAVINGS_RE,
+  STORAGE_EXPENSE_RE,
+  SUBSCRIPTION_RE,
+  UTILITY_RE,
+  financialItemTypeForNonDebt,
+  matchSectionHeading,
+} from "../../domain/tracktozero/financialItemTaxonomy.js";
 
 export const WORKBOOK_DISCOVERY_VERSION = "data-1a";
 
@@ -79,12 +91,6 @@ const monthEndStatementDate = ({ sheetName, dueDate }) => {
   if (monthIndex < 0 || !Number.isInteger(year)) return "";
   return new Date(Date.UTC(year, monthIndex + 1, 0)).toISOString().slice(0, 10);
 };
-const isAggregateOrSectionLabel = (value) => {
-  const normalized = normalizeText(value);
-  if (/\b(subtotal|grand total|total)\b/.test(normalized)) return true;
-  return ["credit cards", "student loans", "personal loans", "line of credit", "business"].includes(normalized);
-};
-
 export const getSafeAccountReference = (text = "") => {
   const source = safeString(text);
   const last4 = source.match(/(?:\*{2,}|x{2,}|•{2,}|\bending\s+in\s+|\blast\s*4\s*)\s*(\d{4})\b/i)?.[1]
@@ -289,7 +295,19 @@ const classifyRow = ({ accountText, categoryText, sheetName, hasBalanceEvidence,
   if (hasBalanceEvidence) debtSignals.push("balance evidence");
   if (hasAprEvidence) debtSignals.push("APR evidence");
   if (hasMinimumEvidence && debtSignals.length) debtSignals.push("minimum payment evidence");
-  if (ORDINARY_BILL_RE.test(haystack) || BILL_CATEGORY_RE.test(haystack)) billSignals.push("ordinary bill vocabulary/category");
+  // DATA-2: broadened beyond the original ordinary-bill/category vocabulary
+  // to also recognize utility/subscription/insurance/home-expense/storage/
+  // savings/income vocabulary as non-debt evidence - same decision structure
+  // as before, just richer input (see financialItemTaxonomy.js). Savings and
+  // income in particular had NO vocabulary at all previously, so a row like
+  // "Monthly Savings" or "EagleView income" fell through to `uncertain`
+  // instead of being confidently recognized as not debt.
+  if (
+    ORDINARY_BILL_RE.test(haystack) || BILL_CATEGORY_RE.test(haystack)
+    || UTILITY_RE.test(haystack) || SUBSCRIPTION_RE.test(haystack) || INSURANCE_RE.test(haystack)
+    || HOME_EXPENSE_RE.test(haystack) || STORAGE_EXPENSE_RE.test(haystack)
+    || SAVINGS_RE.test(haystack) || INCOME_RE.test(haystack)
+  ) billSignals.push("ordinary bill vocabulary/category");
   if (POSSIBLE_PAYMENT_RE.test(haystack) && !hasBalanceEvidence && !hasAprEvidence && !DEBT_CATEGORY_RE.test(haystack)) {
     return { classification: CLASSIFICATIONS.possibleDebt, debtSignals, billSignals, reason: "Recurring payment resembles debt but no payoff balance/loan evidence was found." };
   }
@@ -374,6 +392,7 @@ const candidateFromGroup = ({ group, importBatchId, source, sourceFilename }) =>
     aprUnique.length > 1 ? "Multiple plausible APR values found; review before confirming." : "",
     minimum?.value == null ? "Minimum payment is missing or unresolved." : "",
     scopeSuggestion === SCOPE_SUGGESTIONS.businessCandidate ? "Business-like scope evidence found; do not include in household plan without confirmation." : "",
+    group.possibleSeparateAccount ? "This creditor name appears more than once in this sheet without an account number - kept as a separate possible account. Confirm during review." : "",
   ].filter(Boolean);
   const confidenceLabel = scopeSuggestion === SCOPE_SUGGESTIONS.businessCandidate
     ? "business_debt_confirm_scope"
@@ -417,6 +436,7 @@ const candidateFromGroup = ({ group, importBatchId, source, sourceFilename }) =>
         entityKey: group.key,
         sourceCount: group.sources.length,
         consolidated: group.sources.length > 1,
+        possibleSeparateAccounts: group.possibleSeparateAccount,
       },
       ordinaryBillEvidence: group.ordinaryBillEvidence,
     },
@@ -436,6 +456,15 @@ const extractRowsFromSheet = ({ topologySheet, sheet, XLSX, fileName }) => {
     const columnMap = buildColumnMap(headerCells);
     if (columnMap.accountName == null && columnMap.creditorName == null) continue;
     const maxRows = Math.min(range.e.r, headerRowIndex + 300);
+    // DATA-2: standalone section-heading rows (e.g. a lone "UTILITIES" row
+    // with no financial data, immediately above the rows it categorizes)
+    // previously vanished with no trace - matched, skipped, and forgotten.
+    // Rows below inherit this as a categoryText fallback (see effectiveCategoryText
+    // below), so a bare-vocabulary row like "Gas" under "UTILITIES" - or any
+    // row with no per-row category column at all - still classifies
+    // correctly instead of falling through to `uncertain`. Reset per table
+    // region, not per sheet: a new header region starts a fresh context.
+    let currentSectionLabel = "";
     for (let r = headerRowIndex + 1; r <= maxRows; r += 1) {
       const row = topologySheet.rows[r] || [];
       const identity = rowIdentity({ row, columnMap, sheetName: topologySheet.sheetName });
@@ -445,8 +474,16 @@ const extractRowsFromSheet = ({ topologySheet, sheet, XLSX, fileName }) => {
       const categoryText = safeString(identity.categoryText);
       const ownerSuggestion = parseOwnerSuggestion(accountText) || (columnMap.owner != null ? parseOwnerSuggestion(row[columnMap.owner]?.text) || safeString(row[columnMap.owner]?.text) : "");
       const strippedLabel = stripOwnerSuffix(accountText);
-      const debtType = normalizeDebtType(categoryText, `${accountText} ${topologySheet.sheetName}`);
-      if (isAggregateOrSectionLabel(strippedLabel)) continue;
+      const sectionMatch = !categoryText ? matchSectionHeading(strippedLabel) : null;
+      if (sectionMatch) {
+        // Subtotal/total rows end the current section's data without
+        // themselves becoming a new section label; a genuine heading
+        // (CREDIT CARDS, UTILITIES, BUSINESS, ...) becomes the new context.
+        if (sectionMatch.financialItemType !== FINANCIAL_ITEM_TYPES.subtotalOrSummary) currentSectionLabel = strippedLabel;
+        continue;
+      }
+      const effectiveCategoryText = categoryText || currentSectionLabel;
+      const debtType = normalizeDebtType(effectiveCategoryText, `${accountText} ${topologySheet.sheetName}`);
       const dueCell = columnMap.dueDate != null ? sheet[cellRef(XLSX, r, columnMap.dueDate)] : null;
       const dueDate = dueCell ? normalizeDateField(dueCell.w ?? dueCell.v) || (Number.isInteger(Number(dueCell.v)) ? `day:${Number(dueCell.v)}` : null) : null;
       const balanceCells = [columnMap.currentBalance, columnMap.startingBalance]
@@ -481,12 +518,16 @@ const extractRowsFromSheet = ({ topologySheet, sheet, XLSX, fileName }) => {
       const minimumPayment = minimumEvidence.find((item) => item.value != null)?.value ?? null;
       const classification = classifyRow({
         accountText,
-        categoryText,
+        categoryText: effectiveCategoryText,
         sheetName: topologySheet.sheetName,
         hasBalanceEvidence: balanceEvidence.some((item) => item.value != null),
         hasAprEvidence: apr.aprStatus !== "unknown" || !!aprCell,
         hasMinimumEvidence: minimumPayment != null,
       });
+      const sectionHeadingContext = currentSectionLabel ? matchSectionHeading(currentSectionLabel) : null;
+      const financialItemType = classification.classification === CLASSIFICATIONS.notDebt
+        ? financialItemTypeForNonDebt({ accountText, categoryText, sectionHint: sectionHeadingContext?.financialItemType })
+        : FINANCIAL_ITEM_TYPES.debt;
       const accountReferenceSafe = getSafeAccountReference(accountText);
       records.push({
         key: entityKeyFor({ label: strippedLabel, ownerSuggestion, accountReferenceSafe }),
@@ -496,6 +537,7 @@ const extractRowsFromSheet = ({ topologySheet, sheet, XLSX, fileName }) => {
         accountReferenceSafe,
         debtType,
         classification,
+        financialItemType,
         identityEvidence: accountCell ? [{
           value: accountText,
           truth: cellTruth({ cell: accountCell.cell, header: headerCells[columnMap.accountName ?? columnMap.creditorName]?.text || "", sheetName: topologySheet.sheetName }),
@@ -515,23 +557,56 @@ const extractRowsFromSheet = ({ topologySheet, sheet, XLSX, fileName }) => {
         minimumEvidence,
         dueEvidence: dueCell ? [{ value: dueDate, raw: dueCell.w ?? dueCell.v, statementDate: monthEndStatementDate({ sheetName: topologySheet.sheetName, dueDate }), provenance: provenanceForCell({ fileName, sheetName: topologySheet.sheetName, sheetIndex: topologySheet.sheetIndex, rowIndex: r, colIndex: columnMap.dueDate, header: headerCells[columnMap.dueDate]?.text || "", cell: dueCell, XLSX }), truth: cellTruth({ cell: dueCell, header: headerCells[columnMap.dueDate]?.text || "", sheetName: topologySheet.sheetName }) }] : [],
         source: { sheetName: topologySheet.sheetName, sheetIndex: topologySheet.sheetIndex, row: r + 1 },
-        businessSignal: BUSINESS_RE.test(`${accountText} ${categoryText} ${topologySheet.sheetName}`) ? `${accountText} ${categoryText}` : "",
+        businessSignal: BUSINESS_RE.test(`${accountText} ${effectiveCategoryText} ${topologySheet.sheetName}`) ? `${accountText} ${effectiveCategoryText}` : "",
       });
     }
   }
   return records;
 };
 
+// DATA-2: "do not invent account identifiers" - two DISTINCT accounts from
+// the same creditor in the same sheet (e.g. two separate "Aidvantage" student
+// loan rows in one Student Loans section, no account-last-4 to tell them
+// apart) must never be silently merged into one candidate just because their
+// name-based entity key matches. Only applies when accountReferenceSafe is
+// empty - last-4-disambiguated keys are already unambiguous. Deliberately
+// does NOT affect the legitimate cross-sheet case (the SAME account
+// recurring across 12 monthly tabs): each sheet contributes at most one row
+// per key there, so the occurrence index is always 0 on every sheet and the
+// key is untouched.
+const resolveNameKeyCollisionsWithinSheet = (records) => {
+  const countPerSheet = new Map();
+  for (const record of records) {
+    if (record.accountReferenceSafe) continue;
+    const dedupeKey = `${record.key}|${record.source.sheetIndex}`;
+    countPerSheet.set(dedupeKey, (countPerSheet.get(dedupeKey) || 0) + 1);
+  }
+  const occurrenceIndex = new Map();
+  return records.map((record) => {
+    if (record.accountReferenceSafe) return record;
+    const dedupeKey = `${record.key}|${record.source.sheetIndex}`;
+    if ((countPerSheet.get(dedupeKey) || 0) <= 1) return record;
+    const occurrence = occurrenceIndex.get(dedupeKey) || 0;
+    occurrenceIndex.set(dedupeKey, occurrence + 1);
+    // Every colliding record is flagged (not just the 2nd+) so a human
+    // reviewing either candidate sees the same "possibly separate account"
+    // context - but only occurrence>0 gets a key suffix, so the first
+    // occurrence's entity key stays stable/unchanged.
+    return { ...record, key: occurrence === 0 ? record.key : `${record.key}#${occurrence}`, possibleSeparateAccount: true };
+  });
+};
+
 export const discoverWorkbookDebtCandidates = ({ workbook, XLSX, fileName = "", importBatchId = "", source = "excel" }) => {
   if (!workbook?.SheetNames?.length) {
-    return { candidates: [], batchWarnings: ["No sheet was found in this file."], topology: { fileName, sheetCount: 0, sheets: [] }, scanSummary: {}, confident: false };
+    return { candidates: [], nonDebtItems: [], batchWarnings: ["No sheet was found in this file."], topology: { fileName, sheetCount: 0, sheets: [] }, scanSummary: {}, confident: false };
   }
   const topology = analyzeWorkbookTopology({ workbook, XLSX, fileName });
-  const records = [];
+  let records = [];
   for (const topologySheet of topology.sheets) {
     if (LOW_SHEET_RE.test(topologySheet.sheetName) && topologySheet.relevanceScore < 3) continue;
     records.push(...extractRowsFromSheet({ topologySheet, sheet: workbook.Sheets[topologySheet.sheetName], XLSX, fileName }));
   }
+  records = resolveNameKeyCollisionsWithinSheet(records);
   const groups = new Map();
   const ordinaryBills = [];
   const ambiguousItems = [];
@@ -556,12 +631,14 @@ export const discoverWorkbookDebtCandidates = ({ workbook, XLSX, fileName = "", 
         sources: [],
         businessSignals: [],
         ordinaryBillEvidence: [],
+        possibleSeparateAccount: false,
       });
     }
     const group = groups.get(record.key);
     group.classifications.push(record.classification.classification);
     group.reasons.push(record.classification.reason);
     group.sources.push(record.source);
+    if (record.possibleSeparateAccount) group.possibleSeparateAccount = true;
     if (record.businessSignal) group.businessSignals.push(record.businessSignal);
     record.classification.debtSignals.forEach((signal) => group.classificationEvidence.push(evidence({ kind: "debt_signal", source: signal, weight: 1, provenance: record.source })));
     record.classification.billSignals.forEach((signal) => group.ordinaryBillEvidence.push(evidence({ kind: "bill_signal", source: signal, weight: 1, provenance: record.source })));
@@ -575,6 +652,24 @@ export const discoverWorkbookDebtCandidates = ({ workbook, XLSX, fileName = "", 
   const candidates = [...groups.values()]
     .map((group) => candidateFromGroup({ group, importBatchId, source, sourceFilename: fileName }))
     .filter((candidate) => candidate.evidence.classification !== CLASSIFICATIONS.notDebt);
+  // DATA-2: non-debt items are understood, not silently lost - retained here
+  // as lightweight staging records (never a full ImportCandidate: no
+  // candidateId, no fieldEvidence blob) so a future summary can say "we
+  // recognized N items that aren't debts." They never enter the
+  // ImportCandidate/Review pipeline and never become a Debt.
+  const nonDebtItems = ordinaryBills.map((record) => ({
+    financialItemType: record.financialItemType,
+    label: record.accountName,
+    sheetName: record.source.sheetName,
+    sheetIndex: record.source.sheetIndex,
+    row: record.source.row,
+    reason: record.classification.reason,
+    scopeSuggestion: record.businessSignal ? SCOPE_SUGGESTIONS.businessCandidate : "",
+  }));
+  const nonDebtByType = nonDebtItems.reduce((acc, item) => {
+    acc[item.financialItemType] = (acc[item.financialItemType] || 0) + 1;
+    return acc;
+  }, {});
   const scanSummary = {
     sheetsAnalyzed: topology.sheets.length,
     sheetsRelevant: topology.sheets.filter((sheet) => sheet.relevanceScore >= 3).length,
@@ -584,6 +679,7 @@ export const discoverWorkbookDebtCandidates = ({ workbook, XLSX, fileName = "", 
     needsInformation: candidates.filter((candidate) => candidate.balanceStatus === "unresolved" || candidate.aprStatus === "unknown" || candidate.minimumPayment == null).length,
     ordinaryBillsIgnored: ordinaryBills.length,
     ambiguousItems: ambiguousItems.length,
+    nonDebtByType,
   };
   const batchWarnings = [
     candidates.length ? "" : "Valid workbook parsed, but no likely debt candidates were found.",
@@ -592,6 +688,7 @@ export const discoverWorkbookDebtCandidates = ({ workbook, XLSX, fileName = "", 
   ].filter(Boolean);
   return {
     candidates,
+    nonDebtItems,
     batchWarnings,
     topology: {
       ...topology,

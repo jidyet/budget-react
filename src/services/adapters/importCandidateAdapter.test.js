@@ -75,6 +75,13 @@ describe("importCandidateAdapter: field normalization", () => {
     expect(normalizeDebtType("", "")).toBe("other");
     expect(normalizeDebtType(undefined, "Mystery Corp")).toBe("other");
   });
+
+  it("DATA-2: classifies a business credit card as business_debt, not credit_card - business_debt must be checked first", () => {
+    expect(normalizeDebtType("", "U.S. Bank Business credit card")).toBe("business_debt");
+    expect(normalizeDebtType("", "Business Line of Credit")).toBe("business_debt");
+    // A plain (non-business) credit card is unaffected by the reordering.
+    expect(normalizeDebtType("", "Chase Sapphire credit card")).toBe("credit_card");
+  });
 });
 
 describe("importCandidateAdapter: row-to-candidate pipeline", () => {

@@ -277,7 +277,11 @@ const forwardWindowFromLabelMatch = (lines, lineIndex, match, searchLines, stopP
   return collected.join(" ");
 };
 
-export function extractLabeledCurrency(text, labelPatterns, { allowZero = true, searchLines = 2 } = {}) {
+// DATA-2: shared by extractLabeledCurrency (unchanged behavior/signature -
+// existing callers are unaffected) and extractLabeledCurrencyWithProvenance
+// (new - carries matchedLabel/matchedText forward for source-evidence
+// display), so there is exactly one place that decides which candidate wins.
+const collectLabeledCurrencyCandidates = (text, labelPatterns, { allowZero = true, searchLines = 2 } = {}) => {
   const lines = getTextLines(text);
   const candidates = [];
 
@@ -294,12 +298,25 @@ export function extractLabeledCurrency(text, labelPatterns, { allowZero = true, 
       if (value == null) return;
       let score = 100 - labelIndex * 10 - index;
       if (index < 12) score += 18;
-      candidates.push({ value, score });
+      candidates.push({ value, score, matchedLabel: match[0].trim(), matchedText: line });
     });
   });
 
   candidates.sort((left, right) => right.score - left.score);
-  return candidates[0]?.value ?? null;
+  return candidates;
+};
+
+export function extractLabeledCurrency(text, labelPatterns, options = {}) {
+  return collectLabeledCurrencyCandidates(text, labelPatterns, options)[0]?.value ?? null;
+}
+
+// DATA-2: same selection as extractLabeledCurrency, but returns the winning
+// candidate's provenance (which label matched, and the full source line) -
+// "where did this value come from?" for a field that previously had no
+// answer at all once it left this module.
+export function extractLabeledCurrencyWithProvenance(text, labelPatterns, options = {}) {
+  const top = collectLabeledCurrencyCandidates(text, labelPatterns, options)[0];
+  return top ? { value: top.value, matchedLabel: top.matchedLabel, matchedText: top.matchedText, score: top.score } : null;
 }
 
 // A garbled/misaligned match (e.g. day 79) must never outrank - or stand in
@@ -316,7 +333,7 @@ const isPlausibleDateString = (value) => {
   return true;
 };
 
-export function extractLabeledDate(text, labelPatterns, { searchLines = 2, stopPatterns = [] } = {}) {
+const collectLabeledDateCandidates = (text, labelPatterns, { searchLines = 2, stopPatterns = [] } = {}) => {
   const lines = getTextLines(text);
   const dateValueRe = /(\d{2}\/\d{2}\/\d{4}|\w+ \d{1,2},?\s*\d{4})/i;
   const candidates = [];
@@ -335,12 +352,21 @@ export function extractLabeledDate(text, labelPatterns, { searchLines = 2, stopP
       if (!dateMatches.length) return;
       let score = 100 - labelIndex * 10 - index;
       if (index < 12) score += 18;
-      candidates.push({ value: dateMatches[0], score });
+      candidates.push({ value: dateMatches[0], score, matchedLabel: match[0].trim(), matchedText: line });
     });
   });
 
   candidates.sort((left, right) => right.score - left.score);
-  return candidates[0]?.value ?? null;
+  return candidates;
+};
+
+export function extractLabeledDate(text, labelPatterns, options = {}) {
+  return collectLabeledDateCandidates(text, labelPatterns, options)[0]?.value ?? null;
+}
+
+export function extractLabeledDateWithProvenance(text, labelPatterns, options = {}) {
+  const top = collectLabeledDateCandidates(text, labelPatterns, options)[0];
+  return top ? { value: top.value, matchedLabel: top.matchedLabel, matchedText: top.matchedText, score: top.score } : null;
 }
 
 // "Month Day" with NO year (e.g. "Feb 10") - only ever tried as a fallback
@@ -525,6 +551,109 @@ export function extractAprDetails(text) {
 export function extractAprPercent(text) {
   const { aprSelected } = extractAprDetails(text);
   return aprSelected?.value ?? null;
+}
+
+// DATA-2: previously there was no way to tell "the creditor's required
+// minimum" (min_due, above) apart from what the person actually paid this
+// period - a statement's own "Amount Paid"/"Payments Received" line was
+// never read at all. allowZero: true because a genuine $0 payment this
+// period is meaningful information, distinct from "not found."
+export function extractAmountPaid(text) {
+  return extractLabeledCurrency(text, [
+    /\bamount paid\b/i,
+    /\bpayment received\b/i,
+    /\bpayments received\b/i,
+    /\bpayments? and credits\b/i,
+  ], { allowZero: true, searchLines: 1 });
+}
+
+// DATA-2: credit limit / available credit were never extracted at all.
+export function extractCreditLimit(text) {
+  return extractLabeledCurrency(text, [
+    /\bcredit limit\b/i,
+    /\btotal credit line\b/i,
+    /\bcredit line\b/i,
+  ], { allowZero: true, searchLines: 1 });
+}
+
+export function extractAvailableCredit(text) {
+  return extractLabeledCurrency(text, [
+    /\bavailable credit\b/i,
+    /\bcredit available\b/i,
+  ], { allowZero: true, searchLines: 1 });
+}
+
+// DATA-2: which kind of balance an APR applies to - normalizeAprCandidate
+// already EXCLUDES cash-advance/penalty/balance-transfer rows from ever
+// winning as the selected purchase APR (correct for that purpose), which
+// means those rates were simply thrown away rather than preserved. This
+// classifies (never excludes) so extractAprRateComponents below can keep
+// them as structured, non-authoritative reference data.
+const APR_BALANCE_TYPE_PATTERNS = [
+  { balanceType: "cash_advance", re: /cash advance/i },
+  { balanceType: "penalty", re: /penalty/i },
+  { balanceType: "balance_transfer", re: /balance transfer/i },
+  { balanceType: "purchase", re: /\bpurchases?\b|current and future transactions|revolving/i },
+];
+export function balanceTypeForAprContext(context) {
+  const source = String(context || "");
+  const found = APR_BALANCE_TYPE_PATTERNS.find((entry) => entry.re.test(source));
+  return found ? found.balanceType : "other";
+}
+
+// DATA-2: preserves EVERY APR candidate as a structured, balance-typed
+// component (purchase/cash_advance/penalty/balance_transfer/other) instead
+// of discarding every non-purchase rate the way the single-winner selection
+// in extractAprDetails necessarily does. balanceSubjectToRate/interestCharged
+// are best-effort, read from the same interest-charge-table row the rate
+// itself came from when present - null (never invented) otherwise.
+// `aprSelected` is passed in (already computed by the caller) rather than
+// recomputed here, so the primary-APR text scan only runs once per statement.
+export function extractAprRateComponents(text, { aprSelected = null } = {}) {
+  const components = [];
+  const seen = new Map(); // key -> the component object already pushed into `components` (same reference, so mutating it here updates that entry directly)
+  const pushComponent = ({ apr, context, balanceSubjectToRate = null, interestCharged = null }) => {
+    const numeric = Number(apr);
+    if (!Number.isFinite(numeric) || numeric < 0 || numeric > 99.999) return;
+    const balanceType = balanceTypeForAprContext(context);
+    const key = `${balanceType}|${numeric}`;
+    const existing = seen.get(key);
+    if (existing) {
+      // A later match for the same balance type + rate can carry richer data
+      // (the interest-charge-table row sweep, which runs after the plain
+      // APR_CONTEXT_PATTERNS sweep, is the only source that ever finds
+      // balanceSubjectToRate/interestCharged) - fill in whichever fields the
+      // first match left null, rather than "first seen wins" discarding them.
+      if (existing.balanceSubjectToRate == null && balanceSubjectToRate != null) existing.balanceSubjectToRate = balanceSubjectToRate;
+      if (existing.interestCharged == null && interestCharged != null) existing.interestCharged = interestCharged;
+      return;
+    }
+    const component = { balanceType, apr: numeric, balanceSubjectToRate, interestCharged, source: String(context || "").trim() };
+    seen.set(key, component);
+    components.push(component);
+  };
+
+  APR_CONTEXT_PATTERNS.forEach(({ regex }) => {
+    for (const match of text.matchAll(regex)) pushComponent({ apr: match[1], context: match[0] });
+  });
+
+  const interestChargeSection = text.match(/interest charge calculation[\s\S]{0,1200}/i)?.[0] || "";
+  const rowSource = interestChargeSection || text;
+  for (const match of rowSource.matchAll(APR_TABLE_ROW_RE)) {
+    const restOfLine = rowSource.slice(match.index + match[0].length).split("\n")[0] || "";
+    const amounts = [...restOfLine.matchAll(MONEY_VALUE_RE)].map((m) => parseCurrency(m[1])).slice(0, 2);
+    pushComponent({ apr: match[2], context: match[0], balanceSubjectToRate: amounts[0] ?? null, interestCharged: amounts[1] ?? null });
+  }
+
+  // The "active" component is the one matching the already-selected primary
+  // APR (extractAprDetails' battle-tested scoring) - never a second,
+  // independently-derived "which one is active" heuristic that could
+  // disagree with it.
+  const selectedBalanceType = aprSelected ? balanceTypeForAprContext(aprSelected.source) : null;
+  return components.map((component) => ({
+    ...component,
+    activeBalance: aprSelected != null && component.apr === aprSelected.value && component.balanceType === selectedBalanceType,
+  }));
 }
 
 export const HOLDER_NAME_BLOCKLIST = /^(?:payable|payment|balance|transfer|minimum|account|statement|interest|previous|current|new|due|date|total|amount|fee|charge|purchase|credit|debit|available|billing|return|transaction|activity|summary|account number|routing)$/i;
@@ -766,6 +895,70 @@ export function detectProviderName(text) {
   return "";
 }
 
+// DATA-2: product-tier detection - detectProviderName only ever identifies
+// the ISSUER (e.g. "Capital One", "US Bank"), never which specific card/
+// line/loan product it is, which was direct evidence for debt-type
+// classification the parser never used ("Personal Line" is strong evidence
+// of a line of credit, not "Other").
+export const PRODUCT_DETECT = [
+  ["Quicksilver",           /quicksilver/i],
+  ["Venture",                /\bventure\b/i],
+  ["Cash+ Visa Signature",   /cash\+\s*visa signature|\bcash\+/i],
+  ["Personal Line",          /personal line(?: of credit)?/i],
+  ["Sapphire",                /sapphire/i],
+  ["Freedom",                 /\bfreedom\b/i],
+  ["World Elite Mastercard",  /world elite mastercard/i],
+];
+export function detectProductName(text) {
+  const source = String(text || "");
+  for (const [label, regex] of PRODUCT_DETECT) {
+    if (regex.test(source)) return label;
+  }
+  return "";
+}
+
+// DATA-2: coarse document-type pre-classification so field-label priority
+// can differ by product shape later if needed - a line-of-credit statement
+// is checked first since it can ALSO legitimately contain "minimum payment
+// due" (so a credit-card check alone would misfire), but real LOC
+// statements don't describe themselves as a "credit card."
+export function detectDocumentType(text) {
+  const source = String(text || "");
+  // Many real card statements never literally say "credit card" - they name
+  // the card network/product instead ("Visa Signature", "Mastercard", ...).
+  if (/\bcredit card\b|\bvisa\b|\bmastercard\b/i.test(source)) return "CREDIT_CARD_STATEMENT";
+  // Deliberately does NOT trigger on a bare "advance" - "cash advance" is
+  // normal credit-card vocabulary too, so that alone would misclassify most
+  // credit card statements as a line of credit. Only genuinely LOC-specific
+  // terms count here.
+  if (/line of credit|personal line|draw period/i.test(source)) return "LOC_STATEMENT";
+  if (/principal balance|amortization|loan servicer|payoff amount/i.test(source)) return "LOAN_STATEMENT";
+  return "UNKNOWN";
+}
+
+// DATA-2: the CFPB-mandated "Minimum Payment Warning" box (federally
+// standardized wording across US card issuers) - reference-only illustration
+// data, never TrackToZero's own PlanVersion/payoff projection. Deliberately
+// narrow/specific patterns (not generic "years"/"total" matches) so this
+// can't accidentally capture min_due/balance from unrelated nearby text.
+export function extractCreditorPayoffIllustration(text) {
+  const minOnlyMatch = text.match(/only the minimum payment[\s\S]{0,200}?(\d{1,2})\s*years?[\s\S]{0,160}?(?:total of\s*)?\$?([\d,]+)(?:\.\d{2})?\s*\(including interest\)/i);
+  // The dollar figure must be IMMEDIATELY adjacent (only whitespace between
+  // it and its own "pay off the balance" sentence) - a wider gap risks
+  // binding to an EARLIER, unrelated dollar amount (e.g. the minimum-only
+  // paragraph's total-paid figure) that happens to precede a LATER "pay off
+  // the balance" sentence by coincidence.
+  const altMatch = text.match(/\$\s?([\d,]+(?:\.\d{2})?)\s{0,10}(?:pay off the balance|you will pay off)[\s\S]{0,160}?(\d{1,2})\s*years?[\s\S]{0,220}?save an estimated\s*\$?([\d,]+)/i);
+  if (!minOnlyMatch && !altMatch) return null;
+  return {
+    yearsToPayoff: minOnlyMatch ? Number(minOnlyMatch[1]) : null,
+    totalPaid: minOnlyMatch ? parseCurrency(minOnlyMatch[2]) : null,
+    alternatePaymentAmount: altMatch ? parseCurrency(altMatch[1]) : null,
+    alternateYearsToPayoff: altMatch ? Number(altMatch[2]) : null,
+    estimatedSavings: altMatch ? parseCurrency(altMatch[3]) : null,
+  };
+}
+
 export function extractLoanType(text) {
   if (/subsidized/i.test(text) && /unsubsidized/i.test(text)) return "Subsidized + Unsubsidized";
   if (/subsidized/i.test(text)) return "Subsidized";
@@ -807,7 +1000,7 @@ export function enrichStatement(result, text) {
   const purchasesAmount = extractPurchasesAmount(text);
   const detectedProvider = detectProviderName(text);
   const detectedLast4 = extractAccountLast4FromText(text);
-  const labeledBalance = extractLabeledCurrency(text, [
+  const BALANCE_LABELS = [
     /\bnew balance\b/i,
     /\bcurrent balance\b/i,
     /\bstatement balance\b/i,
@@ -815,11 +1008,29 @@ export function enrichStatement(result, text) {
     /\btotal balance\b/i,
     /\boutstanding balance\b/i,
     /\bamount owed\b/i,
-  ], { allowZero: false, searchLines: 1 });
+  ];
+  const labeledBalance = extractLabeledCurrency(text, BALANCE_LABELS, { allowZero: false, searchLines: 1 });
+  const balanceProvenance = extractLabeledCurrencyWithProvenance(text, BALANCE_LABELS, { allowZero: false, searchLines: 1 });
   const previousBalance = extractLabeledCurrency(text, [/\bprevious balance\b/i, /\bprior balance\b/i, /\blast statement balance\b/i], { allowZero: true, searchLines: 1 })
     ?? firstCurrencyMatch(text, EXTRACTION_RE.previousBalance);
-  const minimumDue = extractLabeledCurrency(text, [/\bminimum payment due\b/i, /\bminimum due\b/i, /\bminimum amount due\b/i, /\bpayment due\b/i], { allowZero: true, searchLines: 1 })
-    ?? result.min_due;
+  const MIN_DUE_LABELS = [/\bminimum payment due\b/i, /\bminimum due\b/i, /\bminimum amount due\b/i, /\bpayment due\b/i];
+  const minimumDue = extractLabeledCurrency(text, MIN_DUE_LABELS, { allowZero: true, searchLines: 1 }) ?? result.min_due;
+  const minDueProvenance = extractLabeledCurrencyWithProvenance(text, MIN_DUE_LABELS, { allowZero: true, searchLines: 1 });
+  // DATA-2: the amount actually paid this period is a DIFFERENT field from
+  // the creditor's required minimum above - previously there was no
+  // extraction for this at all, so nothing prevented a caller from
+  // mistaking one for the other upstream.
+  const AMOUNT_PAID_LABELS = [/\bamount paid\b/i, /\bpayment received\b/i, /\bpayments received\b/i, /\bpayments? and credits\b/i];
+  const amountPaid = extractAmountPaid(text);
+  const amountPaidProvenance = extractLabeledCurrencyWithProvenance(text, AMOUNT_PAID_LABELS, { allowZero: true, searchLines: 1 });
+  const CREDIT_LIMIT_LABELS = [/\bcredit limit\b/i, /\btotal credit line\b/i, /\bcredit line\b/i];
+  const creditLimit = extractCreditLimit(text);
+  const creditLimitProvenance = extractLabeledCurrencyWithProvenance(text, CREDIT_LIMIT_LABELS, { allowZero: true, searchLines: 1 });
+  const availableCredit = extractAvailableCredit(text);
+  const rateComponents = extractAprRateComponents(text, { aprSelected });
+  const productName = detectProductName(text);
+  const documentType = detectDocumentType(text);
+  const creditorPayoffIllustration = extractCreditorPayoffIllustration(text);
   const interestCharged = extractLabeledCurrency(text, [/\binterest charged\b/i, /\btotal interest\b/i, /\binterest charge\b/i, /\binterest\b/i], { allowZero: true, searchLines: 1 })
     ?? firstCurrencyMatch(text, EXTRACTION_RE.interestCharged);
   const fees = extractLabeledCurrency(text, [/\bfees charged\b/i, /\btotal fees\b/i, /\bfees\b/i], { allowZero: true, searchLines: 1 })
@@ -838,6 +1049,7 @@ export function enrichStatement(result, text) {
   // (e.g. "Payment Due Date" reading forward into "Statement Closing Date
   // <a full date>" and mistaking that unrelated date for its own).
   const dueDateFromLabels = extractLabeledDate(text, DUE_DATE_LABELS, { searchLines: 2, stopPatterns: STATEMENT_DATE_LABELS });
+  const dueDateProvenance = extractLabeledDateWithProvenance(text, DUE_DATE_LABELS, { searchLines: 2, stopPatterns: STATEMENT_DATE_LABELS });
   const statementDateFromLabels = extractLabeledDate(text, STATEMENT_DATE_LABELS, { searchLines: 2, stopPatterns: DUE_DATE_LABELS });
   const statementDateIso = statementDateFromLabels ? dateStringToIso(statementDateFromLabels) : null;
   // Only tried when no full (with-year) due date was found anywhere in the
@@ -882,6 +1094,24 @@ export function enrichStatement(result, text) {
       ? `${detectedProvider}${detectedLast4 ? ` . . . ${detectedLast4}` : ""}`
       : sanitizeInstitutionHint(result.account_hint),
     account_last4: detectedLast4 || extractLast4(result?.account_hint),
+    // DATA-2 additions below - amount actually paid (distinct from min_due),
+    // credit limit/available credit, structured multi-APR rate components,
+    // product/document-type detection, the CFPB payoff-illustration box
+    // (reference-only), and per-field source provenance (matched label +
+    // source line - page number is not tracked in this phase, see
+    // pdfImportReader.js's extractTextFromPdf).
+    amount_paid: amountPaid,
+    credit_limit: creditLimit,
+    available_credit: availableCredit,
+    rate_components: rateComponents,
+    product_name: productName,
+    document_type: documentType,
+    creditor_payoff_illustration: creditorPayoffIllustration,
+    balance_provenance: balanceProvenance,
+    min_due_provenance: minDueProvenance,
+    amount_paid_provenance: amountPaidProvenance,
+    credit_limit_provenance: creditLimitProvenance,
+    due_date_provenance: dueDateProvenance,
   };
 }
 

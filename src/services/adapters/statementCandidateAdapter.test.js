@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { parseStatement } from "./statementTextExtraction.js";
 import { statementResultToCandidate } from "./statementCandidateAdapter.js";
+import { CAPITAL_ONE_STATEMENT_TEXT } from "./__fixtures__/capitalOneStatement.fixture.js";
+import { US_BANK_CASH_PLUS_STATEMENT_TEXT } from "./__fixtures__/usBankCashPlusStatement.fixture.js";
+import { US_BANK_PERSONAL_LINE_STATEMENT_TEXT } from "./__fixtures__/usBankPersonalLineStatement.fixture.js";
 
 // Exercises the existing, already-deployed parseStatement() extraction engine
 // directly with synthetic statement TEXT (never real user statements) - this is
@@ -435,5 +438,58 @@ describe("statementCandidateAdapter: due date formats without a comma, and witho
     const parsed = parseStatement(text);
     expect(parsed.due_date).toBeNull();
     expect(parsed.due_day).toBe(10);
+  });
+});
+
+describe("DATA-2: statementResultToCandidate maps the new PDF-extraction fields onto the candidate", () => {
+  it("converts rate components to the candidate's decimal APR convention and marks the active balance", () => {
+    const parsed = parseStatement(CAPITAL_ONE_STATEMENT_TEXT);
+    const candidate = statementResultToCandidate(parsed, { source: "pdf", importBatchId: "batch", fileName: "capital-one.pdf" });
+    expect(candidate.financialItemType).toBe("DEBT");
+    expect(candidate.productName).toBe("Quicksilver");
+    expect(candidate.documentType).toBe("CREDIT_CARD_STATEMENT");
+    const purchase = candidate.rateComponents.find((c) => c.balanceType === "purchase");
+    const cashAdvance = candidate.rateComponents.find((c) => c.balanceType === "cash_advance");
+    expect(purchase).toMatchObject({ apr: 0.264, activeBalance: true });
+    expect(cashAdvance).toMatchObject({ apr: 0.284, activeBalance: false });
+  });
+
+  it("populates evidence.fieldEvidence.apr from the parser's APR candidates - this is what lets reviewDomain's existing multi-APR check see a PDF-sourced candidate", () => {
+    const parsed = parseStatement(US_BANK_CASH_PLUS_STATEMENT_TEXT);
+    const candidate = statementResultToCandidate(parsed, { source: "pdf", importBatchId: "batch", fileName: "cash-plus.pdf" });
+    expect(candidate.evidence.fieldEvidence.apr.length).toBeGreaterThan(1);
+    expect(candidate.evidence.fieldEvidence.apr.every((entry) => entry.aprStatus === "known" && entry.truth === "observed")).toBe(true);
+  });
+
+  it("carries amount paid, credit limit, available credit, and the payoff illustration onto evidence", () => {
+    const parsed = parseStatement(CAPITAL_ONE_STATEMENT_TEXT);
+    const candidate = statementResultToCandidate(parsed, { source: "pdf", importBatchId: "batch", fileName: "capital-one.pdf" });
+    expect(candidate.evidence.amountPaid).toBe(100);
+    expect(candidate.evidence.creditLimit).toBe(5100);
+    expect(candidate.evidence.availableCredit).toBe(3108.01);
+    expect(candidate.evidence.creditorPayoffIllustration).toMatchObject({ yearsToPayoff: 17, totalPaid: 5847 });
+    // Amount paid must never be mistaken for the creditor's required minimum.
+    expect(candidate.minimumPayment).toBe(65);
+  });
+
+  it("carries per-field source provenance (matched label, source text) onto evidence - a PDF candidate previously had none at all", () => {
+    const parsed = parseStatement(CAPITAL_ONE_STATEMENT_TEXT);
+    const candidate = statementResultToCandidate(parsed, { source: "pdf", importBatchId: "batch", fileName: "capital-one.pdf" });
+    expect(candidate.evidence.provenance.balance).toMatchObject({ matchedLabel: expect.stringMatching(/new balance/i) });
+    expect(candidate.evidence.provenance.minimumPayment).toMatchObject({ matchedLabel: expect.stringMatching(/minimum payment due/i) });
+  });
+
+  it("uses documentType/productName as strong debt-type evidence instead of falling through to 'other' (task section 45 regression)", () => {
+    // Neither "Capital One" (creditor) nor "Capital One . . . 2656" (account
+    // name) contains the literal substring "credit card"/"visa"/"mastercard",
+    // so without the documentType/productName fallback this fell through to
+    // "other" despite the parser already knowing it's a CREDIT_CARD_STATEMENT.
+    const capitalOne = parseStatement(CAPITAL_ONE_STATEMENT_TEXT);
+    const capitalOneCandidate = statementResultToCandidate(capitalOne, { source: "pdf", importBatchId: "batch", fileName: "capital-one.pdf" });
+    expect(capitalOneCandidate.debtType).toBe("credit_card");
+
+    const personalLine = parseStatement(US_BANK_PERSONAL_LINE_STATEMENT_TEXT);
+    const personalLineCandidate = statementResultToCandidate(personalLine, { source: "pdf", importBatchId: "batch", fileName: "personal-line.pdf" });
+    expect(personalLineCandidate.debtType).toBe("line_of_credit");
   });
 });

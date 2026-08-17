@@ -22,6 +22,10 @@ export const HEADER_ALIASES = {
 };
 
 const DEBT_TYPE_ALIASES = [
+  // Must come before credit_card - Array.find takes the first match, and a
+  // label like "U.S. Bank Business credit card" would otherwise always match
+  // credit_card first even though the business qualifier is stronger evidence.
+  { type: "business_debt", match: /business.{0,25}(credit\s*card|loan|line\s*of\s*credit)/i },
   { type: "credit_card", match: /credit\s*card|visa|mastercard|amex|discover card/i },
   // Known student-loan servicer names count as a student-loan signal even when
   // the literal phrase "student loan" isn't present (common on real statements -

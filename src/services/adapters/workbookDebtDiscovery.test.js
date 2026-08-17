@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as XLSX from "xlsx";
 import { discoverWorkbookDebtCandidates, EVIDENCE_TRUTH, CLASSIFICATIONS, SCOPE_SUGGESTIONS } from "./workbookDebtDiscovery.js";
 import { readExcelFileToCandidates } from "./excelImportReader.js";
+import { FINANCIAL_ITEM_TYPES } from "../../domain/tracktozero/financialItemTaxonomy.js";
 
 const addSheet = (wb, name, rows) => {
   const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -120,17 +121,33 @@ describe("DATA-1A workbook debt discovery", () => {
     expect(linkedIdentity.provenance.formula).toBe("January!B4");
   });
 
-  it("preserves multiple APR ambiguity for review", () => {
+  it("preserves multiple APR ambiguity for review when the SAME account (same sheet, one row) is re-read across sheets over time", () => {
     const wb = XLSX.utils.book_new();
-    addSheet(wb, "Debt Tracker", [
-      ["Account", "APR", "Balance"],
-      ["Capital One", "19.99%", 1000],
-      ["Capital One", "24.99%", 1000],
-    ]);
+    // Same account tracked across two monthly tabs - the legitimate
+    // cross-sheet consolidation case, unaffected by DATA-2's same-sheet
+    // duplicate-creditor disambiguation (see the test below).
+    addSheet(wb, "January", [["Account", "APR", "Balance"], ["Capital One", "19.99%", 1000]]);
+    addSheet(wb, "February", [["Account", "APR", "Balance"], ["Capital One", "24.99%", 1000]]);
     const { candidates } = discoverWorkbookDebtCandidates({ workbook: wb, XLSX, fileName: "rates.xlsx", importBatchId: "batch" });
+    expect(candidates).toHaveLength(1);
     const candidate = candidates[0];
     expect(candidate.evidence.fieldEvidence.apr).toHaveLength(2);
     expect(candidate.warnings.join(" ")).toMatch(/multiple plausible APR/i);
+  });
+
+  it("DATA-2: does NOT invent an account identifier - two same-creditor rows in the SAME sheet with no last-4 stay separate candidates, not merged", () => {
+    const wb = XLSX.utils.book_new();
+    addSheet(wb, "Student Loans", [
+      ["Account", "Balance", "APR", "Minimum Payment"],
+      ["Aidvantage", 8000, "5.5%", 90],
+      ["Aidvantage", 12000, "6.0%", 130],
+    ]);
+    const { candidates } = discoverWorkbookDebtCandidates({ workbook: wb, XLSX, fileName: "loans.xlsx", importBatchId: "batch" });
+    const aidvantage = candidates.filter((candidate) => candidate.creditorName.includes("Aidvantage"));
+    expect(aidvantage).toHaveLength(2);
+    expect(aidvantage.map((candidate) => candidate.currentBalance).sort((a, b) => a - b)).toEqual([8000, 12000]);
+    expect(aidvantage.every((candidate) => candidate.evidence.duplicateResolution.possibleSeparateAccounts)).toBe(true);
+    expect(aidvantage.every((candidate) => /kept as a separate possible account/i.test(candidate.warnings.join(" ")))).toBe(true);
   });
 
   it("keeps clean debt spreadsheets working through the workbook engine", () => {
@@ -204,6 +221,96 @@ describe("DATA-1A workbook debt discovery", () => {
     const result = await readExcelFileToCandidates(file, { importBatchId: "batch" });
     expect(result.parserVersion).toBe("data-1a");
     expect(result.candidates[0]).toMatchObject({ decision: "pending_review", balanceStatus: "confirmed" });
+  });
+
+  it("DATA-2: recognizes a STANDALONE section-heading row (not just a per-row Category column) and propagates it to rows with no category of their own", () => {
+    const wb = XLSX.utils.book_new();
+    addSheet(wb, "Sheet1", [
+      ["Account / Cardholder", "Payment", "Balance"],
+      ["CREDIT CARDS", null, null],
+      ["Capital One", 65, 2000],
+      ["UTILITIES", null, null],
+      ["Gas", 150, null],
+    ]);
+    const { candidates, nonDebtItems } = discoverWorkbookDebtCandidates({ workbook: wb, XLSX, fileName: "sections.xlsx", importBatchId: "batch" });
+    // The heading rows themselves never become a candidate or a non-debt item.
+    expect(candidates.some((c) => /CREDIT CARDS|UTILITIES/.test(c.accountName))).toBe(false);
+    expect(nonDebtItems.some((item) => /CREDIT CARDS|UTILITIES/.test(item.label))).toBe(false);
+    const capitalOne = candidates.find((c) => c.accountName === "Capital One");
+    expect(capitalOne).toMatchObject({ debtType: "credit_card" });
+    expect(capitalOne.evidence.classification).toBe(CLASSIFICATIONS.likelyDebt);
+    expect(candidates.some((c) => c.accountName === "Gas")).toBe(false);
+    const gas = nonDebtItems.find((item) => item.label === "Gas");
+    expect(gas).toMatchObject({ financialItemType: FINANCIAL_ITEM_TYPES.utility });
+  });
+
+  it("DATA-2: recognizes the full non-debt taxonomy via section headings, including savings/income which previously had no vocabulary at all", () => {
+    const wb = XLSX.utils.book_new();
+    addSheet(wb, "Sheet1", [
+      ["Account / Cardholder", "Payment", "Balance"],
+      ["INSURANCE", null, null],
+      ["Auto Insurance", 240, null],
+      ["SUBSCRIPTIONS", null, null],
+      ["Netflix", 22, null],
+      ["HOME EXPENSES", null, null],
+      ["Lawn Service", 60, null],
+      ["STORAGE", null, null],
+      ["Storage bill", 90, null],
+      ["SAVINGS", null, null],
+      ["Monthly Savings", 500, null],
+      ["INCOME", null, null],
+      ["EagleView income", 3000, null],
+    ]);
+    const { candidates, nonDebtItems, scanSummary } = discoverWorkbookDebtCandidates({ workbook: wb, XLSX, fileName: "taxonomy.xlsx", importBatchId: "batch" });
+    expect(candidates).toHaveLength(0);
+    const byLabel = (label) => nonDebtItems.find((item) => item.label === label);
+    expect(byLabel("Auto Insurance").financialItemType).toBe(FINANCIAL_ITEM_TYPES.insurance);
+    expect(byLabel("Netflix").financialItemType).toBe(FINANCIAL_ITEM_TYPES.subscription);
+    expect(byLabel("Lawn Service").financialItemType).toBe(FINANCIAL_ITEM_TYPES.homeExpense);
+    expect(byLabel("Storage bill").financialItemType).toBe(FINANCIAL_ITEM_TYPES.storageExpense);
+    // Savings and income: genuinely new vocabulary - previously these had NO
+    // dedicated classification at all and fell through as generic "ordinary
+    // bill" (or worse, `uncertain`).
+    expect(byLabel("Monthly Savings").financialItemType).toBe(FINANCIAL_ITEM_TYPES.savings);
+    expect(byLabel("EagleView income").financialItemType).toBe(FINANCIAL_ITEM_TYPES.income);
+    expect(scanSummary.nonDebtByType[FINANCIAL_ITEM_TYPES.savings]).toBe(1);
+    expect(scanSummary.nonDebtByType[FINANCIAL_ITEM_TYPES.income]).toBe(1);
+  });
+
+  it("DATA-2: BUSINESS section requires secondary classification - a business row with debt evidence becomes business debt, a business row with only expense evidence stays non-debt", () => {
+    const wb = XLSX.utils.book_new();
+    addSheet(wb, "Sheet1", [
+      ["Account / Cardholder", "Payment", "Balance", "APR"],
+      ["BUSINESS", null, null, null],
+      ["U.S. Bank Business credit card", 120, 4000, "22%"],
+      ["Business storage fee", 60, null, null],
+    ]);
+    const { candidates, nonDebtItems } = discoverWorkbookDebtCandidates({ workbook: wb, XLSX, fileName: "business.xlsx", importBatchId: "batch" });
+    const businessCard = candidates.find((c) => c.accountName.includes("Business credit card"));
+    expect(businessCard).toMatchObject({ debtType: "business_debt" });
+    expect(businessCard.evidence.scopeSuggestion).toBe(SCOPE_SUGGESTIONS.businessCandidate);
+    expect(businessCard.includedInCorePayoffPlan).toBe(false);
+    const storageFee = nonDebtItems.find((item) => item.label === "Business storage fee");
+    expect(storageFee).toMatchObject({ financialItemType: FINANCIAL_ITEM_TYPES.storageExpense, scopeSuggestion: SCOPE_SUGGESTIONS.businessCandidate });
+  });
+
+  it("DATA-2 / formula-derived future balances never become confirmed balance truth, even when they are the ONLY balance evidence for a debt", () => {
+    const wb = XLSX.utils.book_new();
+    // "New Balance" is the same formula-projection marker the household
+    // budget's own Balance Tracker sheet uses for a value computed from an
+    // earlier balance rather than directly observed/entered.
+    addSheet(wb, "Balance Tracker", [
+      ["Account / Cardholder", "APR", "Minimum Payment", "New Balance"],
+      ["Future Only Card", "19.99%", 50, { f: "B4+100", v: 1500 }],
+    ]);
+    const { candidates } = discoverWorkbookDebtCandidates({ workbook: wb, XLSX, fileName: "future-only.xlsx", importBatchId: "batch" });
+    const candidate = candidates.find((c) => c.accountName === "Future Only Card");
+    expect(candidate).toBeTruthy();
+    expect(candidate.evidence.fieldEvidence.balance[0].truth).toBe(EVIDENCE_TRUTH.projected);
+    // The only balance evidence available is a formula-derived projection -
+    // never confirmed truth, never a fabricated observed value.
+    expect(candidate.balanceStatus).toBe("unresolved");
+    expect(candidate.currentBalance).toBe(0);
   });
 });
 

@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import Card from "../ui/Card.jsx";
 import Badge from "../ui/Badge.jsx";
+import useReducedMotion from "../../../hooks/useReducedMotion.js";
 import { TYPE_SCALE, ttzPalette } from "../theme.js";
 import { formatMoney as money } from "../formatting.js";
 import { CATEGORY_CONFIG } from "./debtCategoryConfig.js";
@@ -15,6 +16,7 @@ import { deriveCategoryBreakdown } from "../debtPortfolioView.js";
 function CategoryTile({ entry, breakdown, onSelect }) {
   const [active, setActive] = useState(false);
   const palette = ttzPalette;
+  const reducedMotion = useReducedMotion();
   const Icon = entry.icon;
   return (
     <Card
@@ -23,9 +25,9 @@ function CategoryTile({ entry, breakdown, onSelect }) {
         textAlign: "left",
         display: "grid",
         gap: 10,
-        transform: active ? "translateY(-2px)" : "none",
+        transform: !reducedMotion && active ? "translateY(-2px)" : "none",
         boxShadow: active ? "var(--ttz-shadow-md, 0 8px 24px rgba(10,34,54,0.08))" : "var(--ttz-shadow-sm, 0 1px 2px rgba(10,34,54,0.06))",
-        transition: "transform 120ms ease, box-shadow 120ms ease",
+        transition: reducedMotion ? "none" : "transform 120ms ease, box-shadow 120ms ease",
       }}
     >
       <button
@@ -36,6 +38,7 @@ function CategoryTile({ entry, breakdown, onSelect }) {
         onFocus={() => setActive(true)}
         onBlur={() => setActive(false)}
         aria-label={`View ${breakdown.count} ${entry.label.toLowerCase()}`}
+        className="ttz-focus-ring"
         style={{
           all: "unset",
           display: "grid",

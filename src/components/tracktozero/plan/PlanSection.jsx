@@ -963,7 +963,13 @@ export default function PlanSection({ snapshot, service, refresh, runAction, wri
     <div style={{ display: "grid", gap: 10 }}>
       <div>
         <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>{planHeading}</div>
-        <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx, marginTop: 4 }}>Your path to $0</div>
+        {/* UX-8: the Plan tab previously had zero semantic headings at all
+            (every "title" here was a styled div) - this is the one real
+            <h1> for the whole tab, rendered once regardless of which
+            destination (My Plan/Compare/What If/etc.) is active, matching
+            Home/Debts/Activity's existing one-h1-per-page pattern. Same
+            visual style as before - a tag change, not a visual change. */}
+        <h1 style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx, marginTop: 4, margin: "4px 0 0" }}>Your path to $0</h1>
       </div>
 
       <div role="tablist" aria-label="Plan sections" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>

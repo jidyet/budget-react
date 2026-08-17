@@ -58,9 +58,15 @@ export default function TopBar({ workspace, repositoryMode, snapshotMode, active
           ) : null}
         </div>
 
-        <div style={{ flex: 1, display: "flex", justifyContent: isCompact ? "flex-start" : "center", overflowX: isCompact ? "auto" : "visible" }}>
-          <PrimaryNav activeTab={activeTab} onSelect={onSelectTab} badges={navBadges} />
-        </div>
+        {/* UX-8: below the mobile breakpoint, layout/MobileBottomNav.jsx
+            takes over primary navigation - rendering PrimaryNav here too
+            would put two landmarks both announced as "Primary" on the page
+            at once, and duplicate every focusable nav control. */}
+        {!isMobile ? (
+          <div style={{ flex: 1, display: "flex", justifyContent: isCompact ? "flex-start" : "center", overflowX: isCompact ? "auto" : "visible" }}>
+            <PrimaryNav activeTab={activeTab} onSelect={onSelectTab} badges={navBadges} />
+          </div>
+        ) : null}
 
         {!isCompact ? (
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>

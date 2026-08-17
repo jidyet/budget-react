@@ -18,6 +18,7 @@ function QueueRow({ item, active, onSelect }) {
       type="button"
       onClick={() => onSelect(item.id)}
       aria-current={active}
+      className="ttz-focus-ring"
       style={{
         all: "unset",
         display: "flex",

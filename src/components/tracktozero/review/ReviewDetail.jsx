@@ -428,7 +428,7 @@ export default function ReviewDetail({ item, open, onClose, workspaceId, workspa
 
   return (
     <Drawer open={open} title={item.candidate.accountName || "Review"} onClose={onClose}>
-      <div style={{ display: "grid", gap: 16 }} aria-live="polite">
+      <div style={{ display: "grid", gap: 16 }} role="status" aria-live="polite">
         {stale ? (
           <DangerCallout title="This debt changed">
             {FRIENDLY_STALE_MESSAGE}

@@ -1,13 +1,16 @@
 import React from "react";
 import { ttzPalette, toneColors } from "../theme.js";
+import useReducedMotion from "../../../hooks/useReducedMotion.js";
 
 // Debt-payoff progress display (UX-1 Part 12). `value`/`max` describe
-// already-computed progress (e.g. from progressService.deriveConfirmedProgress)
-// - this component never computes payoff percentage itself. `tone` defaults
-// to success since progress bars only render for confirmed, positive
-// movement; pass an explicit tone to override.
+// already-computed progress (e.g. from homeViewModels.js's
+// deriveConfirmedProgress) - this component never computes payoff
+// percentage itself. `tone` defaults to success since progress bars only
+// render for confirmed, positive movement; pass an explicit tone to
+// override.
 export default function ProgressBar({ value = 0, max = 100, tone = "success", label, style }) {
   const palette = ttzPalette;
+  const reducedMotion = useReducedMotion();
   const pct = max > 0 ? Math.min(100, Math.max(0, (value / max) * 100)) : 0;
   const colors = toneColors(palette)[tone] || toneColors(palette).success;
   return (
@@ -31,7 +34,7 @@ export default function ProgressBar({ value = 0, max = 100, tone = "success", la
             height: "100%",
             background: colors.fg,
             borderRadius: 999,
-            transition: "width 200ms ease",
+            transition: reducedMotion ? "none" : "width 200ms ease",
           }}
         />
       </div>

@@ -14,6 +14,7 @@ function CandidateRow({ candidate, active, onSelect }) {
       type="button"
       onClick={() => onSelect(candidate.candidateId)}
       aria-current={active}
+      className="ttz-focus-ring"
       style={{
         all: "unset",
         display: "flex",

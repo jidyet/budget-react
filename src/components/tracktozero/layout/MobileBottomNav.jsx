@@ -1,0 +1,145 @@
+import React from "react";
+import { Activity, Home, Plus, Target, Wallet } from "lucide-react";
+import { ttzPalette, TYPE_SCALE } from "../theme.js";
+import { useIsMobile } from "../useViewport.js";
+
+// UX-8: dedicated mobile navigation. Deliberately 4 destinations (not
+// PrimaryNav's full 6) + one center action, matching the task's explicit
+// target IA - Review and Settings are intentionally left off the bottom bar
+// (Settings is already one tap away via the account menu's "Workspace
+// settings" item, TopBar.jsx/UserMenu.jsx, unchanged by this component;
+// Review is reachable from Home's Next Move / the horizontally-scrolling
+// top nav that already exists below the tablet breakpoint).
+//
+// Uses the EXACT SAME activeTab/onSelectTab authority PrimaryNav already
+// consumes - no second tab-router, no independent state. aria-current and
+// real text labels (never color/icon alone) mark the active item.
+const ITEMS = [
+  { key: "home", label: "Home", Icon: Home },
+  { key: "debts", label: "Debts", Icon: Wallet },
+  { key: "plan", label: "Plan", Icon: Target },
+  { key: "activity", label: "Activity", Icon: Activity },
+];
+
+// Exported separately from the viewport-gated default export so it can be
+// unit-tested directly (this repo's tests run in a Node - not jsdom -
+// environment, where useIsMobile() always resolves to false and the
+// default export would always render null; MobileBottomNavContent has no
+// such gate, only the actual nav markup/logic).
+export function MobileBottomNavContent({ activeTab, onSelectTab, badges = {}, onOpenQuickActions }) {
+  const palette = ttzPalette;
+  const firstHalf = ITEMS.slice(0, 2);
+  const secondHalf = ITEMS.slice(2);
+
+  const renderItem = (item) => {
+    const { key, label } = item;
+    const Icon = item.Icon;
+    const active = activeTab === key;
+    const count = badges[key] || 0;
+    return (
+      <button
+        key={key}
+        type="button"
+        aria-current={active ? "page" : undefined}
+        className="ttz-focus-ring"
+        onClick={() => onSelectTab(key)}
+        style={{
+          all: "unset",
+          boxSizing: "border-box",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 2,
+          flex: 1,
+          minHeight: 48,
+          padding: "6px 4px",
+          cursor: "pointer",
+          color: active ? palette.info : palette.tx2,
+        }}
+      >
+        <span style={{ position: "relative", display: "inline-flex" }}>
+          <Icon size={20} aria-hidden="true" />
+          {count > 0 ? (
+            <span
+              aria-hidden="true"
+              style={{
+                position: "absolute",
+                top: -4,
+                right: -6,
+                minWidth: 14,
+                height: 14,
+                borderRadius: 999,
+                background: palette.wa,
+                color: "#ffffff",
+                fontSize: 9,
+                fontWeight: 800,
+                display: "grid",
+                placeItems: "center",
+                padding: "0 3px",
+              }}
+            >
+              {count > 9 ? "9+" : count}
+            </span>
+          ) : null}
+        </span>
+        <span style={{ ...TYPE_SCALE.caption, fontSize: 11, fontWeight: active ? 800 : 500, color: "inherit" }}>{label}</span>
+      </button>
+    );
+  };
+
+  return (
+    <nav
+      aria-label="Primary"
+      style={{
+        position: "fixed",
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: "var(--ttz-z-sticky, 30)",
+        background: palette.surf,
+        borderTop: `1px solid ${palette.border}`,
+        display: "flex",
+        alignItems: "stretch",
+        // Safe-area handling (iPhone home indicator / Android gesture bar) -
+        // never a hardcoded device-specific number, falls back to 0 on
+        // platforms without the inset.
+        paddingBottom: "max(var(--ttz-space-2, 8px), env(safe-area-inset-bottom, 0px))",
+      }}
+    >
+      {firstHalf.map(renderItem)}
+
+      <div style={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "center", padding: "4px 0" }}>
+        <button
+          type="button"
+          aria-label="Quick actions"
+          className="ttz-focus-ring"
+          onClick={onOpenQuickActions}
+          style={{
+            width: 52,
+            height: 52,
+            borderRadius: "50%",
+            border: "none",
+            background: palette.go,
+            color: "#ffffff",
+            display: "grid",
+            placeItems: "center",
+            boxShadow: "var(--ttz-shadow-md, 0 8px 24px rgba(10,34,54,0.08))",
+            cursor: "pointer",
+            transform: "translateY(-14px)",
+          }}
+        >
+          <Plus size={24} aria-hidden="true" />
+        </button>
+      </div>
+
+      {secondHalf.map(renderItem)}
+    </nav>
+  );
+}
+
+export default function MobileBottomNav(props) {
+  const isMobile = useIsMobile();
+  if (!isMobile) return null;
+  return <MobileBottomNavContent {...props} />;
+}

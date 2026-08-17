@@ -26,13 +26,25 @@ import { useIsTablet } from "../useViewport.js";
 // is meaningless, producing an empty/wrong category page with no visible
 // cause. A full remount is simpler and more robust than manually resetting
 // each piece of local state, and correctly closes any open modal too.
-export default function DebtsCenter({ snapshot, service, refresh, refreshReview, runAction, writeState, reviewSnapshot, onGoToReview }) {
+export default function DebtsCenter({ snapshot, service, refresh, refreshReview, runAction, writeState, reviewSnapshot, onGoToReview, initialAction, onInitialActionHandled }) {
   const [destination, setDestination] = useState(() => resolveDebtsDestination(typeof window !== "undefined" ? window.location.pathname : "/debts"));
   const [ownerFilter, setOwnerFilter] = useState("all");
-  const [addDebtOpen, setAddDebtOpen] = useState(false);
+  // UX-8: mobile quick-action sheet support - `initialAction` ("add-debt" |
+  // "import" | null) is a one-shot navigation intent from
+  // TrackToZeroV2App.jsx's QuickActionSheet, consumed only via this lazy
+  // initializer (never a useEffect+setState mirroring a prop, which this
+  // repo's react-hooks/set-state-in-effect rule forbids). The effect below
+  // only tells the PARENT the intent has been consumed, so it doesn't
+  // reappear on a later, unrelated remount of this component.
+  const [addDebtOpen, setAddDebtOpen] = useState(() => initialAction === "add-debt");
   const [addDebtPrefillName, setAddDebtPrefillName] = useState("");
-  const [importOpen, setImportOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(() => initialAction === "import-statement");
   const isTablet = useIsTablet();
+
+  useEffect(() => {
+    if (initialAction) onInitialActionHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;

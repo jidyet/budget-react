@@ -12,6 +12,7 @@ import { V2_TEST_ACTOR_ID, V2_TEST_NOW } from "../../services/tracktozero/v2Seed
 import { getLaunchFlags } from "../../config/launchFlags";
 import { ROLE_PERMISSIONS } from "../../domain/tracktozero/constants.js";
 import { presentedOwnerLabel } from "../../domain/tracktozero/ownership.js";
+import { ttzPalette } from "./theme.js";
 import AppShell from "./layout/AppShell.jsx";
 import PageContainer from "./layout/PageContainer.jsx";
 import QaHarnessControls from "./layout/QaHarnessControls.jsx";
@@ -138,7 +139,7 @@ function JoinInviteScreen({ previewState, authState, authForm, setAuthForm, onSu
               <Field label="Password">
                 <input style={styles.input} type="password" value={authForm.password} onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })} minLength={6} required />
               </Field>
-              {authState.error && <p role="alert" style={{ color: "#991b1b", fontWeight: 800 }}>{authState.error}</p>}
+              {authState.error && <p role="alert" style={{ color: ttzPalette.da, fontWeight: 800 }}>{authState.error}</p>}
               <button type="submit" disabled={authBusy} style={authBusy ? styles.disabledButton : styles.primaryButton}>
                 {authBusy ? "Please wait..." : authForm.mode === "signup" ? "Create account and continue" : "Sign in to continue"}
               </button>
@@ -165,7 +166,7 @@ function JoinAcceptScreen({ preview, signedInEmail, onAccept, busy, error }) {
             <p><strong>Invited by:</strong> {invite?.invitedByName || "TrackToZero member"}</p>
             <p><strong>Invite email:</strong> {invite?.emailNormalized}</p>
           </div>
-          {error && <p role="alert" style={{ color: "#991b1b", fontWeight: 800 }}>{error}</p>}
+          {error && <p role="alert" style={{ color: ttzPalette.da, fontWeight: 800 }}>{error}</p>}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
             <button type="button" disabled={busy} style={busy ? styles.disabledButton : styles.primaryButton} onClick={onAccept}>
               {busy ? "Joining..." : "Join household"}
@@ -197,7 +198,7 @@ function JoinConnectScreen({ workspaceName, matches = [], onConnect, onSkip, bus
               </select>
             </Field>
           )}
-          {error && <p role="alert" style={{ color: "#991b1b", fontWeight: 800 }}>{error}</p>}
+          {error && <p role="alert" style={{ color: ttzPalette.da, fontWeight: 800 }}>{error}</p>}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
             <button
               type="button"
@@ -232,7 +233,7 @@ function AuthScreen({ onSubmit, state, setState, error, busy, firebaseReady, una
               <Field label="Password">
                 <input style={styles.input} type="password" value={state.password} onChange={(event) => setState({ ...state, password: event.target.value })} minLength={6} required />
               </Field>
-              {error && <p role="alert" style={{ color: "#991b1b", fontWeight: 800 }}>{error}</p>}
+              {error && <p role="alert" style={{ color: ttzPalette.da, fontWeight: 800 }}>{error}</p>}
               <button type="submit" disabled={busy} style={busy ? styles.disabledButton : styles.primaryButton}>
                 {busy ? "Please wait..." : state.mode === "signup" ? "Create account" : "Sign in"}
               </button>
@@ -259,7 +260,7 @@ function OnboardingScreen({ busy, error, onChooseWorkspace, onSignOut }) {
           <p style={{ margin: "0 0 6px", letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 900, color: "#2f6289", fontSize: 12 }}>Welcome to TrackToZero</p>
           <h1 style={{ margin: "0 0 10px", fontSize: 32 }}>First, choose how you want to track debt.</h1>
           <p style={{ color: "#365a78" }}>You can start alone or create a household workspace. Either way, debts, balances, plans, and progress use the same V2 payoff model.</p>
-          {error && <p role="alert" style={{ color: "#991b1b", fontWeight: 800 }}>{error}</p>}
+          {error && <p role="alert" style={{ color: ttzPalette.da, fontWeight: 800 }}>{error}</p>}
           <div style={{ ...styles.grid, marginTop: 18 }}>
             <article style={{ ...styles.card, boxShadow: "none" }}>
               <h2>Personal</h2>
@@ -573,9 +574,9 @@ function Settings({ snapshot, repositoryMode, service, refresh, runAction, write
             </div>
           </div>
           {latestInvite && (
-            <div style={{ ...styles.card, marginTop: 16, borderColor: "#86efac" }}>
+            <div style={{ ...styles.card, marginTop: 16, borderColor: ttzPalette.go }}>
               <h3 style={{ marginTop: 0 }}>Invite ready</h3>
-              <p style={{ marginBottom: 8 }}>{latestInvite.emailNormalized} · expires {new Date(latestInvite.expiresAt).toLocaleDateString()}</p>
+              <p style={{ marginBottom: 8, overflowWrap: "anywhere" }}>{latestInvite.emailNormalized} · expires {new Date(latestInvite.expiresAt).toLocaleDateString()}</p>
               <button
                 type="button"
                 style={styles.primaryButton}
@@ -597,7 +598,7 @@ function Settings({ snapshot, repositoryMode, service, refresh, runAction, write
                   {snapshot.memberInvites.map((invite) => (
                     <article key={invite.id} style={{ border: "1px solid #d7e7f5", borderRadius: 16, padding: 12, background: "#fff" }}>
                       <p style={{ margin: 0, fontWeight: 800, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                        {invite.emailNormalized}
+                        <span style={{ overflowWrap: "anywhere", minWidth: 0 }}>{invite.emailNormalized}</span>
                         <Badge tone={invite.derivedStatus === "pending" ? "warning" : invite.derivedStatus === "accepted" ? "success" : "neutral"}>
                           {invite.derivedStatus === "pending" ? "Pending invitation" : invite.derivedStatus === "accepted" ? "Accepted" : invite.derivedStatus === "canceled" ? "Canceled" : "Expired"}
                         </Badge>
@@ -783,6 +784,11 @@ export default function TrackToZeroV2App() {
   const [writeState, setWriteState] = useState({ inProgress: false, action: "", error: "", success: "", errorAction: "" });
   const [reviewState, setReviewState] = useState({ status: "idle", snapshot: null });
   const [activityState, setActivityState] = useState({ status: "idle", page: null });
+  // UX-8: mobile quick-action sheet - the sheet itself is stateless UI (see
+  // QuickActionSheet.jsx); this is only "is it open" plus "what should
+  // Debts auto-open once we navigate there," never new business logic.
+  const [quickActionsOpen, setQuickActionsOpen] = useState(false);
+  const [debtsInitialAction, setDebtsInitialAction] = useState(null);
   const requestSeq = useRef(0);
   const reviewRequestSeq = useRef(0);
   const activityRequestSeq = useRef(0);
@@ -1270,8 +1276,38 @@ export default function TrackToZeroV2App() {
     navBadges: { review: reviewState.snapshot?.actionableCount ?? reviewState.snapshot?.openCount ?? 0 },
   };
 
+  // UX-8: the mobile quick-action sheet never mutates anything itself - it
+  // only navigates to Debts and tells DebtsCenter.jsx which of its own,
+  // already-existing surfaces (AddDebtModal/ImportCenter/the always-visible
+  // QuickUpdateRail) to bring to the front. Same permission gate DebtsCenter
+  // already uses for the same actions, not a second permission model.
+  const canManageDebtsMobile = snapshot.permissions.manageDebts && snapshot.mode !== "legacy_preview";
+  const canObserveMobile = snapshot.permissions.recordObservations && snapshot.mode !== "legacy_preview";
+  const onSelectQuickAction = (actionKey) => {
+    setQuickActionsOpen(false);
+    setDebtsInitialAction(actionKey === "record-payment" || actionKey === "update-balance" ? null : actionKey);
+    navigateTab("debts");
+  };
+  const mobileBottomNavProps = {
+    activeTab: tab,
+    onSelectTab: navigateTab,
+    // None of MobileBottomNav's 4 items (home/debts/plan/activity) currently
+    // has a badge count of its own - Review is the only nav-badge count
+    // today (topBarProps.navBadges), and Review is deliberately not one of
+    // the 4 mobile items (see MobileBottomNav.jsx's own comment).
+    badges: {},
+    onOpenQuickActions: () => setQuickActionsOpen(true),
+  };
+  const quickActionSheetProps = {
+    open: quickActionsOpen,
+    onClose: () => setQuickActionsOpen(false),
+    onSelectAction: onSelectQuickAction,
+    canManage: canManageDebtsMobile,
+    canObserve: canObserveMobile,
+  };
+
   return (
-    <AppShell topBarProps={topBarProps}>
+    <AppShell topBarProps={topBarProps} mobileBottomNavProps={mobileBottomNavProps} quickActionSheetProps={quickActionSheetProps}>
       <PageContainer>
         {qaControlsVisible ? (
           <WorkspaceBar
@@ -1292,7 +1328,7 @@ export default function TrackToZeroV2App() {
           />
         ) : null}
         {(writeState.error || writeState.success) && (
-          <div role="status" aria-live="polite" style={{ ...styles.card, marginTop: 16, borderColor: writeState.error ? "#fecaca" : "#86efac" }}>
+          <div role="status" aria-live="polite" style={{ ...styles.card, marginTop: 16, borderColor: writeState.error ? ttzPalette.da : ttzPalette.go }}>
             {writeState.error || writeState.success}
           </div>
         )}
@@ -1330,7 +1366,7 @@ export default function TrackToZeroV2App() {
             onRefreshReview={() => Promise.all([refreshReview(workspaceId), refresh(workspaceId)])}
           />
         )}
-        {tab === "debts" && <DebtsCenter key={snapshot.workspace?.id} snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} refreshReview={() => refreshReview(workspaceId)} runAction={runAction} writeState={writeState} reviewSnapshot={reviewState.snapshot} onGoToReview={() => navigateTab("review")} />}
+        {tab === "debts" && <DebtsCenter key={snapshot.workspace?.id} snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} refreshReview={() => refreshReview(workspaceId)} runAction={runAction} writeState={writeState} reviewSnapshot={reviewState.snapshot} onGoToReview={() => navigateTab("review")} initialAction={debtsInitialAction} onInitialActionHandled={() => setDebtsInitialAction(null)} />}
         {tab === "plan" && <Plan snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} />}
         {tab === "settings" && <Settings snapshot={snapshot} repositoryMode={runtime.mode} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} latestInvite={latestInvite} setLatestInvite={setLatestInvite} />}
       </PageContainer>

@@ -1,10 +1,15 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import Card from "./Card.jsx";
 import Button from "./Button.jsx";
+import { useDialogFocus } from "./useDialogFocus.js";
 import { ttzPalette, TYPE_SCALE } from "../theme.js";
 
 export default function Drawer({ open, title, children, onClose, side = "right" }) {
   const palette = ttzPalette;
+  const containerRef = useRef(null);
+
+  useDialogFocus({ open, containerRef, initialFocusRef: null });
+
   useEffect(() => {
     if (!open) return undefined;
     const onKeyDown = (event) => {
@@ -18,6 +23,7 @@ export default function Drawer({ open, title, children, onClose, side = "right" 
   return (
     <div role="presentation" style={{ position: "fixed", inset: 0, zIndex: "var(--ttz-z-modal, 50)", background: "rgba(7,19,31,0.36)" }}>
       <Card
+        ref={containerRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="ttz-drawer-title"

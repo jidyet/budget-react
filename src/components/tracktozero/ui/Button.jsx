@@ -1,5 +1,6 @@
 import React, { forwardRef } from "react";
 import { ttzPalette } from "../theme.js";
+import useReducedMotion from "../../../hooks/useReducedMotion.js";
 
 // ONE button system for the whole product - consistent height/radius/focus/
 // disabled/loading behavior instead of every screen styling its own <button>
@@ -34,10 +35,11 @@ const SIZE_STYLES = {
 };
 
 const Button = forwardRef(function Button(
-  { variant = "secondary", size = "md", loading = false, disabled = false, iconOnly = false, style, children, ...rest },
+  { variant = "secondary", size = "md", loading = false, disabled = false, iconOnly = false, style, className, children, ...rest },
   ref
 ) {
   const palette = ttzPalette;
+  const reducedMotion = useReducedMotion();
   const variantStyle = VARIANT_STYLES(palette)[variant] || VARIANT_STYLES(palette).secondary;
   const sizeStyle = SIZE_STYLES[size] || SIZE_STYLES.md;
   const isDisabled = disabled || loading;
@@ -48,6 +50,7 @@ const Button = forwardRef(function Button(
       type="button"
       disabled={isDisabled}
       aria-busy={loading || undefined}
+      className={["ttz-focus-ring", className].filter(Boolean).join(" ")}
       style={{
         ...variantStyle,
         ...sizeStyle,
@@ -62,7 +65,7 @@ const Button = forwardRef(function Button(
         fontWeight: 700,
         cursor: isDisabled ? "not-allowed" : "pointer",
         opacity: isDisabled ? 0.55 : 1,
-        transition: "background-color 120ms ease, border-color 120ms ease, opacity 120ms ease",
+        transition: reducedMotion ? "none" : "background-color 120ms ease, border-color 120ms ease, opacity 120ms ease",
         outlineOffset: 2,
         ...style,
       }}

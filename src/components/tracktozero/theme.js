@@ -10,7 +10,35 @@ import { BRAND_COLORS } from "../../config/brand.js";
 // V2 does not yet offer a theme toggle - buildPalette already supports
 // "dark" for whenever that's built; this just fixes V2 to "light" for now.
 export const TTZ_THEME = "light";
-export const ttzPalette = buildPalette(TTZ_THEME);
+
+// UX-8 contrast fix, SCOPED TO V2 ONLY - go/wa/info/ac/da (measured via a
+// throwaway WCAG relative-luminance script, not eyeballed) fail 4.5:1 text
+// contrast against a Badge/StatusBadge's own tinted background - their REAL
+// rendering context, which is a stricter, more honest test than checking
+// against plain white alone (checking against white only found go/wa/info
+// failing; checking against each tone's actual ~12%-tint background also
+// surfaced a narrower danger shortfall: 4.27:1). These four are used
+// pervasively as small Badge/StatusBadge/tone-strip TEXT (11-12px, nowhere
+// near WCAG's ~18.66px-bold "large text" exception). Overridden here, in
+// V2's own theme layer, rather than in shared src/config/palette.js|
+// brand.js - those files also power the V1 app, out of scope for this
+// phase and with no test coverage here to verify a shared-token change
+// against. `ac` and `info` share one identical brand-blue value already
+// (see palette.js) and are corrected to the same darkened value so text
+// rendered in either still looks identical, as it does today.
+// Decorative/background tints (acS/acD/goD/waD/infoD) are left untouched -
+// darkening the foreground only improves its contrast against those
+// already-light tints, and they aren't subject to the text-contrast rule
+// themselves.
+const CONTRAST_SAFE_OVERRIDES = {
+  go: "#2a7c32", // was #39a844 (BRAND_COLORS.green) - 3.06:1 vs white / 2.71:1 vs own tint bg -> 5.21:1 / 4.63:1
+  wa: "#a85b12", // was #ff8a1c (BRAND_COLORS.orange) - 2.36:1 vs white / 2.13:1 vs own tint bg -> 5.04:1 / 4.55:1
+  info: "#11759e", // was #18a7e1 (BRAND_COLORS.blue) - 2.74:1 vs white / 2.46:1 vs own tint bg -> 5.17:1 / 4.58:1
+  ac: "#11759e", // was #18a7e1, identical brand-blue value to `info` - kept in sync
+  da: "#cc2626", // was #d42828 - already 5.08:1 vs white, but only 4.27:1 vs its own tint bg -> 4.56:1
+};
+
+export const ttzPalette = { ...buildPalette(TTZ_THEME), ...CONTRAST_SAFE_OVERRIDES };
 
 // UX-0 established the truthful plan-health/status codes (derivePlanHealth,
 // classifyPlanStatus - see services/tracktozero/projectionStatusService.js).

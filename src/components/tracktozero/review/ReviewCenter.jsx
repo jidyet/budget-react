@@ -6,6 +6,7 @@ import LoadingState from "../ui/LoadingState.jsx";
 import InfoCallout from "../ui/InfoCallout.jsx";
 import WarningCallout from "../ui/WarningCallout.jsx";
 import ConfirmationDialog from "../ui/ConfirmationDialog.jsx";
+import Drawer from "../ui/Drawer.jsx";
 import ReviewSessionCard from "./ReviewSessionCard.jsx";
 import ReviewQueueList from "./ReviewQueueList.jsx";
 import ResolvedHistory from "./ResolvedHistory.jsx";
@@ -99,6 +100,14 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
   const [showResolved, setShowResolved] = useState(true);
   const [tab, setTab] = useState("needsReview");
   const [cursorId, setCursorId] = useState(null);
+  // UX-8: below the tablet breakpoint, the queue-list pane doesn't render
+  // inline (no room) - previously that meant it was ENTIRELY gone, leaving
+  // only the Jump-to-item <Select>/Previous/Next as the sole way to move
+  // through the queue on a phone. This drawer reuses the exact same
+  // ReviewQueueList component (no second queue-rendering implementation)
+  // so mobile users can still browse/scan the queue, not just step through
+  // it one item at a time.
+  const [queueDrawerOpen, setQueueDrawerOpen] = useState(false);
   // DATA-HH1: people created mid-session via "+ Add as a new household
   // person" (see handleCreatePerson below) - merged with snapshot.people so
   // a newly-created person is immediately selectable without waiting on a
@@ -293,10 +302,15 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
             queue.length ? (
               <>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
-                  <span style={{ ...TYPE_SCALE.supporting, color: palette.tx2 }} aria-live="polite">
+                  <span style={{ ...TYPE_SCALE.supporting, color: palette.tx2 }} role="status" aria-live="polite">
                     {itemPositionLabel(currentIndex + 1, queue.length)}
                   </span>
                   <div style={{ display: "flex", alignItems: "flex-end", gap: 8, flexWrap: "wrap" }}>
+                    {isTablet ? (
+                      <Button size="sm" variant="secondary" onClick={() => setQueueDrawerOpen(true)}>
+                        Queue ({queue.length})
+                      </Button>
+                    ) : null}
                     <Field label={jumpToItemLabel()}>
                       <Select value={currentItem?.id || ""} onChange={(event) => setCursorId(event.target.value)} aria-label={jumpToItemLabel()}>
                         {queue.map((item, index) => (
@@ -313,6 +327,16 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
 
                 {tab === "skipped" && currentItem?.blocking ? (
                   <WarningCallout style={{ marginBottom: 12 }} title={laterItemBlockingNote()} />
+                ) : null}
+
+                {isTablet ? (
+                  <Drawer open={queueDrawerOpen} title={`Review queue (${queue.length})`} onClose={() => setQueueDrawerOpen(false)} side="left">
+                    <ReviewQueueList
+                      items={queue}
+                      currentItemId={currentItem?.id}
+                      onSelect={(id) => { setCursorId(id); setQueueDrawerOpen(false); }}
+                    />
+                  </Drawer>
                 ) : null}
 
                 <div style={{ display: "grid", gridTemplateColumns: isTablet ? "1fr" : "minmax(220px, 280px) 1fr", gap: 16, alignItems: "start" }}>

@@ -244,7 +244,7 @@ export default function ImportCenter({ snapshot, service, refresh, refreshReview
             )}
 
             {importState.status === "parsing" && (
-              <div aria-live="polite" style={{ ...TYPE_SCALE.supporting, color: palette.ac || palette.tx, fontWeight: 800 }}>
+              <div role="status" aria-live="polite" style={{ ...TYPE_SCALE.supporting, color: palette.ac || palette.tx, fontWeight: 800 }}>
                 Reading your file… Finding debt details… Checking for duplicates… Preparing your review…
               </div>
             )}

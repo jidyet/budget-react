@@ -1,4 +1,4 @@
-import React from "react";
+import React, { forwardRef } from "react";
 import { ttzPalette, toneColors } from "../theme.js";
 
 // ONE card surface for the whole product (UX-1 Part 12/17) - stops every
@@ -37,11 +37,12 @@ const VARIANT_STYLES = (palette) => ({
   },
 });
 
-export default function Card({ variant = "default", padding = "var(--ttz-space-5, 24px)", style, children, ...rest }) {
+const Card = forwardRef(function Card({ variant = "default", padding = "var(--ttz-space-5, 24px)", style, children, ...rest }, ref) {
   const palette = ttzPalette;
   const variantStyle = VARIANT_STYLES(palette)[variant] || VARIANT_STYLES(palette).default;
   return (
     <div
+      ref={ref}
       style={{
         borderRadius: "var(--ttz-radius-lg, 16px)",
         padding,
@@ -53,4 +54,6 @@ export default function Card({ variant = "default", padding = "var(--ttz-space-5
       {children}
     </div>
   );
-}
+});
+
+export default Card;

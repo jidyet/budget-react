@@ -24,7 +24,7 @@ export default function ActivityPreviewCard({ activityPage, onViewAllActivity })
         <div style={{ display: "grid", gap: 10 }}>
           {entries.map((entry) => (
             <div key={entry.id} style={{ display: "grid", gap: 2 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                 <span style={{ ...TYPE_SCALE.body, color: ttzPalette.tx }}>{entry.title}</span>
                 <span style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted }}>{entry.dateLabel}</span>
               </div>

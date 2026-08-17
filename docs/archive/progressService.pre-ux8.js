@@ -1,3 +1,22 @@
+/**
+ * ARCHIVED — PRE UX-8
+ *
+ * Historical TrackToZero progress implementation.
+ *
+ * This service was confirmed during UX-7 to have no active Home/runtime
+ * consumer despite previously describing itself as the progress source
+ * of truth.
+ *
+ * Its aggregate percentage model differs from the UX-7 confirmed-progress
+ * contract based on the active plan's frozen startingDebtSnapshot.
+ *
+ * This file is reference-only.
+ * DO NOT import it into runtime application code.
+ *
+ * See:
+ * TRACKTOZERO_UX7_HOME_ACTIVITY_RETENTION_RESULTS.md
+ */
+
 import { isBalanceUnresolved } from "../../domain/tracktozero/ownership.js";
 
 // THE single source of "how much of this debt has actually been paid off"

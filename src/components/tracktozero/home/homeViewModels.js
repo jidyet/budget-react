@@ -594,6 +594,7 @@ export const deriveNextMove = (snapshot, context) => {
       body: monthlyStatus.supporting,
       ctaLabel: monthlyStatus.ctaLabel || "Record payment",
       action: "debts",
+      targetDebt: context.currentTarget || null,
     };
   }
 
@@ -603,6 +604,7 @@ export const deriveNextMove = (snapshot, context) => {
       body: "Payment history is recorded, but confirmed progress only moves after a new balance snapshot.",
       ctaLabel: "Update balance",
       action: "debts",
+      targetDebt: context.currentTarget || null,
     };
   }
 
@@ -638,6 +640,7 @@ export const deriveNextMove = (snapshot, context) => {
     body: "Your current target is set. Keep balances fresh so Home can compare reality to the plan.",
     ctaLabel: "View debt",
     action: "debts",
+    targetDebt: context.currentTarget || null,
   };
 };
 

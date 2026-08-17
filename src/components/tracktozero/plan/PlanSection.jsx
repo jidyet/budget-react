@@ -13,6 +13,7 @@ import ConfirmationDialog from "../ui/ConfirmationDialog.jsx";
 import { ttzPalette, TYPE_SCALE } from "../theme.js";
 import { formatMoney as money, formatPercent as percent } from "../formatting.js";
 import { describeDebtReviewReasons, disambiguationSuffixForDebt, presentedOwnerLabel } from "../../../domain/tracktozero/ownership.js";
+import LenderIdentity from "../debts/LenderIdentity.jsx";
 import { deriveDebtsAwaitingReforecast } from "../../../services/tracktozero/projectionStatusService.js";
 import { PLAN_DESTINATIONS, resolvePlanDestination, buildPlanPath, navigateToPlanDestination } from "./planRouting.js";
 import { getWorkspacePresentation } from "../workspacePresentation.js";
@@ -97,10 +98,8 @@ function PayoffOrderList({ debts = [], isHousehold = false, highlightFirst = fal
             >
               {index + 1}
             </div>
-            <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
-              <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: isFirst ? 700 : 500 }}>
-                {debt.name}{suffix ? ` (${suffix})` : ""}
-              </div>
+            <div style={{ display: "grid", gap: 4, minWidth: 0, flex: 1 }}>
+              <LenderIdentity creditorName={debt.name} disambiguator={suffix} size="sm" />
               <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                 <span>{money(debt.currentBalance || 0)}</span>
                 <span>{debt.aprStatus === "unknown" ? "Unknown APR" : percent(debt.apr)}</span>
@@ -127,8 +126,13 @@ function ExcludedDebtsSection({ debts = [], isHousehold = false, onGoToDebts }) 
       <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted }}>Excluded from this preview</div>
       {debts.map((debt) => (
         <div key={debt.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "10px 12px", borderRadius: 10, border: `1px solid ${ttzPalette.border}` }}>
-          <div style={{ display: "grid", gap: 2 }}>
-            <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 500 }}>{debt.name}{isHousehold ? ` · ${presentedOwnerLabel(debt)}` : ""}</div>
+          <div style={{ display: "grid", gap: 4, minWidth: 0 }}>
+            {/* UX-8.3: reuses the exact same disambiguationSuffixForDebt call
+                PayoffOrderList already makes - this section previously
+                skipped it, a real gap since a same-named excluded debt was
+                just as ambiguous here as in the numbered list it complements. */}
+            <LenderIdentity creditorName={debt.name} disambiguator={disambiguationSuffixForDebt(debt, debts, { isHousehold })} size="sm" />
+            {isHousehold ? <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>{presentedOwnerLabel(debt)}</div> : null}
             <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>
               {describeDebtReviewReasons(debt, isHousehold).filter((reason) => reason.blocksPlan).map((reason) => reason.label).join(" · ") || "Needs review"}
             </div>

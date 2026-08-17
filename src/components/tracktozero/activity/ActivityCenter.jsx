@@ -7,6 +7,7 @@ import EmptyState from "../ui/EmptyState.jsx";
 import LoadingState from "../ui/LoadingState.jsx";
 import { ttzPalette, TYPE_SCALE } from "../theme.js";
 import { deriveActivityFeed } from "../home/activityFeed.js";
+import LenderIdentity from "../debts/LenderIdentity.jsx";
 
 const KIND_LABELS = {
   debt_created: "Debt added",
@@ -23,6 +24,7 @@ function ActivityRow({ entry }) {
     <div style={{ display: "grid", gap: 4, padding: "14px 0", borderBottom: `1px solid ${ttzPalette.border}` }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {entry.debtName ? <LenderIdentity creditorName={entry.debtName} size="sm" showName={false} /> : null}
           <Badge tone="neutral">{KIND_LABELS[entry.kind] || "Update"}</Badge>
           <span style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 600 }}>{entry.title}</span>
         </div>

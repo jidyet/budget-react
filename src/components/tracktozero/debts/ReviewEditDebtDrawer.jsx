@@ -8,10 +8,11 @@ import Checkbox from "../ui/Checkbox.jsx";
 import Button from "../ui/Button.jsx";
 import WarningCallout from "../ui/WarningCallout.jsx";
 import OwnerField from "./OwnerField.jsx";
+import LenderIdentity from "./LenderIdentity.jsx";
 import { DEBT_TYPE_OPTIONS } from "./debtCategoryConfig.js";
 import { TYPE_SCALE, ttzPalette } from "../theme.js";
 import { formatMoney as money } from "../formatting.js";
-import { describeDebtReviewReasons } from "../../../domain/tracktozero/ownership.js";
+import { describeDebtReviewReasons, disambiguationSuffixForDebt } from "../../../domain/tracktozero/ownership.js";
 
 const draftFromDebt = (debt) => ({
   name: debt?.name || "",
@@ -84,6 +85,14 @@ export default function ReviewEditDebtDrawer({ open, debt, onClose, snapshot, se
   return (
     <Drawer open={open} title={`Review & edit: ${debt.name}`} onClose={onClose}>
       <div style={{ display: "grid", gap: 16 }}>
+        <LenderIdentity
+          creditorName={debt.name}
+          debtType={debt.debtType}
+          lastFour={debt.accountReferenceSafe}
+          disambiguator={disambiguationSuffixForDebt(debt, snapshot.debts || [], { isHousehold })}
+          showType
+          size="lg"
+        />
         {reasons.length ? (
           <WarningCallout title="Needs attention">
             <div style={{ display: "grid", gap: 4 }}>

@@ -11,6 +11,7 @@ import { deriveMilestones } from "./milestones.js";
 import NextMoveHero from "./NextMoveHero.jsx";
 import MilestoneBanner from "./MilestoneBanner.jsx";
 import ActivityPreviewCard from "./ActivityPreviewCard.jsx";
+import LenderIdentity from "../debts/LenderIdentity.jsx";
 
 // Below this many observed points, a full-size trend chart would just be a
 // near-empty frame with one or two dots - a compact callout is more honest
@@ -304,9 +305,9 @@ function ThisMonthCard({ homeContext, onViewDetails, onCompareStrategies }) {
     <Card variant="elevated" style={{ padding: 24, borderLeft: `4px solid ${tone.fg}` }}>
       <div style={{ display: "grid", gap: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "start" }}>
-          <div style={{ display: "grid", gap: 6 }}>
+          <div style={{ display: "grid", gap: 8 }}>
             <div style={{ ...TYPE_SCALE.overline, color: tone.fg }}>This month</div>
-            <div style={{ ...TYPE_SCALE.pageTitle, color: ttzPalette.tx, fontSize: 24 }}>{currentTarget.name}</div>
+            <LenderIdentity creditorName={currentTarget.name} debtType={currentTarget.debtType} lastFour={currentTarget.accountReferenceSafe} size="lg" />
             <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>{(currentTarget.ownerLabel || "Unassigned")} · Current target</div>
           </div>
           <Badge tone="info">Current target</Badge>

@@ -6,6 +6,7 @@ import Button from "../ui/Button.jsx";
 import Card from "../ui/Card.jsx";
 import { presentedOwnerLabel } from "../../../domain/tracktozero/ownership.js";
 import { getWorkspacePresentation } from "../workspacePresentation.js";
+import LenderIdentity from "../debts/LenderIdentity.jsx";
 
 // Home's single dominant surface (UX-7): exactly one deterministic next
 // move (see deriveNextMove's priority chain), one primary CTA. Everything
@@ -37,6 +38,13 @@ export default function NextMoveHero({ homeContext, actions }) {
         </div>
 
         <div style={{ display: "grid", gap: 8 }}>
+          {/* UX-8.3: lender identity only appears when Next Move actually
+              targets a specific Debt (record payment / update balance /
+              stay-on-target) - never for a generic action like Review
+              imports, Build plan, Reforecast, or Add debt. */}
+          {nextMove?.targetDebt ? (
+            <LenderIdentity creditorName={nextMove.targetDebt.name} debtType={nextMove.targetDebt.debtType} lastFour={nextMove.targetDebt.accountReferenceSafe} size="lg" />
+          ) : null}
           <h1 style={{ ...TYPE_SCALE.pageTitle, color: ttzPalette.tx, margin: 0, fontSize: "clamp(1.5rem, 1.1rem + 1.6vw, 2.1rem)" }}>
             {nextMove?.label || "Check your plan"}
           </h1>

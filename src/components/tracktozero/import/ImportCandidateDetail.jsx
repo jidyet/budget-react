@@ -12,8 +12,10 @@ import OwnerField from "../debts/OwnerField.jsx";
 import ReconciliationSection from "./ReconciliationSection.jsx";
 import AprCandidatesField from "./AprCandidatesField.jsx";
 import EvidenceTrust from "./EvidenceTrust.jsx";
+import LenderIdentity from "../debts/LenderIdentity.jsx";
 import { DEBT_TYPE_OPTIONS } from "../debts/debtCategoryConfig.js";
 import { isDebtIncludedByDefault } from "../../../domain/tracktozero/financialItemTaxonomy.js";
+import { getLenderIdentity } from "../../../domain/tracktozero/lenderRegistry.js";
 import { TYPE_SCALE, ttzPalette } from "../theme.js";
 
 const DECISION_LABELS = { pending_review: "Needs your review", confirmed: "Will be added", excluded: "Excluded", needs_information: "Needs information" };
@@ -32,9 +34,30 @@ export default function ImportCandidateDetail({ candidate, canManage, busy, onUp
   const palette = ttzPalette;
   const provenance = candidate.evidence?.provenance || {};
   const amountPaid = candidate.evidence?.amountPaid;
+  // UX-8.3: "Source creditor" is the raw parser-evidence text (never edited
+  // here, never hidden); "Recognized as" is derived from the CURRENT
+  // editable accountName so it stays correct if the reviewer corrects a
+  // misread name before confirming. Recognition is never silent - an
+  // unmatched creditor says so explicitly instead of implying confidence
+  // that doesn't exist.
+  const sourceCreditorText = candidate.creditorName && candidate.creditorName !== candidate.accountName ? candidate.creditorName : "";
+  const recognitionSource = candidate.accountName || candidate.creditorName || "";
+  const recognizedIdentity = recognitionSource ? getLenderIdentity(recognitionSource) : null;
 
   return (
     <Card variant={candidate.decision === "confirmed" ? "highlight" : candidate.decision === "excluded" ? "critical" : "default"}>
+      {recognizedIdentity ? (
+        <div style={{ display: "grid", gap: 6, marginBottom: 12, padding: "10px 12px", borderRadius: 10, background: palette.surf2 }}>
+          {sourceCreditorText ? (
+            <div style={{ ...TYPE_SCALE.caption, color: palette.tx2 }}>Source creditor: {sourceCreditorText}</div>
+          ) : null}
+          <div style={{ ...TYPE_SCALE.caption, color: palette.tx2 }}>Recognized as</div>
+          <LenderIdentity creditorName={recognitionSource} debtType={candidate.debtType} size="md" />
+          {!recognizedIdentity.matched ? (
+            <div style={{ ...TYPE_SCALE.caption, color: palette.tx2 }}>Not confidently identified - shown as entered.</div>
+          ) : null}
+        </div>
+      ) : null}
       <ReconciliationSection candidate={candidate} canManage={canManage} busy={busy} onResolveMatch={onResolveMatch} onResolveNew={onResolveNew} />
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>

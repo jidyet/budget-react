@@ -7,11 +7,13 @@ import Field from "../ui/Field.jsx";
 import EmptyState from "../ui/EmptyState.jsx";
 import DebtBadges from "./DebtBadges.jsx";
 import ScopeSelector from "./ScopeSelector.jsx";
+import LenderIdentity from "./LenderIdentity.jsx";
 import { TYPE_SCALE, ttzPalette } from "../theme.js";
 import { formatMoney as money, formatPercent as percent } from "../formatting.js";
 import { debtCategoryGroupFor } from "../../../domain/tracktozero/financialItemTaxonomy.js";
 import { filterDebtsByOwnerScope } from "../debtPortfolioView.js";
 import { categoryConfigForSlug } from "./debtCategoryConfig.js";
+import { disambiguationSuffixForDebt } from "../../../domain/tracktozero/ownership.js";
 
 const STATUS_FILTERS = [
   { key: "all", label: "All" },
@@ -142,8 +144,14 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "var(--ttz-space-4, 16px)" }}>
           {debts.map((debt) => (
             <Card key={debt.id} variant="default">
-              <div style={{ ...TYPE_SCALE.cardTitle, color: palette.tx }}>{debt.name}</div>
-              <div style={{ ...TYPE_SCALE.metricSm, color: palette.tx, margin: "6px 0" }}>
+              <LenderIdentity
+                creditorName={debt.name}
+                debtType={debt.debtType}
+                lastFour={debt.accountReferenceSafe}
+                disambiguator={disambiguationSuffixForDebt(debt, debts, { isHousehold })}
+                showType
+              />
+              <div style={{ ...TYPE_SCALE.metricSm, color: palette.tx, margin: "10px 0 6px" }}>
                 {money(resolveBalance(debt, latestSnapshotsByDebt))} · {debt.aprStatus === "unknown" ? "APR unknown" : percent(debt.apr)}
               </div>
               <div style={{ ...TYPE_SCALE.supporting, color: palette.tx2 }}>

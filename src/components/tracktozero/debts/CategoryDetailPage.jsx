@@ -15,17 +15,28 @@ import { formatMoney as money, formatPercent as percent } from "../formatting.js
 import { categoryConfigForSlug } from "./debtCategoryConfig.js";
 import { disambiguationSuffixForDebt } from "../../../domain/tracktozero/ownership.js";
 import { getLenderIdentity } from "../../../domain/tracktozero/lenderRegistry.js";
+import { derivePaymentTiming, paymentTimingLabel, PAYMENT_TIMING_STATUS } from "../../../domain/tracktozero/paymentTiming.js";
 import { useIsTablet } from "../useViewport.js";
 import {
   applyDebtExplorerFilters,
   BALANCE_RANGE_OPTIONS,
   DEBT_EXPLORER_SORTS,
+  DUE_TIMING_FILTER_OPTIONS,
   groupDebtsByLender,
   groupDebtsByOwner,
   resolveDebtBalance,
   scopeToCategory,
   sortDebtExplorerDebts,
 } from "./debtExplorerView.js";
+
+// BETA-3: same tone convention as Home's UpcomingPaymentsCard - never a
+// tone that could read as an accusation ("past due" styling) for the
+// deliberately neutral due_date_passed status.
+const DUE_TIMING_TONE = {
+  [PAYMENT_TIMING_STATUS.dueDatePassed]: "warning",
+  [PAYMENT_TIMING_STATUS.dueToday]: "danger",
+  [PAYMENT_TIMING_STATUS.dueThisWeek]: "info",
+};
 
 const STATUS_FILTERS = [
   { key: "all", label: "All" },
@@ -39,7 +50,7 @@ const GROUP_BY_OPTIONS = [
   ["none", "None"],
 ];
 
-const DEFAULT_FILTERS = { statusFilter: "all", planFilter: "all", qualityFilter: "all", lenderFilter: "all", balanceFilter: "all" };
+const DEFAULT_FILTERS = { statusFilter: "all", planFilter: "all", qualityFilter: "all", lenderFilter: "all", balanceFilter: "all", dueTimingFilter: "all" };
 
 // UX-8.4: a compact account row used INSIDE a lender group - the group
 // header already shows the lender's name/logo prominently, so repeating a
@@ -48,7 +59,18 @@ const DEFAULT_FILTERS = { statusFilter: "all", planFilter: "all", qualityFilter:
 // lender-mates (owner/last-four via disambiguationSuffixForDebt, balance,
 // APR, required payment, due day) plus the existing data-quality badges and
 // edit action are shown.
-function LenderGroupAccountRow({ debt, disambiguator, latestSnapshotsByDebt, isTarget, isHousehold, onReviewDebt }) {
+// BETA-3: a compact, restrained due-timing badge - only rendered when the
+// debt actually has a dueDay (derivePaymentTiming's no_due_date is never
+// shown as a badge, matching the "due date isn't mandatory" precedent
+// elsewhere in this file). Text comes straight from paymentTimingLabel, so
+// it can never drift into "past due"/"overdue" language.
+function DueTimingBadge({ debt, paymentEventsByDebt }) {
+  if (debt.dueDay == null) return null;
+  const timing = derivePaymentTiming(debt, { paymentEvents: paymentEventsByDebt?.[debt.id] || [] });
+  return <Badge tone={DUE_TIMING_TONE[timing.status] || "neutral"}>{paymentTimingLabel(timing)}</Badge>;
+}
+
+function LenderGroupAccountRow({ debt, disambiguator, latestSnapshotsByDebt, paymentEventsByDebt, isTarget, isHousehold, onReviewDebt }) {
   const palette = ttzPalette;
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap", padding: "10px 0", borderTop: `1px solid ${palette.border}` }}>
@@ -62,14 +84,17 @@ function LenderGroupAccountRow({ debt, disambiguator, latestSnapshotsByDebt, isT
         <div style={{ ...TYPE_SCALE.supporting, color: palette.tx2 }}>
           Required payment: {debt.minimumRequiredPayment == null ? "not set" : money(debt.minimumRequiredPayment)} · Due day: {debt.dueDay || "not set"}
         </div>
-        <DebtBadges debt={debt} isTarget={isTarget} isHousehold={isHousehold} />
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+          <DebtBadges debt={debt} isTarget={isTarget} isHousehold={isHousehold} />
+          <DueTimingBadge debt={debt} paymentEventsByDebt={paymentEventsByDebt} />
+        </div>
       </div>
       <Button type="button" size="sm" variant="ghost" onClick={() => onReviewDebt?.(debt)}>Review &amp; edit</Button>
     </div>
   );
 }
 
-function DebtCard({ debt, disambiguator, latestSnapshotsByDebt, isTarget, isHousehold, onReviewDebt }) {
+function DebtCard({ debt, disambiguator, latestSnapshotsByDebt, paymentEventsByDebt, isTarget, isHousehold, onReviewDebt }) {
   const palette = ttzPalette;
   return (
     <Card variant="default">
@@ -88,7 +113,10 @@ function DebtCard({ debt, disambiguator, latestSnapshotsByDebt, isTarget, isHous
       <div style={{ ...TYPE_SCALE.supporting, color: palette.tx2 }}>
         Required payment: {money(debt.minimumRequiredPayment)} · Due day: {debt.dueDay || "not set"}
       </div>
-      <DebtBadges debt={debt} isTarget={isTarget} isHousehold={isHousehold} />
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+        <DebtBadges debt={debt} isTarget={isTarget} isHousehold={isHousehold} />
+        <DueTimingBadge debt={debt} paymentEventsByDebt={paymentEventsByDebt} />
+      </div>
       <Button type="button" size="sm" variant="ghost" style={{ marginTop: 4 }} onClick={() => onReviewDebt?.(debt)}>Review &amp; edit</Button>
     </Card>
   );
@@ -100,6 +128,7 @@ function FilterControls({
   qualityFilter, setQualityFilter,
   lenderFilter, setLenderFilter,
   balanceFilter, setBalanceFilter,
+  dueTimingFilter, setDueTimingFilter,
   groupBy, setGroupBy,
   sort, setSort,
   lenderOptions,
@@ -141,6 +170,11 @@ function FilterControls({
           {BALANCE_RANGE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </Select>
       </Field>
+      <Field label="Due date">
+        <Select value={dueTimingFilter} onChange={(event) => setDueTimingFilter(event.target.value)}>
+          {DUE_TIMING_FILTER_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </Select>
+      </Field>
       <Field label="Group by">
         <Select value={groupBy} onChange={(event) => setGroupBy(event.target.value)}>
           {GROUP_BY_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -167,6 +201,7 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
   const [qualityFilter, setQualityFilter] = useState("all");
   const [lenderFilter, setLenderFilter] = useState("all");
   const [balanceFilter, setBalanceFilter] = useState("all");
+  const [dueTimingFilter, setDueTimingFilter] = useState("all");
   const [groupBy, setGroupBy] = useState("lender");
   const [sort, setSort] = useState("payoff_order");
   const [collapsedGroups, setCollapsedGroups] = useState(() => new Set());
@@ -176,6 +211,7 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
   const entry = categorySlug === "all" ? null : categoryConfigForSlug(categorySlug);
   const isHousehold = snapshot.workspace?.type === "household";
   const latestSnapshotsByDebt = useMemo(() => snapshot.latestSnapshotsByDebt || {}, [snapshot.latestSnapshotsByDebt]);
+  const paymentEventsByDebt = useMemo(() => snapshot.paymentEventsByDebt || {}, [snapshot.paymentEventsByDebt]);
 
   const allActive = useMemo(
     () => [...portfolio.activeDebts, ...portfolio.reviewDebts, ...portfolio.paidOffDebts],
@@ -208,19 +244,19 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
   }, [categoryScoped]);
 
   const filtered = useMemo(() => applyDebtExplorerFilters(categoryScoped, {
-    statusFilter, planFilter, qualityFilter, lenderFilter, balanceFilter,
-    reviewIds, paidOffIds, targetDebtId: snapshot.targetDebt?.id, latestSnapshotsByDebt,
-  }), [categoryScoped, statusFilter, planFilter, qualityFilter, lenderFilter, balanceFilter, reviewIds, paidOffIds, snapshot.targetDebt, latestSnapshotsByDebt]);
+    statusFilter, planFilter, qualityFilter, lenderFilter, balanceFilter, dueTimingFilter,
+    reviewIds, paidOffIds, targetDebtId: snapshot.targetDebt?.id, latestSnapshotsByDebt, paymentEventsByDebt,
+  }), [categoryScoped, statusFilter, planFilter, qualityFilter, lenderFilter, balanceFilter, dueTimingFilter, reviewIds, paidOffIds, snapshot.targetDebt, latestSnapshotsByDebt, paymentEventsByDebt]);
 
   const debts = useMemo(
-    () => sortDebtExplorerDebts(filtered, sort, { payoffOrderIndex, latestSnapshotsByDebt }),
-    [filtered, sort, payoffOrderIndex, latestSnapshotsByDebt]
+    () => sortDebtExplorerDebts(filtered, sort, { payoffOrderIndex, latestSnapshotsByDebt, paymentEventsByDebt }),
+    [filtered, sort, payoffOrderIndex, latestSnapshotsByDebt, paymentEventsByDebt]
   );
 
   const categoryTotal = useMemo(() => categoryScoped.reduce((sum, d) => sum + resolveDebtBalance(d, latestSnapshotsByDebt), 0), [categoryScoped, latestSnapshotsByDebt]);
   const filteredTotal = useMemo(() => debts.reduce((sum, d) => sum + resolveDebtBalance(d, latestSnapshotsByDebt), 0), [debts, latestSnapshotsByDebt]);
-  const hasActiveFilters = statusFilter !== "all" || planFilter !== "all" || qualityFilter !== "all" || lenderFilter !== "all" || balanceFilter !== "all";
-  const activeFilterCount = [statusFilter, planFilter, qualityFilter, lenderFilter, balanceFilter].filter((v) => v !== "all").length;
+  const hasActiveFilters = statusFilter !== "all" || planFilter !== "all" || qualityFilter !== "all" || lenderFilter !== "all" || balanceFilter !== "all" || dueTimingFilter !== "all";
+  const activeFilterCount = [statusFilter, planFilter, qualityFilter, lenderFilter, balanceFilter, dueTimingFilter].filter((v) => v !== "all").length;
 
   const clearFilters = () => {
     setStatusFilter(DEFAULT_FILTERS.statusFilter);
@@ -228,6 +264,7 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
     setQualityFilter(DEFAULT_FILTERS.qualityFilter);
     setLenderFilter(DEFAULT_FILTERS.lenderFilter);
     setBalanceFilter(DEFAULT_FILTERS.balanceFilter);
+    setDueTimingFilter(DEFAULT_FILTERS.dueTimingFilter);
   };
 
   const toggleGroup = (key) => setCollapsedGroups((prev) => {
@@ -237,7 +274,11 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
   });
 
   const palette = ttzPalette;
-  const filterProps = { statusFilter, setStatusFilter, planFilter, setPlanFilter, qualityFilter, setQualityFilter, lenderFilter, setLenderFilter, balanceFilter, setBalanceFilter, groupBy, setGroupBy, sort, setSort, lenderOptions };
+  const filterProps = {
+    statusFilter, setStatusFilter, planFilter, setPlanFilter, qualityFilter, setQualityFilter,
+    lenderFilter, setLenderFilter, balanceFilter, setBalanceFilter, dueTimingFilter, setDueTimingFilter,
+    groupBy, setGroupBy, sort, setSort, lenderOptions,
+  };
 
   const lenderGroups = groupBy === "lender" ? groupDebtsByLender(debts) : null;
   const ownerGroups = groupBy === "owner" ? groupDebtsByOwner(debts) : null;
@@ -304,6 +345,7 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
               debt={debt}
               disambiguator={disambiguationSuffixForDebt(debt, debts, { isHousehold })}
               latestSnapshotsByDebt={latestSnapshotsByDebt}
+              paymentEventsByDebt={paymentEventsByDebt}
               isTarget={snapshot.targetDebt?.id === debt.id}
               isHousehold={isHousehold}
               onReviewDebt={onReviewDebt}
@@ -350,6 +392,7 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
                         debt={debt}
                         disambiguator={disambiguationSuffixForDebt(debt, group.debts, { isHousehold })}
                         latestSnapshotsByDebt={latestSnapshotsByDebt}
+              paymentEventsByDebt={paymentEventsByDebt}
                         isTarget={snapshot.targetDebt?.id === debt.id}
                         isHousehold={isHousehold}
                         onReviewDebt={onReviewDebt}
@@ -374,6 +417,7 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
                       debt={debt}
                       disambiguator={disambiguationSuffixForDebt(debt, debts, { isHousehold })}
                       latestSnapshotsByDebt={latestSnapshotsByDebt}
+              paymentEventsByDebt={paymentEventsByDebt}
                       isTarget={snapshot.targetDebt?.id === debt.id}
                       isHousehold={isHousehold}
                       onReviewDebt={onReviewDebt}
@@ -422,6 +466,7 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
                         debt={debt}
                         disambiguator={disambiguationSuffixForDebt(debt, group.debts, { isHousehold })}
                         latestSnapshotsByDebt={latestSnapshotsByDebt}
+              paymentEventsByDebt={paymentEventsByDebt}
                         isTarget={snapshot.targetDebt?.id === debt.id}
                         isHousehold={isHousehold}
                         onReviewDebt={onReviewDebt}

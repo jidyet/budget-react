@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveConfirmedProgress, deriveHomeContext, deriveNextMove, deriveProjectedTrajectory } from "./homeViewModels.js";
+import { deriveConfirmedProgress, deriveHomeContext, deriveNextMove, deriveProjectedTrajectory, deriveUpcomingPayments } from "./homeViewModels.js";
 
 const debt = (overrides = {}) => ({
   id: "d1",
@@ -290,6 +290,128 @@ describe("UX-7: deriveNextMove is a deterministic, ordered priority chain", () =
     });
     expect(move.label).toBe("Stay on this month's target");
     expect(move.action).toBe("debts");
+  });
+});
+
+describe("BETA-3: deriveUpcomingPayments never conflates required-payment timing with the extra-payoff target", () => {
+  const now = new Date(2026, 7, 17, 12); // Aug 17, 2026 - matches paymentTiming.test.js's reference date
+
+  it("PAY-17: includes due-today, due-this-week, and due-date-passed; excludes far-upcoming and no-due-date", () => {
+    const snapshot = baseSnapshot({
+      debts: [
+        debt({ id: "d1", name: "Due today", dueDay: 17 }),
+        debt({ id: "d2", name: "Due this week", dueDay: 20 }),
+        debt({ id: "d3", name: "Due date passed", dueDay: 10 }),
+        debt({ id: "d4", name: "Far upcoming", dueDay: 30 }),
+        debt({ id: "d5", name: "No due date", dueDay: null }),
+      ],
+    });
+    const upcoming = deriveUpcomingPayments(snapshot, { now });
+    expect(upcoming.entries.map((entry) => entry.debt.id)).toEqual(["d3", "d1", "d2"]);
+    expect(upcoming.count).toBe(3);
+  });
+
+  it("PAY-18: excludes archived and paid-off debts even when they carry a due-today dueDay", () => {
+    const snapshot = baseSnapshot({
+      debts: [
+        debt({ id: "d1", name: "Due today", dueDay: 17 }),
+        debt({ id: "d2", name: "Archived", dueDay: 17, status: "archived" }),
+        debt({ id: "d3", name: "Paid off", dueDay: 17, currentBalance: 0, balanceStatus: "confirmed" }),
+      ],
+    });
+    const upcoming = deriveUpcomingPayments(snapshot, { now });
+    expect(upcoming.entries.map((entry) => entry.debt.id)).toEqual(["d1"]);
+  });
+
+  it("PAY-19: a debt excluded from the core payoff plan is still eligible for payment-timing (distinct from the extra-payoff target)", () => {
+    const snapshot = baseSnapshot({
+      debts: [debt({ id: "d1", name: "Mortgage", dueDay: 17, includedInCorePayoffPlan: false })],
+      includedDebts: [],
+    });
+    const upcoming = deriveUpcomingPayments(snapshot, { now });
+    expect(upcoming.entries.map((entry) => entry.debt.id)).toEqual(["d1"]);
+  });
+
+  it("PAY-20: a missing minimumRequiredPayment is never coerced to $0 - it's counted as unknown, not summed as zero", () => {
+    const snapshot = baseSnapshot({
+      debts: [
+        debt({ id: "d1", name: "Known amount", dueDay: 17, minimumRequiredPayment: 45 }),
+        debt({ id: "d2", name: "Unknown amount", dueDay: 18, minimumRequiredPayment: null }),
+      ],
+    });
+    const upcoming = deriveUpcomingPayments(snapshot, { now });
+    expect(upcoming.count).toBe(2);
+    expect(upcoming.knownAmountCount).toBe(1);
+    expect(upcoming.unknownAmountCount).toBe(1);
+    expect(upcoming.totalKnownAmount).toBe(45);
+  });
+});
+
+describe("BETA-3: deriveNextMove surfaces an urgent required payment without hiding it behind the payoff target", () => {
+  const passedEntry = (name = "Discover Card") => ({
+    debt: { id: "d9", name },
+    timing: { status: "due_date_passed", dueDate: new Date(2026, 7, 10), daysUntil: -7 },
+  });
+  const todayEntry = (name = "Discover Card") => ({
+    debt: { id: "d9", name },
+    timing: { status: "due_today", dueDate: new Date(2026, 7, 17), daysUntil: 0 },
+  });
+  const thisWeekEntry = (name = "Discover Card") => ({
+    debt: { id: "d9", name },
+    timing: { status: "due_this_week", dueDate: new Date(2026, 7, 20), daysUntil: 3 },
+  });
+
+  it("a due-today required payment wins over the monthly-status payment/balance tiers for a DIFFERENT (extra-payoff-target) debt", () => {
+    const move = deriveNextMove({}, {
+      hasBlockingReview: false,
+      planHealth: { code: "on_track" },
+      debtsAwaitingReforecast: [],
+      dataFreshness: { isStale: false },
+      currentTarget: { name: "Chase Freedom" },
+      monthlyStatus: { shouldRecordPayment: true, supporting: "Go pay it." },
+      upcomingPayments: { entries: [todayEntry()] },
+    });
+    expect(move.label).toBe("Discover Card is due today");
+    expect(move.action).toBe("debts");
+    expect(move.targetDebt.id).toBe("d9");
+  });
+
+  it("a passed-and-unconfirmed due date asks for confirmation, not a delinquency claim", () => {
+    const move = deriveNextMove({}, {
+      dataFreshness: { isStale: false },
+      monthlyStatus: {},
+      upcomingPayments: { entries: [passedEntry()] },
+    });
+    expect(move.label).toBe("Confirm your Discover Card payment");
+    expect(move.body).not.toMatch(/past.?due|overdue|delinquent|missed/i);
+  });
+
+  it("stale data freshness (tier 4) still wins over an urgent payment - trust in the numbers comes first", () => {
+    const move = deriveNextMove({}, {
+      dataFreshness: { isStale: true },
+      monthlyStatus: {},
+      upcomingPayments: { entries: [todayEntry()] },
+    });
+    expect(move.label).toBe("Update your balances");
+  });
+
+  it("due-this-week alone does not hijack the hero slot - it falls through to the existing lower tiers", () => {
+    const move = deriveNextMove({}, {
+      dataFreshness: { isStale: false },
+      monthlyStatus: { shouldRecordPayment: true, supporting: "Go pay it." },
+      currentTarget: { name: "Chase Freedom" },
+      upcomingPayments: { entries: [thisWeekEntry()] },
+    });
+    expect(move.label).toBe("Record your Chase Freedom payment");
+  });
+
+  it("no upcoming-payments entries at all falls through unaffected (existing behavior preserved)", () => {
+    const move = deriveNextMove({}, {
+      dataFreshness: { isStale: false },
+      homeState: "active-plan",
+      monthlyStatus: { shouldRecordPayment: false, shouldUpdateBalance: false },
+    });
+    expect(move.label).toBe("Stay on this month's target");
   });
 });
 

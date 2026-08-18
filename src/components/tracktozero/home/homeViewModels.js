@@ -9,6 +9,7 @@
 import { isBalanceUnresolved, isConfirmedZero } from "../../../domain/tracktozero/ownership.js";
 import { deriveCurrentPlanPeriodStatus } from "./homeMonthlyStatus.js";
 import { TRACKTOZERO_STATUS_THRESHOLDS, deriveDebtsAwaitingReforecast } from "../../../services/tracktozero/projectionStatusService.js";
+import { PAYMENT_TIMING_STATUS, comparePaymentTiming, derivePaymentTiming, paymentTimingLabel } from "../../../domain/tracktozero/paymentTiming.js";
 
 const MAX_TRAJECTORY_POINTS = 8;
 const HOME_REFERENCE_MONTH = "Aug 2026";
@@ -422,6 +423,53 @@ export const deriveDataFreshness = (snapshot, asOf = new Date()) => {
   return { isStale, daysOld, lastUpdate, staleDebts };
 };
 
+// BETA-3: the required-payment execution surface for Home's "Upcoming
+// Payments" section - distinct from the extra-payoff-target concept
+// (currentTarget/nextMove/monthlyStatus), and computed over EVERY tracked,
+// non-archived, non-paid-off debt (not just includedDebts/eligibleDebts),
+// since a debt excluded from the active core payoff plan still has its own
+// real-world due date that needs to be paid. Only the three statuses that
+// call for near-term action surface here (due today, due this week, due
+// date passed - confirm) - a debt with no due date, or one merely
+// "upcoming" beyond a week, belongs on the Debts page's due-date filters,
+// not this Home summary.
+const UPCOMING_PAYMENT_STATUSES = new Set([
+  PAYMENT_TIMING_STATUS.dueDatePassed,
+  PAYMENT_TIMING_STATUS.dueToday,
+  PAYMENT_TIMING_STATUS.dueThisWeek,
+]);
+
+export const deriveUpcomingPayments = (snapshot, { now = new Date() } = {}) => {
+  const eligibleDebts = (snapshot?.debts || []).filter((debt) => debt.status !== "archived" && !isConfirmedZero(debt));
+
+  const entries = eligibleDebts
+    .map((debt) => {
+      const timing = derivePaymentTiming(debt, { now, paymentEvents: snapshot?.paymentEventsByDebt?.[debt.id] || [] });
+      return {
+        debt,
+        timing,
+        label: paymentTimingLabel(timing),
+        // Never coerce a missing minimum payment to 0 - a debt with an
+        // unknown required payment is surfaced as "needs review," never as
+        // a fabricated $0 obligation.
+        minimumRequiredPayment: debt.minimumRequiredPayment == null ? null : Number(debt.minimumRequiredPayment),
+      };
+    })
+    .filter((entry) => UPCOMING_PAYMENT_STATUSES.has(entry.timing.status))
+    .sort((a, b) => comparePaymentTiming(a.timing, b.timing));
+
+  const knownAmountEntries = entries.filter((entry) => entry.minimumRequiredPayment != null);
+  const totalKnownAmount = knownAmountEntries.reduce((sum, entry) => sum + entry.minimumRequiredPayment, 0);
+
+  return {
+    entries,
+    count: entries.length,
+    knownAmountCount: knownAmountEntries.length,
+    unknownAmountCount: entries.length - knownAmountEntries.length,
+    totalKnownAmount,
+  };
+};
+
 export const derivePaidOffDebts = (snapshot) =>
   (snapshot.debts || [])
     .filter((debt) => isConfirmedZero(debt))
@@ -582,6 +630,34 @@ export const deriveNextMove = (snapshot, context) => {
       body: "Your latest confirmed balances are stale, so Home can't compare reality to your plan with confidence.",
       ctaLabel: "Update balances",
       action: "debts",
+    };
+  }
+
+  // BETA-3: a required payment due today, or whose due date has already
+  // passed unconfirmed, is real-world time pressure that exists whether or
+  // not that debt is this plan's extra-payoff target - it must never be
+  // hidden behind "stay on target" / target-debt-only guidance (tiers
+  // below this one, all scoped to context.currentTarget via monthlyStatus).
+  // Ranked below the data/plan-trust tiers above (blocking review, critical
+  // health, reforecast, stale freshness) since those determine whether
+  // Home's guidance can be trusted at all; ranked above every payoff-
+  // target-specific tier below, per that ordering. "Due this week" is
+  // intentionally excluded here - it's surfaced on the Upcoming Payments
+  // section, not urgent enough to take over the hero slot.
+  const urgentPayment = (context.upcomingPayments?.entries || []).find((entry) => (
+    entry.timing.status === PAYMENT_TIMING_STATUS.dueDatePassed || entry.timing.status === PAYMENT_TIMING_STATUS.dueToday
+  ));
+  if (urgentPayment) {
+    const debtName = urgentPayment.debt.name || "this debt";
+    const isPassed = urgentPayment.timing.status === PAYMENT_TIMING_STATUS.dueDatePassed;
+    return {
+      label: isPassed ? `Confirm your ${debtName} payment` : `${debtName} is due today`,
+      body: isPassed
+        ? `${debtName}'s due date has passed. If you already paid it, record the payment - if not, pay it to stay current.`
+        : `${debtName} has a payment due today.`,
+      ctaLabel: "Record payment",
+      action: "debts",
+      targetDebt: urgentPayment.debt,
     };
   }
 
@@ -799,6 +875,7 @@ export const deriveHomeContext = (snapshot, reviewSnapshot, scenario) => {
     monthlyStatus: deriveCurrentPlanPeriodStatus(snapshot),
     debtCount: (snapshot?.debts || []).filter((debt) => debt.status !== "archived").length,
     debtSnapshot: deriveDebtSnapshot(snapshot, { hasActivePlan }),
+    upcomingPayments: deriveUpcomingPayments(snapshot),
     snapshot,
   };
 

@@ -11,6 +11,7 @@ import { deriveMilestones } from "./milestones.js";
 import NextMoveHero from "./NextMoveHero.jsx";
 import MilestoneBanner from "./MilestoneBanner.jsx";
 import ActivityPreviewCard from "./ActivityPreviewCard.jsx";
+import UpcomingPaymentsCard from "./UpcomingPaymentsCard.jsx";
 import LenderIdentity from "../debts/LenderIdentity.jsx";
 
 // Below this many observed points, a full-size trend chart would just be a
@@ -715,6 +716,8 @@ function NoActivePlanState({ homeContext, onCompareStrategies, onAddDebt, onGoTo
 
         <DebtSnapshotCard homeContext={homeContext} onGoToDebts={onGoToDebts || onAddDebt} />
 
+        <UpcomingPaymentsCard homeContext={homeContext} onGoToDebts={onGoToDebts || onAddDebt} />
+
         <Card variant="default" style={{ padding: 24 }}>
           <div style={{ display: "grid", gap: 12 }}>
             <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Import review</div>
@@ -772,11 +775,15 @@ function BlockingReviewState({ homeContext, onGoToReview, onGoToDebts }) {
           </Card>
         ) : null}
       </div>
+
+      {/* Required-payment timing is independent of whether the plan can be
+          fully trusted yet - a real-world due date doesn't wait on review. */}
+      <UpcomingPaymentsCard homeContext={homeContext} onGoToDebts={onGoToDebts} />
     </div>
   );
 }
 
-function AllPaidOffState({ homeContext, onViewMyPlan }) {
+function AllPaidOffState({ homeContext, onViewMyPlan, onGoToDebts }) {
   return (
     <div style={{ display: "grid", gap: GAP }}>
       <Card variant="elevated" style={{ padding: 32, textAlign: "center", background: toneColors(ttzPalette).success.bg }}>
@@ -800,6 +807,10 @@ function AllPaidOffState({ homeContext, onViewMyPlan }) {
           </Card>
         </div>
       ) : null}
+
+      {/* A debt excluded from the core plan (e.g. a mortgage) can still have
+          its own real-world due date even after every INCLUDED debt hits $0. */}
+      <UpcomingPaymentsCard homeContext={homeContext} onGoToDebts={onGoToDebts} />
     </div>
   );
 }
@@ -874,7 +885,7 @@ export default function HomeCommandCenter({
   if (homeContext.homeState === "all-paid-off") {
     return (
       <main style={{ display: "grid", gap: GAP }}>
-        <AllPaidOffState homeContext={homeContext} onViewMyPlan={goToMyPlan} />
+        <AllPaidOffState homeContext={homeContext} onViewMyPlan={goToMyPlan} onGoToDebts={goToDebts} />
       </main>
     );
   }
@@ -884,6 +895,7 @@ export default function HomeCommandCenter({
       <NextMoveHero homeContext={homeContext} actions={nextMoveActions} />
       <MilestoneBanner workspaceId={homeContext.workspace?.id} milestones={milestones} />
       <DebtFreedomHero homeContext={homeContext} />
+      <UpcomingPaymentsCard homeContext={homeContext} onGoToDebts={goToDebts} />
 
       <div style={gridColumns(320)}>
         <ThisMonthCard

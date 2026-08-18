@@ -15,6 +15,7 @@ import { debtCategoryGroupFor } from "../../../domain/tracktozero/financialItemT
 import { filterDebtsByOwnerScope } from "../debtPortfolioView.js";
 import { effectiveOwnerType, presentedOwnerLabel } from "../../../domain/tracktozero/ownership.js";
 import { getLenderIdentity } from "../../../domain/tracktozero/lenderRegistry.js";
+import { comparePaymentTiming, derivePaymentTiming } from "../../../domain/tracktozero/paymentTiming.js";
 
 export const resolveDebtBalance = (debt, latestSnapshotsByDebt) =>
   Number(latestSnapshotsByDebt?.[debt.id]?.balance ?? debt.currentBalance ?? 0) || 0;
@@ -40,10 +41,13 @@ export const applyDebtExplorerFilters = (debts, {
   qualityFilter = "all",
   lenderFilter = "all",
   balanceFilter = "all",
+  dueTimingFilter = "all",
   reviewIds = new Set(),
   paidOffIds = new Set(),
   targetDebtId = null,
   latestSnapshotsByDebt = {},
+  paymentEventsByDebt = {},
+  now = new Date(),
 } = {}) => {
   let list = debts;
   if (statusFilter === "needs_attention") list = list.filter((debt) => reviewIds.has(debt.id));
@@ -72,8 +76,28 @@ export const applyDebtExplorerFilters = (debts, {
       }
     });
   }
+  // BETA-3: calendar-aware due-timing filter - distinct from the naive
+  // raw-dueDay `due_date` sort below (unchanged) and from status/plan/
+  // quality, which say nothing about a debt's own due date. Reuses
+  // paymentTiming.js's derivePaymentTiming so this filter can never drift
+  // from the Home Upcoming Payments surface's own definition of "due
+  // today"/"due this week"/"due date passed."
+  if (dueTimingFilter !== "all") {
+    list = list.filter((debt) => (
+      derivePaymentTiming(debt, { now, paymentEvents: paymentEventsByDebt?.[debt.id] || [] }).status === dueTimingFilter
+    ));
+  }
   return list;
 };
+
+export const DUE_TIMING_FILTER_OPTIONS = [
+  ["all", "Any due date"],
+  ["due_date_passed", "Due date passed"],
+  ["due_today", "Due today"],
+  ["due_this_week", "Due this week"],
+  ["upcoming", "Upcoming"],
+  ["no_due_date", "No due date"],
+];
 
 export const BALANCE_RANGE_OPTIONS = [
   ["all", "Any balance"],
@@ -93,7 +117,8 @@ const requiredPaymentSortValue = (debt) => (debt.minimumRequiredPayment == null 
 
 export const DEBT_EXPLORER_SORTS = [
   ["payoff_order", "Current payoff order"],
-  ["due_date", "Due date: soonest first"],
+  ["due_date", "Due day: soonest first"],
+  ["due_soonest", "Due date: soonest first (calendar-aware)"],
   ["apr_desc", "APR: highest first"],
   ["apr_asc", "APR: lowest first"],
   ["balance_desc", "Balance: highest first"],
@@ -104,13 +129,25 @@ export const DEBT_EXPLORER_SORTS = [
   ["lender_desc", "Lender: Z-A"],
 ];
 
-export const sortDebtExplorerDebts = (debts, sort, { payoffOrderIndex = new Map(), latestSnapshotsByDebt = {} } = {}) => {
+export const sortDebtExplorerDebts = (debts, sort, {
+  payoffOrderIndex = new Map(),
+  latestSnapshotsByDebt = {},
+  paymentEventsByDebt = {},
+  now = new Date(),
+} = {}) => {
   const sorted = [...debts];
   const lenderName = (debt) => getLenderIdentity(debt.name).canonicalName;
   if (sort === "payoff_order") {
     sorted.sort((a, b) => (payoffOrderIndex.has(a.id) ? payoffOrderIndex.get(a.id) : Infinity) - (payoffOrderIndex.has(b.id) ? payoffOrderIndex.get(b.id) : Infinity));
   } else if (sort === "due_date") {
     sorted.sort((a, b) => (a.dueDay ?? Infinity) - (b.dueDay ?? Infinity));
+  } else if (sort === "due_soonest") {
+    // Calendar-aware, distinct from the naive raw-dueDay `due_date` sort
+    // above - reuses paymentTiming.js's own comparator so due-date-passed
+    // debts always lead, then due-today, then soonest-upcoming, with no
+    // due date always trailing.
+    const timingFor = (debt) => derivePaymentTiming(debt, { now, paymentEvents: paymentEventsByDebt?.[debt.id] || [] });
+    sorted.sort((a, b) => comparePaymentTiming(timingFor(a), timingFor(b)));
   } else if (sort === "apr_desc") {
     sorted.sort((a, b) => aprSortValue(b) - aprSortValue(a));
   } else if (sort === "apr_asc") {

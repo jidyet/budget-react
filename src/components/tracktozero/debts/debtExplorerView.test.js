@@ -90,6 +90,20 @@ describe("DEBT-EXPLORER: applyDebtExplorerFilters", () => {
     const result = applyDebtExplorerFilters(debts, { planFilter: "included", balanceFilter: "2000_5000", reviewIds, paidOffIds });
     expect(result.map((d) => d.id)).toEqual(["included"]);
   });
+
+  it("BETA-3: filters by calendar-aware due timing, reusing paymentTiming.js's own status set", () => {
+    const now = new Date(2026, 7, 17, 12); // Aug 17, 2026
+    const timingDebts = [
+      debt({ id: "today", dueDay: 17 }),
+      debt({ id: "this-week", dueDay: 20 }),
+      debt({ id: "passed", dueDay: 10 }),
+      debt({ id: "no-due", dueDay: null }),
+    ];
+    expect(applyDebtExplorerFilters(timingDebts, { dueTimingFilter: "due_today", now }).map((d) => d.id)).toEqual(["today"]);
+    expect(applyDebtExplorerFilters(timingDebts, { dueTimingFilter: "due_this_week", now }).map((d) => d.id)).toEqual(["this-week"]);
+    expect(applyDebtExplorerFilters(timingDebts, { dueTimingFilter: "due_date_passed", now }).map((d) => d.id)).toEqual(["passed"]);
+    expect(applyDebtExplorerFilters(timingDebts, { dueTimingFilter: "no_due_date", now }).map((d) => d.id)).toEqual(["no-due"]);
+  });
 });
 
 describe("DEBT-EXPLORER: sortDebtExplorerDebts", () => {
@@ -120,6 +134,30 @@ describe("DEBT-EXPLORER: sortDebtExplorerDebts", () => {
   it("sorts by due date, soonest first, undefined due day last", () => {
     const debts = [debt({ id: "a", dueDay: 20 }), debt({ id: "b", dueDay: null }), debt({ id: "c", dueDay: 5 })];
     expect(sortDebtExplorerDebts(debts, "due_date").map((d) => d.id)).toEqual(["c", "a", "b"]);
+  });
+
+  it("BETA-3: due_soonest is calendar-aware, distinct from the naive raw-dueDay due_date sort", () => {
+    const now = new Date(2026, 7, 17, 12); // Aug 17, 2026
+    // "early" (dueDay 5) already passed this month, but a qualifying
+    // payment recorded this month rolls it to Sep 5 (~19 days out).
+    // "later" (dueDay 25) hasn't passed yet and is only 8 days out. Raw
+    // dueDay order says early(5) < later(25); calendar-aware timing says
+    // the opposite, since early's NEXT real occurrence is further away.
+    const debts = [
+      debt({ id: "early", dueDay: 5 }),
+      debt({ id: "later", dueDay: 25 }),
+    ];
+    const paymentEventsByDebt = { early: [{ amount: 40, paidAt: new Date(2026, 7, 10).toISOString() }] };
+    const naive = sortDebtExplorerDebts(debts, "due_date").map((d) => d.id);
+    expect(naive).toEqual(["early", "later"]);
+    const calendarAware = sortDebtExplorerDebts(debts, "due_soonest", { now, paymentEventsByDebt }).map((d) => d.id);
+    expect(calendarAware).toEqual(["later", "early"]);
+  });
+
+  it("due_soonest ranks a debt with no due date last", () => {
+    const now = new Date(2026, 7, 17, 12);
+    const debts = [debt({ id: "no-due", dueDay: null }), debt({ id: "today", dueDay: 17 })];
+    expect(sortDebtExplorerDebts(debts, "due_soonest", { now }).map((d) => d.id)).toEqual(["today", "no-due"]);
   });
 
   it("sorts by balance both directions", () => {

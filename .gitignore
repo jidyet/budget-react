@@ -18,6 +18,9 @@ functions/.env.local
 .firebase-bin/
 .firebase-config-v2/
 .firebase-bin-v2/
+.firebase-config-beta/
+.firebase-bin-beta/
+.firebase-config-beta-deploy/
 .firebase/
 .gradle-home/
 .safety-snapshots/

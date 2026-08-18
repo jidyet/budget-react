@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
-import { auth as productionAuth, getFirebaseConfig, getFirebaseStatus, login as productionLogin, logout as productionLogout, signup as productionSignup } from "../../firebase";
+import { doc, getDoc } from "firebase/firestore";
+import { auth as productionAuth, db as productionDb, getFirebaseConfig, getFirebaseStatus, login as productionLogin, logout as productionLogout, signup as productionSignup } from "../../firebase";
 import {
   createTrackToZeroRepository,
   ensureTrackToZeroV2EmulatorActor,
@@ -279,6 +280,33 @@ function OnboardingScreen({ busy, error, onChooseWorkspace, onSignOut }) {
               </button>
             </article>
           </div>
+          {onSignOut && <button type="button" style={{ ...styles.button, marginTop: 18 }} onClick={onSignOut}>Sign out</button>}
+        </section>
+      </div>
+    </main>
+  );
+}
+
+// BETA-3: shown for a signed-in but unapproved user on a beta-gated
+// deployment (see isBetaGatedRuntime below), BEFORE they ever reach
+// onboarding/workspace creation - proactive, not a reaction to a raw
+// Firestore permission-denied error (rules deny beta_allowlist `list`, and
+// a bare PERMISSION_DENIED carries no distinguishing detail, so this is a
+// separate, deliberate `get` of the signed-in user's OWN allowlist doc,
+// exactly what firestore.beta.rules already allows). This is a UX
+// courtesy only - the real access boundary is enforced server-side by
+// firestore.beta.rules' v2BetaApproved() gate regardless of what this
+// screen does or doesn't show.
+function BetaInviteOnlyScreen({ email, onSignOut }) {
+  return (
+    <main style={styles.shell}>
+      <div style={styles.wrap}>
+        <section style={styles.card}>
+          <p style={{ margin: "0 0 6px", letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 900, color: "#2f6289", fontSize: 12 }}>Controlled beta</p>
+          <h1 style={{ margin: "0 0 10px", fontSize: 28 }}>This beta is invite-only.</h1>
+          <p style={{ color: "#365a78" }}>
+            {email ? <>{email} isn&apos;t on the current tester list yet.</> : "This account isn't on the current tester list yet."} If you&apos;re expecting access, check with whoever invited you - TrackToZero doesn&apos;t open self-serve signup during this controlled beta.
+          </p>
           {onSignOut && <button type="button" style={{ ...styles.button, marginTop: 18 }} onClick={onSignOut}>Sign out</button>}
         </section>
       </div>
@@ -752,6 +780,14 @@ export default function TrackToZeroV2App() {
   // them. firebaseEmulator (seeded QA harness) and inMemory are unaffected.
   const usesRealAuthUi = isProductionRuntime || isLocalBetaRuntime;
   const repository = useMemo(() => getRuntimeRepository(), []);
+  // BETA-3: true only for a firebaseProduction-mode deployment pointed at
+  // a project OTHER than real production (today, that's exclusively
+  // tracktozero-beta - this stays generic rather than hardcoding that
+  // project id, so it also covers any future non-prod firebaseProduction
+  // deployment). True production itself is never gated: getFirebaseConfig
+  // there resolves to TRACKTOZERO_V2_PRODUCTION_PROJECT_ID, which this
+  // explicitly excludes.
+  const isBetaGatedRuntime = isProductionRuntime && getFirebaseConfig().projectId !== TRACKTOZERO_V2_PRODUCTION_PROJECT_ID;
 
   // Fail closed: if local-beta mode can't establish its own emulator-backed
   // auth (bad/missing host config), this throws inside the memo rather than
@@ -852,6 +888,43 @@ export default function TrackToZeroV2App() {
       setAuthState({ status: "unavailable", user: null, error: isLocalBetaRuntime ? "TrackToZero could not connect to the local Auth emulator." : "TrackToZero could not connect to Firebase Auth." });
     });
   }, [usesRealAuthUi, isLocalBetaRuntime, localBetaAuthError, activeAuth]);
+
+  // BETA-3: proactive beta-allowlist check for a beta-gated deployment
+  // only - reads ONLY the signed-in user's own beta_allowlist doc (all
+  // firestore.beta.rules permits any client to read; `list` is denied
+  // outright), never a query, never anyone else's doc. This never runs
+  // for real production (isBetaGatedRuntime is always false there) and
+  // is purely a UX courtesy - see BetaInviteOnlyScreen's own comment.
+  const [betaApprovalState, setBetaApprovalState] = useState({ status: "idle", email: "" });
+  useEffect(() => {
+    if (!isBetaGatedRuntime) return undefined;
+    const email = (authState.user?.email || "").trim().toLowerCase();
+    if (!email) {
+      setBetaApprovalState({ status: "idle", email: "" });
+      return undefined;
+    }
+    let cancelled = false;
+    setBetaApprovalState({ status: "checking", email });
+    getDoc(doc(productionDb, "beta_allowlist", email))
+      .then((snap) => {
+        if (cancelled) return;
+        const approved = snap.exists() && snap.data()?.status === "active";
+        setBetaApprovalState({ status: approved ? "approved" : "not_approved", email });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // Fail OPEN on this proactive check only (never on the server-side
+        // rules themselves) - if the read itself can't complete (offline,
+        // transient error), fall through to the normal onboarding/workspace
+        // flow rather than wrongly telling an approved tester they're
+        // locked out; any real access decision is still enforced by
+        // firestore.beta.rules regardless of what this check concludes.
+        setBetaApprovalState({ status: "approved", email });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isBetaGatedRuntime, authState.user]);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -1297,6 +1370,14 @@ export default function TrackToZeroV2App() {
         />
       );
     }
+  }
+
+  // BETA-3: checked after the join-invite branches above (an invite in
+  // hand still goes through its own existing flow/error path) but before
+  // plain self-serve onboarding - a beta-gated, unapproved, non-invited
+  // signup never reaches the Personal/Household picker at all.
+  if (usesRealAuthUi && isBetaGatedRuntime && !joinIntent && betaApprovalState.status === "not_approved") {
+    return <BetaInviteOnlyScreen email={betaApprovalState.email} onSignOut={activeLogout} />;
   }
 
   if (usesRealAuthUi && runtimeState.status === "needs_onboarding") {

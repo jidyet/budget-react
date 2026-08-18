@@ -1,3 +1,22 @@
+// UX-8.4: local, bundled lender wordmarks - see src/assets/lenders/
+// PROVENANCE.md for the exact source URL/license status of every file.
+// Every asset is a Vite-bundled local import (no remote URL ever appears in
+// this file or in LenderIdentity.jsx), so these ship in the JS bundle and
+// require zero runtime network requests. Only lenders with a verified,
+// appropriately-licensed source get an entry here - see PROVENANCE.md for
+// the (larger) list of lenders deliberately left fallback-only.
+import bankOfAmericaLogo from "../../assets/lenders/bank-of-america.svg";
+import capitalOneLogo from "../../assets/lenders/capital-one.svg";
+import chaseLogo from "../../assets/lenders/chase.svg";
+import usBankLogo from "../../assets/lenders/us-bank.svg";
+import wellsFargoLogo from "../../assets/lenders/wells-fargo.svg";
+import citiLogo from "../../assets/lenders/citi.svg";
+import discoverLogo from "../../assets/lenders/discover.svg";
+import americanExpressLogo from "../../assets/lenders/american-express.svg";
+import affirmLogo from "../../assets/lenders/affirm.svg";
+import sofiLogo from "../../assets/lenders/sofi.svg";
+import navyFederalLogo from "../../assets/lenders/navy-federal.svg";
+
 // UX-8.3: a presentation-only lender identity lookup. Debt has no dedicated
 // "creditor" field - `debt.name` is the only free-text display field (the UI
 // already labels it "Creditor / debt name" everywhere), so this matches
@@ -70,16 +89,16 @@ const aliasRegex = (alias) => {
 // tests (Capital Grille, generic "America" text, First Financial vs
 // Firstmark, Navy Surplus vs Navy Federal, USAA vs U.S. Bank).
 const RAW_LENDERS = [
-  { lenderId: "bank_of_america", canonicalName: "Bank of America", category: "bank", aliases: ["bank of america", "boa", "bofa", "bankofamerica"] },
-  { lenderId: "capital_one", canonicalName: "Capital One", category: "bank", aliases: ["capital one", "cap one", "capitalone"] },
-  { lenderId: "chase", canonicalName: "Chase", category: "bank", aliases: ["chase", "jpmorgan chase", "jpmorgan", "jp morgan", "chase na", "chase n a"] },
-  { lenderId: "us_bank", canonicalName: "U.S. Bank", category: "bank", aliases: ["us bank", "usbank", "u s bank"] },
-  { lenderId: "wells_fargo", canonicalName: "Wells Fargo", category: "bank", aliases: ["wells fargo", "wellsfargo"] },
-  { lenderId: "citi", canonicalName: "Citi", category: "bank", aliases: ["citi", "citibank"] },
-  { lenderId: "discover", canonicalName: "Discover", category: "bank", aliases: ["discover"] },
-  { lenderId: "american_express", canonicalName: "American Express", category: "bank", aliases: ["american express", "amex"] },
+  { lenderId: "bank_of_america", canonicalName: "Bank of America", category: "bank", aliases: ["bank of america", "boa", "bofa", "bankofamerica"], logo: bankOfAmericaLogo },
+  { lenderId: "capital_one", canonicalName: "Capital One", category: "bank", aliases: ["capital one", "cap one", "capitalone"], logo: capitalOneLogo },
+  { lenderId: "chase", canonicalName: "Chase", category: "bank", aliases: ["chase", "jpmorgan chase", "jpmorgan", "jp morgan", "chase na", "chase n a"], logo: chaseLogo },
+  { lenderId: "us_bank", canonicalName: "U.S. Bank", category: "bank", aliases: ["us bank", "usbank", "u s bank"], logo: usBankLogo },
+  { lenderId: "wells_fargo", canonicalName: "Wells Fargo", category: "bank", aliases: ["wells fargo", "wellsfargo"], logo: wellsFargoLogo },
+  { lenderId: "citi", canonicalName: "Citi", category: "bank", aliases: ["citi", "citibank"], logo: citiLogo },
+  { lenderId: "discover", canonicalName: "Discover", category: "bank", aliases: ["discover"], logo: discoverLogo },
+  { lenderId: "american_express", canonicalName: "American Express", category: "bank", aliases: ["american express", "amex"], logo: americanExpressLogo },
   { lenderId: "synchrony", canonicalName: "Synchrony", category: "fintech", aliases: ["synchrony"] },
-  { lenderId: "affirm", canonicalName: "Affirm", category: "fintech", aliases: ["affirm"] },
+  { lenderId: "affirm", canonicalName: "Affirm", category: "fintech", aliases: ["affirm"], logo: affirmLogo },
   { lenderId: "paypal_credit", canonicalName: "PayPal Credit", category: "fintech", aliases: ["paypal credit", "paypal"] },
   { lenderId: "apple_card", canonicalName: "Apple Card", category: "fintech", aliases: ["apple card"] },
   { lenderId: "mohela", canonicalName: "MOHELA", category: "servicer", aliases: ["mohela"] },
@@ -92,8 +111,8 @@ const RAW_LENDERS = [
   // statementTextExtraction.js PROVIDER_DETECT table via the identical
   // \baes\b word-boundary approach - kept consistent with that precedent.
   { lenderId: "aes", canonicalName: "AES", category: "servicer", aliases: ["aes"] },
-  { lenderId: "sofi", canonicalName: "SoFi", category: "fintech", aliases: ["sofi"] },
-  { lenderId: "navy_federal", canonicalName: "Navy Federal Credit Union", category: "credit_union", aliases: ["navy federal credit union", "navy federal", "navy fcu"] },
+  { lenderId: "sofi", canonicalName: "SoFi", category: "fintech", aliases: ["sofi"], logo: sofiLogo },
+  { lenderId: "navy_federal", canonicalName: "Navy Federal Credit Union", category: "credit_union", aliases: ["navy federal credit union", "navy federal", "navy fcu"], logo: navyFederalLogo },
   { lenderId: "penfed", canonicalName: "PenFed", category: "credit_union", aliases: ["penfed", "pentagon federal"] },
   { lenderId: "ally", canonicalName: "Ally", category: "bank", aliases: ["ally", "ally bank"] },
   { lenderId: "santander", canonicalName: "Santander", category: "bank", aliases: ["santander"] },
@@ -103,17 +122,14 @@ const RAW_LENDERS = [
   { lenderId: "upstart", canonicalName: "Upstart", category: "fintech", aliases: ["upstart"] },
 ];
 
-// UX-8.3: every entry ships with logoAsset: null - see the results doc's
-// "Logo Sourcing" section for why. No real bank logo assets exist anywhere
-// in this repo, no safe/verified sourcing pipeline exists, and the task
-// explicitly forbids hotlinking a remote logo or fabricating/imitating
-// trademarked artwork. The polished initials fallback (see LenderIdentity.jsx)
-// is the complete, intentional presentation for this phase; a real local SVG
-// could be added later by setting logoAsset on an entry with zero structural
-// change to this module or its consumers.
+// UX-8.4: entries with a verified, locally-bundled asset (see
+// PROVENANCE.md) expose it as logoAsset; every other entry stays
+// logoAsset: null and renders the UX-8.3 initials fallback - "a clean
+// fallback is preferable to a questionable asset." No entry was force-fit
+// with an unverified or approximated mark.
 export const LENDER_REGISTRY = Object.freeze(RAW_LENDERS.map((entry) => Object.freeze({
   ...entry,
-  logoAsset: null,
+  logoAsset: entry.logo || null,
   aliasSet: new Set(entry.aliases),
 })));
 

@@ -11,6 +11,17 @@ describe("LENDER-ID: getLenderIdentity - Bank of America aliases", () => {
       expect(result.canonicalName).toBe("Bank of America");
     }
   );
+
+  // UX-8.4 §53.5: BOA/BOFA/Bank of America must render the identical logo,
+  // not three different assets that happen to share a canonical name.
+  it("BOA, BOFA, and Bank of America all resolve to the exact same logoAsset reference", () => {
+    const boa = getLenderIdentity("BOA");
+    const bofa = getLenderIdentity("BOFA");
+    const full = getLenderIdentity("Bank of America");
+    expect(boa.logoAsset).toEqual(expect.any(String));
+    expect(boa.logoAsset).toBe(bofa.logoAsset);
+    expect(boa.logoAsset).toBe(full.logoAsset);
+  });
 });
 
 describe("LENDER-ID: getLenderIdentity - Capital One aliases", () => {
@@ -181,9 +192,28 @@ describe("LENDER-ID: registry structure", () => {
     }
   });
 
-  it("ships with no logo assets in this phase (documented, deliberate - see results doc)", () => {
+  // UX-8.4: only lenders with a verified, provenance-documented local asset
+  // (src/assets/lenders/PROVENANCE.md) get a real logoAsset; every other
+  // entry stays null and renders the UX-8.3 initials fallback - "a clean
+  // fallback is preferable to a questionable asset."
+  it("real logoAsset only appears on the verified, provenance-documented lender set", () => {
+    const WITH_LOGO = new Set([
+      "bank_of_america", "capital_one", "chase", "us_bank", "wells_fargo",
+      "citi", "discover", "american_express", "affirm", "sofi", "navy_federal",
+    ]);
     for (const entry of LENDER_REGISTRY) {
-      expect(entry.logoAsset).toBe(null);
+      if (WITH_LOGO.has(entry.lenderId)) {
+        expect(typeof entry.logoAsset).toBe("string");
+        expect(entry.logoAsset.length).toBeGreaterThan(0);
+      } else {
+        expect(entry.logoAsset).toBe(null);
+      }
     }
+  });
+
+  it("getLenderIdentity surfaces the real logoAsset for a verified lender and null for an unverified one", () => {
+    expect(getLenderIdentity("Bank of America").logoAsset).toEqual(expect.any(String));
+    expect(getLenderIdentity("MOHELA").logoAsset).toBe(null);
+    expect(getLenderIdentity("Family Credit Union Loan").logoAsset).toBe(null);
   });
 });

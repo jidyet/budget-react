@@ -65,7 +65,10 @@ export const deriveActivityFeed = (
       title: `${debt.name} added`,
       detail: `Starting balance ${formatMoney(debt.startingBalance)}`,
       actorName: actorName(debt.createdBy),
+      actorUid: debt.createdBy || null,
       ownerName: ownerName(debt),
+      ownerId: debt.ownerId || null,
+      ownerType: debt.ownerType || null,
       dateLabel: formatShortDate(debt.createdAt),
     });
   }
@@ -87,7 +90,10 @@ export const deriveActivityFeed = (
       title: `${debt?.name || "A debt"} balance confirmed`,
       detail: formatMoney(snapshot.balance),
       actorName: actorName(snapshot.createdBy),
+      actorUid: snapshot.createdBy || null,
       ownerName: ownerName(debt),
+      ownerId: debt?.ownerId || null,
+      ownerType: debt?.ownerType || null,
       dateLabel: formatShortDate(snapshot.observedAt),
     });
   }
@@ -105,7 +111,10 @@ export const deriveActivityFeed = (
       title: `${debt?.name || "A debt"} payment recorded`,
       detail: formatMoney(event.amount),
       actorName: actorName(event.createdBy),
+      actorUid: event.createdBy || null,
       ownerName: ownerName(debt),
+      ownerId: debt?.ownerId || null,
+      ownerType: debt?.ownerType || null,
       dateLabel: formatShortDate(event.paidAt),
     });
   }
@@ -126,14 +135,126 @@ export const deriveActivityFeed = (
       id: `plan-version:${version.id}`,
       kind: "plan_version",
       debtId: null,
+      debtName: null,
+      debtType: null,
       at: version.createdAt,
       title: PLAN_VERSION_COPY[reason] || "Plan updated",
       detail,
       actorName: actorName(version.createdBy),
+      actorUid: version.createdBy || null,
       ownerName: "",
+      ownerId: null,
+      ownerType: null,
       dateLabel: formatShortDate(version.asOf || version.createdAt),
     });
   }
 
   return entries.sort(byCreatedAtDesc);
+};
+
+// ── UX-8.4: Activity Explorer support ───────────────────────────────────
+// Day-grouping and "Today"/"Yesterday" labels are deliberately LOCAL-time
+// (the viewer's own clock), not UTC like formatShortDate above -
+// "Today"/"Yesterday" are inherently a local-time concept for whoever is
+// looking at the screen. This is a new, separate helper rather than a
+// change to formatShortDate, which keeps its existing UTC behavior for its
+// existing callers.
+const localDayKey = (isoString) => {
+  const d = new Date(isoString);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+const localDayLabel = (isoString, referenceNow) => {
+  const d = new Date(isoString);
+  const today = new Date(referenceNow.getFullYear(), referenceNow.getMonth(), referenceNow.getDate());
+  const entryDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diffDays = Math.round((today.getTime() - entryDay.getTime()) / 86400000);
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  const sameYear = d.getFullYear() === referenceNow.getFullYear();
+  return d.toLocaleDateString("en-US", sameYear ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" });
+};
+
+// "2:41 PM" - local time-of-day for a single event row (never a raw
+// Firestore/ISO timestamp).
+export const formatLocalTimeLabel = (isoString) => {
+  if (!isoString) return "";
+  const d = new Date(isoString);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+};
+
+// Groups already-sorted entries into calendar-day buckets, in the SAME
+// order the entries arrived in (so a caller that already sorted newest-
+// first or oldest-first controls both the day order and the within-day
+// order by sorting before calling this - this function never re-sorts).
+export const groupActivityEntriesByLocalDay = (entries, referenceNow = new Date()) => {
+  const groups = [];
+  const byKey = new Map();
+  for (const entry of entries) {
+    const key = localDayKey(entry.at);
+    let group = byKey.get(key);
+    if (!group) {
+      group = { dayKey: key, dayLabel: localDayLabel(entry.at, referenceNow), entries: [] };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    group.entries.push(entry);
+  }
+  return groups;
+};
+
+// UX-8.4: only 4 real event kinds ever exist in this feed (see the 4 push
+// loops above) - "Debt details changed" and "Milestones" are deliberately
+// NOT offered as filter options anywhere, since no real Activity event
+// backs either today (this is documented, not a silent omission).
+export const ACTIVITY_EVENT_TYPE_OPTIONS = [
+  ["all", "All activity"],
+  ["payment_event", "Payments"],
+  ["balance_snapshot", "Balance updates"],
+  ["debt_created", "Debts added"],
+  ["plan_version", "Plan / reforecast"],
+];
+
+export const matchesEventType = (entry, eventTypeFilter = "all") =>
+  eventTypeFilter === "all" || entry.kind === eventTypeFilter;
+
+// Filters on the raw, stable actorUid - never the resolved display string,
+// so a display-name change (or two people sharing a display name) can
+// never silently change who a filter matches.
+export const matchesActor = (entry, actorFilter = "all") =>
+  actorFilter === "all" || entry.actorUid === actorFilter;
+
+// Same owner-scope semantics as the Debt Explorer's filterDebtsByOwnerScope
+// (ownership.js's effectiveOwnerType contract) - "joint"/"unassigned" match
+// by type, anything else matches by the specific member/person id. Actor
+// and owner are independent fields on the same entry and this never reads
+// actorUid.
+export const matchesOwnerScope = (entry, ownerFilter = "all") => {
+  if (ownerFilter === "all") return true;
+  if (ownerFilter === "joint" || ownerFilter === "unassigned") return entry.ownerType === ownerFilter;
+  return entry.ownerId === ownerFilter;
+};
+
+export const matchesDebt = (entry, debtFilter = "all") =>
+  debtFilter === "all" || entry.debtId === debtFilter;
+
+export const ACTIVITY_DATE_RANGE_OPTIONS = [
+  ["all", "All time"],
+  ["7d", "Last 7 days"],
+  ["30d", "Last 30 days"],
+  ["month", "This month"],
+];
+
+export const matchesDateRange = (entry, dateRangeFilter = "all", referenceNow = new Date()) => {
+  if (dateRangeFilter === "all") return true;
+  const entryDate = new Date(entry.at);
+  if (Number.isNaN(entryDate.getTime())) return false;
+  if (dateRangeFilter === "month") {
+    return entryDate.getFullYear() === referenceNow.getFullYear() && entryDate.getMonth() === referenceNow.getMonth();
+  }
+  const diffDays = Math.floor((referenceNow.getTime() - entryDate.getTime()) / 86400000);
+  if (dateRangeFilter === "7d") return diffDays >= 0 && diffDays < 7;
+  if (dateRangeFilter === "30d") return diffDays >= 0 && diffDays < 30;
+  return true;
 };

@@ -48,7 +48,7 @@ export const deriveDebtPortfolioView = (snapshot = {}) => {
   const summaryCards = [
     { key: "leftToGo", label: "Left to go", value: leftToGo, tone: "primary" },
     { key: "active", label: "Active debts", value: actionableDebts.length, tone: "neutral" },
-    { key: "review", label: "Needs review", value: reviewDebts.length, tone: "warning" },
+    { key: "review", label: "Need attention", value: reviewDebts.length, tone: "warning" },
     { key: "paidOff", label: "Paid off", value: paidOffDebts.length, tone: "success" },
   ];
 

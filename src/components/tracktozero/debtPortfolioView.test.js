@@ -42,6 +42,7 @@ describe("deriveDebtPortfolioView", () => {
     expect(view.reviewDebts.map((d) => d.id)).toEqual(["d2"]);
     expect(view.paidOffDebts.map((d) => d.id)).toEqual(["d3"]);
     expect(view.summaryCards.some((card) => card.key === "leftToGo")).toBe(true);
+    expect(view.summaryCards.find((card) => card.key === "review")?.label).toBe("Need attention");
   });
 
   it("counts joint debt once in household summaries while keeping member totals separate", () => {

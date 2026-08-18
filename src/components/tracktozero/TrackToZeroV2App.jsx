@@ -5,6 +5,7 @@ import {
   createTrackToZeroRepository,
   ensureTrackToZeroV2EmulatorActor,
   getTrackToZeroV2LocalBetaAuth,
+  TRACKTOZERO_V2_PRODUCTION_PROJECT_ID,
   TRACKTOZERO_V2_REPOSITORY_MODES,
 } from "../../services/tracktozero/repositoryRuntime";
 import { createTrackToZeroV2AsyncAppService, getUserSafeTrackToZeroError } from "../../services/tracktozero/v2AsyncApplicationService";
@@ -1210,7 +1211,16 @@ export default function TrackToZeroV2App() {
 
   const snapshot = runtimeState.snapshot;
   const workspaces = runtimeState.workspaces;
-  const productionReady = getFirebaseStatus().configured && getFirebaseConfig().projectId === "budgetapp-c9306";
+  // BETA-2 follow-up: this is a SECOND, independent gate from
+  // repositoryRuntime.js's own assertTrackToZeroV2ProductionConfig - it
+  // decides whether the AuthScreen renders at all vs. the disabled state
+  // below, before any repository is even created. Missed in the first pass
+  // of making the expected project id configurable (found by actually
+  // deploying to the real dedicated beta project and hitting the disabled
+  // state) - now reads the same runtime.allowedProductionProjectId used
+  // everywhere else, with the same default, so both gates agree.
+  const productionReady = getFirebaseStatus().configured
+    && getFirebaseConfig().projectId === (runtime.allowedProductionProjectId || TRACKTOZERO_V2_PRODUCTION_PROJECT_ID);
   const firebaseReady = isLocalBetaRuntime ? !localBetaAuthError : (!isProductionRuntime || productionReady);
   const authUnavailableMessage = isLocalBetaRuntime
     ? (localBetaAuthError || "Local beta configuration error: the local Firebase emulators are not reachable. Run `npm run emulators:v2` first.")

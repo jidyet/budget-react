@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "budgetapp-c9306"
+    "default": "budgetapp-c9306",
+    "beta": "tracktozero-beta"
   }
 }

@@ -241,12 +241,21 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
 
   const lenderGroups = groupBy === "lender" ? groupDebtsByLender(debts) : null;
   const ownerGroups = groupBy === "owner" ? groupDebtsByOwner(debts) : null;
+  const visibleGroupKeys = groupBy === "lender"
+    ? lenderGroups.filter((group) => !group.ungrouped).map((group) => group.lenderId)
+    : groupBy === "owner"
+      ? ownerGroups.map((group) => group.key)
+      : [];
+  const allGroupsCollapsed = visibleGroupKeys.length > 0 && visibleGroupKeys.every((key) => collapsedGroups.has(key));
+  const expandAll = () => setCollapsedGroups(new Set());
+  const collapseAll = () => setCollapsedGroups(new Set(visibleGroupKeys));
 
   return (
     <div style={{ display: "grid", gap: "var(--ttz-space-5, 24px)" }}>
       <div>
         <Button variant="ghost" onClick={onBack}>← All debts</Button>
-        <div style={{ marginTop: 8 }}>
+        <div style={{ textAlign: "center", marginTop: 8 }}>
+          <span aria-hidden="true" style={{ display: "inline-block", width: 40, height: 4, borderRadius: 3, background: palette.ac, marginBottom: 10 }} />
           <div style={{ ...TYPE_SCALE.pageTitle, color: palette.tx }}>{entry ? entry.label : "All debts"}</div>
           <div style={{ ...TYPE_SCALE.supporting, color: palette.tx2, marginTop: 4 }}>
             {money(categoryTotal)} total · {categoryScoped.length} account{categoryScoped.length === 1 ? "" : "s"}
@@ -303,6 +312,14 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
         </div>
       ) : groupBy === "lender" ? (
         <div style={{ display: "grid", gap: 16 }}>
+          {visibleGroupKeys.length > 0 ? (
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <Button type="button" size="sm" variant="ghost" onClick={allGroupsCollapsed ? expandAll : collapseAll}>
+                {allGroupsCollapsed ? "Expand all" : "Collapse all"}
+              </Button>
+            </div>
+          ) : null}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 16, alignItems: "start" }}>
           {lenderGroups.filter((group) => !group.ungrouped).map((group) => {
             const collapsed = collapsedGroups.has(group.lenderId);
             return (
@@ -314,7 +331,7 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
                   className="ttz-focus-ring"
                   style={{ all: "unset", display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", cursor: "pointer", boxSizing: "border-box" }}
                 >
-                  <LenderIdentity creditorName={group.debts[0].name} size="md" />
+                  <LenderIdentity creditorName={group.debts[0].name} size="lg" />
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <div style={{ textAlign: "right" }}>
                       <div style={{ ...TYPE_SCALE.body, color: palette.tx, fontWeight: 700 }}>{money(group.total)}</div>
@@ -343,6 +360,7 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
               </Card>
             );
           })}
+          </div>
           {(() => {
             const ungrouped = lenderGroups.find((group) => group.ungrouped);
             if (!ungrouped) return null;
@@ -368,6 +386,14 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
         </div>
       ) : (
         <div style={{ display: "grid", gap: 16 }}>
+          {visibleGroupKeys.length > 0 ? (
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <Button type="button" size="sm" variant="ghost" onClick={allGroupsCollapsed ? expandAll : collapseAll}>
+                {allGroupsCollapsed ? "Expand all" : "Collapse all"}
+              </Button>
+            </div>
+          ) : null}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 16, alignItems: "start" }}>
           {ownerGroups.map((group) => {
             const collapsed = collapsedGroups.has(group.key);
             return (
@@ -406,6 +432,7 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
               </Card>
             );
           })}
+          </div>
         </div>
       )}
     </div>

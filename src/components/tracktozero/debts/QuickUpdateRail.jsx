@@ -22,6 +22,15 @@ import { TYPE_SCALE, ttzPalette } from "../theme.js";
 //   moves confirmed progress.
 // Only the entry point changed (hidden behind an action instead of always
 // rendered); the underlying service calls and their meaning did not.
+//
+// UX-8.4 follow-up: previously a tall, always-vertical card living in its
+// own dedicated 320px sidebar column that ran the full height of the page -
+// direct feedback was that this reserved a whole vertical strip of mostly
+// empty space (the card itself is short) at the cost of the page's usable
+// width. Now a single horizontal bar: title on the left, both prompts (and
+// whichever form is active) flowing inline on the right, wrapping onto a
+// new line only at narrow widths. The caller (DebtsCenter.jsx) renders this
+// full-width above the main content instead of beside it.
 export default function QuickUpdateRail({ snapshot, service, refresh, runAction, writeState, canObserve }) {
   const [mode, setMode] = useState(null); // null | "payment" | "balance"
   const [payment, setPayment] = useState({ debtId: snapshot.debts[0]?.id || "", amount: "" });
@@ -49,63 +58,66 @@ export default function QuickUpdateRail({ snapshot, service, refresh, runAction,
   };
 
   return (
-    <Card variant="elevated" style={{ display: "grid", gap: 16 }}>
-      <div>
+    <Card variant="elevated" style={{ display: "flex", flexWrap: "wrap", gap: 20, alignItems: "center" }}>
+      <div style={{ minWidth: 180 }}>
         <div style={{ ...TYPE_SCALE.overline, color: palette.tx2 }}>Quick update</div>
-        <div style={{ ...TYPE_SCALE.cardTitle, color: palette.tx, marginTop: 4 }}>Keep your debts current</div>
+        <div style={{ ...TYPE_SCALE.cardTitle, color: palette.tx, marginTop: 2 }}>Keep your debts current</div>
+        {!canObserve ? (
+          <p style={{ ...TYPE_SCALE.supporting, color: palette.tx2, margin: "6px 0 0" }}>Your role is read-only for payment/balance updates.</p>
+        ) : null}
       </div>
 
-      {!canObserve ? (
-        <p style={{ ...TYPE_SCALE.supporting, color: palette.tx2 }}>Your role is read-only for payment/balance updates.</p>
+      {canObserve ? (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 20, flex: 1, alignItems: "flex-end", justifyContent: "flex-end" }}>
+          {mode !== "payment" ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ ...TYPE_SCALE.body, color: palette.tx }}>Made a payment?</span>
+              <Button type="button" onClick={() => setMode("payment")}>Record payment</Button>
+            </div>
+          ) : (
+            <form onSubmit={submitPayment} style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: 10 }}>
+              <Field label="Record payment">
+                <Select value={payment.debtId} onChange={(event) => setPayment({ ...payment, debtId: event.target.value })}>
+                  {snapshot.debts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </Select>
+              </Field>
+              <Field label="Amount">
+                <MoneyInput value={payment.amount} onChange={(event) => setPayment({ ...payment, amount: event.target.value })} />
+              </Field>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Button type="submit" variant="primary" disabled={writeState.inProgress}>
+                  {writeState.action === "record payment" ? "Recording..." : "Save payment"}
+                </Button>
+                <Button type="button" variant="ghost" onClick={() => setMode(null)}>Cancel</Button>
+              </div>
+            </form>
+          )}
+
+          {mode !== "balance" ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ ...TYPE_SCALE.body, color: palette.tx }}>Got your latest balance?</span>
+              <Button type="button" onClick={() => setMode("balance")}>Update balance</Button>
+            </div>
+          ) : (
+            <form onSubmit={submitBalance} style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: 10 }}>
+              <Field label="Update confirmed balance">
+                <Select value={balance.debtId} onChange={(event) => setBalance({ ...balance, debtId: event.target.value })}>
+                  {snapshot.debts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </Select>
+              </Field>
+              <Field label="Current balance">
+                <MoneyInput value={balance.amount} onChange={(event) => setBalance({ ...balance, amount: event.target.value })} />
+              </Field>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Button type="submit" variant="primary" disabled={writeState.inProgress}>
+                  {writeState.action === "confirm balance" ? "Saving..." : "Save balance"}
+                </Button>
+                <Button type="button" variant="ghost" onClick={() => setMode(null)}>Cancel</Button>
+              </div>
+            </form>
+          )}
+        </div>
       ) : null}
-
-      {mode !== "payment" ? (
-        <div>
-          <p style={{ ...TYPE_SCALE.body, color: palette.tx, margin: "0 0 8px" }}>Made a payment?</p>
-          <Button type="button" disabled={!canObserve} onClick={() => setMode("payment")}>Record payment</Button>
-        </div>
-      ) : (
-        <form onSubmit={submitPayment} style={{ display: "grid", gap: 10 }}>
-          <Field label="Record payment">
-            <Select value={payment.debtId} onChange={(event) => setPayment({ ...payment, debtId: event.target.value })}>
-              {snapshot.debts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </Select>
-          </Field>
-          <Field label="Amount">
-            <MoneyInput value={payment.amount} onChange={(event) => setPayment({ ...payment, amount: event.target.value })} />
-          </Field>
-          <div style={{ display: "flex", gap: 8 }}>
-            <Button type="submit" variant="primary" disabled={!canObserve || writeState.inProgress}>
-              {writeState.action === "record payment" ? "Recording..." : "Save payment"}
-            </Button>
-            <Button type="button" variant="ghost" onClick={() => setMode(null)}>Cancel</Button>
-          </div>
-        </form>
-      )}
-
-      {mode !== "balance" ? (
-        <div>
-          <p style={{ ...TYPE_SCALE.body, color: palette.tx, margin: "0 0 8px" }}>Got your latest balance?</p>
-          <Button type="button" disabled={!canObserve} onClick={() => setMode("balance")}>Update balance</Button>
-        </div>
-      ) : (
-        <form onSubmit={submitBalance} style={{ display: "grid", gap: 10 }}>
-          <Field label="Update confirmed balance">
-            <Select value={balance.debtId} onChange={(event) => setBalance({ ...balance, debtId: event.target.value })}>
-              {snapshot.debts.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </Select>
-          </Field>
-          <Field label="Current balance">
-            <MoneyInput value={balance.amount} onChange={(event) => setBalance({ ...balance, amount: event.target.value })} />
-          </Field>
-          <div style={{ display: "flex", gap: 8 }}>
-            <Button type="submit" variant="primary" disabled={!canObserve || writeState.inProgress}>
-              {writeState.action === "confirm balance" ? "Saving..." : "Save balance"}
-            </Button>
-            <Button type="button" variant="ghost" onClick={() => setMode(null)}>Cancel</Button>
-          </div>
-        </form>
-      )}
     </Card>
   );
 }

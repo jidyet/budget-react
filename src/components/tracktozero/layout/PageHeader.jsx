@@ -16,7 +16,10 @@ export default function PageHeader({ title, description, actions }) {
   return (
     <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", justifyContent: "space-between", alignItems: isMobile ? "stretch" : "flex-start", gap: 16, marginBottom: "var(--ttz-space-5, 24px)" }}>
       <div>
-        <h1 style={{ ...TYPE_SCALE.pageTitle, color: palette.tx, margin: 0 }}>{title}</h1>
+        <h1 style={{ ...TYPE_SCALE.pageTitle, color: palette.tx, margin: 0, display: "flex", alignItems: "center", gap: 12 }}>
+          <span aria-hidden="true" style={{ display: "inline-block", width: 5, height: "0.85em", borderRadius: 3, background: palette.ac }} />
+          {title}
+        </h1>
         {description ? <p style={{ ...TYPE_SCALE.body, color: palette.tx2, margin: "6px 0 0" }}>{description}</p> : null}
       </div>
       {actions ? <div style={{ display: "flex", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>{actions}</div> : null}

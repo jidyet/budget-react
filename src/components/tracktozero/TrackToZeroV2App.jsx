@@ -1136,7 +1136,21 @@ export default function TrackToZeroV2App() {
     const onPlanPath = path.startsWith("/plan");
     const onDebtsPath = path.startsWith("/debts");
     if (nextTab === "plan" && !onPlanPath) window.history.pushState({}, "", "/plan/my-plan");
-    else if (nextTab === "debts" && !onDebtsPath) window.history.pushState({}, "", "/debts");
+    else if (nextTab === "debts") {
+      // Re-clicking "Debts" while already deep in a category drill-down
+      // (e.g. /debts/credit-cards) used to no-op here, since the guard only
+      // fired when NOT already on a /debts path - the URL never changed, so
+      // DebtsCenter's own popstate listener never saw a reason to reset its
+      // destination back to the category grid. Users reflexively reach for
+      // the top nav as "go back," so this now always returns to the grid
+      // root, dispatching a synthetic popstate (mirroring
+      // navigateToPlanDestination's own pattern) since pushState alone
+      // never fires that event.
+      if (path !== "/debts") {
+        window.history.pushState({}, "", "/debts");
+        window.dispatchEvent(new PopStateEvent("popstate"));
+      }
+    }
     else if (nextTab !== "plan" && nextTab !== "debts" && (onPlanPath || onDebtsPath)) window.history.pushState({}, "", "/");
   };
 

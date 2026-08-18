@@ -9,7 +9,6 @@ import ReviewEditDebtDrawer from "./ReviewEditDebtDrawer.jsx";
 import ImportCenter from "../import/ImportCenter.jsx";
 import { deriveDebtPortfolioView } from "../debtPortfolioView.js";
 import { resolveDebtsDestination, buildDebtsPath } from "./debtsRouting.js";
-import { useIsTablet } from "../useViewport.js";
 
 // UX-6.1: replaces the monolith's inline Debts component. The root view is
 // navigation (portfolio header + owner scope + visual category grid), not a
@@ -41,7 +40,6 @@ export default function DebtsCenter({ snapshot, service, refresh, refreshReview,
   const [addDebtPrefillName, setAddDebtPrefillName] = useState("");
   const [importOpen, setImportOpen] = useState(() => initialAction === "import-statement");
   const [reviewDebtId, setReviewDebtId] = useState(null);
-  const isTablet = useIsTablet();
 
   useEffect(() => {
     if (initialAction) onInitialActionHandled?.();
@@ -120,10 +118,15 @@ export default function DebtsCenter({ snapshot, service, refresh, refreshReview,
         onAddDebt={() => setAddDebtOpen(true)}
         onImportStatement={() => setImportOpen(true)}
       />
-      <div style={{ display: "grid", gridTemplateColumns: isTablet ? "1fr" : "1fr 320px", gap: "var(--ttz-space-5, 24px)", alignItems: "start", marginTop: "var(--ttz-space-5, 24px)" }}>
-        <div>{mainContent}</div>
-        <div>{rail}</div>
-      </div>
+      {/* UX-8.4 follow-up: Quick Update previously lived in its own
+          dedicated 320px sidebar column running the full height of the
+          page - since the card itself is short, that reserved a tall strip
+          of mostly empty space at the cost of the page's usable width
+          (worse once the Debt Explorer's filter bar grew taller). It's now
+          a compact horizontal bar spanning the full width, so the main
+          content below gets the entire page width to work with. */}
+      <div style={{ marginTop: "var(--ttz-space-5, 24px)" }}>{rail}</div>
+      <div style={{ marginTop: "var(--ttz-space-5, 24px)" }}>{mainContent}</div>
       <AddDebtModal
         key={`${addDebtOpen}-${addDebtPrefillName}`}
         open={addDebtOpen}

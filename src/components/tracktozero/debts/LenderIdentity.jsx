@@ -56,6 +56,12 @@ export default function LenderIdentity({ creditorName, debtType, lastFour, disam
   const secondaryParts = [typeLabel, lastFour ? `••••${lastFour}` : ""].filter(Boolean);
   const useLogo = !!identity.logoAsset && !imageFailed;
 
+  // UX-8.4: real logos render on a plain white plate with a light shadow
+  // instead of the tinted/bordered initials-badge treatment - direct
+  // feedback was that the muted surf2 background + border + heavy padding
+  // made real marks look dull and cramped. The initials fallback keeps its
+  // original tinted/bordered look (it still needs a visible container to
+  // read as intentional, since there's no artwork filling the frame).
   const badge = (
     <span
       {...(useLogo ? {} : (showName ? { "aria-hidden": "true" } : { role: "img", "aria-label": identity.canonicalName }))}
@@ -67,13 +73,14 @@ export default function LenderIdentity({ creditorName, debtType, lastFour, disam
         width: dims.badge,
         height: dims.badge,
         borderRadius: 10,
-        background: ttzPalette.surf2,
-        border: `1px solid ${ttzPalette.border}`,
+        background: useLogo ? "#ffffff" : ttzPalette.surf2,
+        border: useLogo ? "1px solid rgba(15, 23, 42, 0.08)" : `1px solid ${ttzPalette.border}`,
+        boxShadow: useLogo ? "0 1px 3px rgba(15, 23, 42, 0.10)" : "none",
         color: ttzPalette.tx2,
         fontWeight: 700,
         fontSize: dims.fontSize,
         letterSpacing: 0.5,
-        padding: useLogo ? Math.round(dims.badge * 0.14) : 0,
+        padding: useLogo ? Math.round(dims.badge * 0.08) : 0,
         boxSizing: "border-box",
         overflow: "hidden",
       }}
@@ -83,7 +90,7 @@ export default function LenderIdentity({ creditorName, debtType, lastFour, disam
           src={identity.logoAsset}
           alt={showName ? "" : identity.canonicalName}
           onError={() => setImageFailed(true)}
-          style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
+          style={{ width: "100%", height: "100%", objectFit: "contain" }}
         />
       ) : (
         identity.initials

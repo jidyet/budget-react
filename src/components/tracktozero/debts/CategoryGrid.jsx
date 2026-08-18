@@ -49,6 +49,16 @@ function CategoryTile({ entry, breakdown, onSelect }) {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          {/* UX-8.4 follow-up: a gentle, continuous icon animation per the
+              task's "animated logos of the debt type" request - a subtle
+              breathing scale rather than a sourced animated asset (real
+              per-type animated marks would mean new licensed assets/a new
+              rendering dependency, mirroring the lender-logo sourcing
+              effort; this stays dependency-free, reusing this file's own
+              existing useReducedMotion/hover-transform pattern). The idle
+              breathe lives on the badge (outer) so it never fights the
+              hover/focus pop (inner, on the icon itself) for the same
+              `transform` property. */}
           <span
             aria-hidden="true"
             style={{
@@ -60,12 +70,23 @@ function CategoryTile({ entry, breakdown, onSelect }) {
               borderRadius: "var(--ttz-radius-md, 12px)",
               background: palette.acS || palette.surf2,
               color: palette.ac || palette.tx,
+              animation: reducedMotion ? "none" : "ttz-category-icon-breathe 3.2s ease-in-out infinite",
             }}
           >
-            <Icon size={20} aria-hidden="true" />
+            <Icon
+              size={20}
+              aria-hidden="true"
+              style={{
+                transform: !reducedMotion && active ? "scale(1.15)" : "scale(1)",
+                transition: reducedMotion ? "none" : "transform 150ms ease",
+              }}
+            />
           </span>
           {breakdown.reviewCount > 0 ? <Badge tone="warning">{breakdown.reviewCount} need attention</Badge> : null}
         </div>
+        {!reducedMotion ? (
+          <style>{"@keyframes ttz-category-icon-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }"}</style>
+        ) : null}
         <div>
           <div style={{ ...TYPE_SCALE.cardTitle, color: palette.tx }}>{entry.label}</div>
           <div style={{ ...TYPE_SCALE.supporting, color: palette.tx2, marginTop: 2 }}>

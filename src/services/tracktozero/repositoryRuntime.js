@@ -79,13 +79,24 @@ export const assertTrackToZeroV2LocalBetaConfig = ({
   return true;
 };
 
+// BETA-2: which single project id counts as "the approved production
+// project" is now a parameter (allowedProjectId), not a hardcoded read of
+// TRACKTOZERO_V2_PRODUCTION_PROJECT_ID inside this check - the constant is
+// still this function's own default, so calling it with no override behaves
+// identically to before. This lets a controlled-beta build point
+// firebaseProduction mode at a separate, dedicated beta Firebase project
+// (never at an arbitrary/misconfigured one - the fail-closed contract
+// itself is unchanged, only which one project id it's closed around is
+// configurable) without weakening what "production mode" means for real
+// production builds, which keep using the default.
 export const assertTrackToZeroV2ProductionConfig = ({
   projectId,
   configured,
   mode = TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction,
+  allowedProjectId = TRACKTOZERO_V2_PRODUCTION_PROJECT_ID,
 } = {}) => {
   if (mode !== TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction) return true;
-  if (!configured || projectId !== TRACKTOZERO_V2_PRODUCTION_PROJECT_ID) {
+  if (!configured || projectId !== allowedProjectId) {
     throw new Error("TrackToZero beta is temporarily unavailable. Production Firebase is not configured for this release.");
   }
   return true;
@@ -96,6 +107,7 @@ export const createTrackToZeroRepository = ({
   firestoreInstance = null,
   firebaseConfig = null,
   emulatorHost = "",
+  allowedProductionProjectId = TRACKTOZERO_V2_PRODUCTION_PROJECT_ID,
 } = {}) => {
   if (mode === TRACKTOZERO_V2_REPOSITORY_MODES.inMemory) {
     return new InMemoryTrackToZeroRepository(createTrackToZeroV2Seed());
@@ -107,6 +119,7 @@ export const createTrackToZeroRepository = ({
       projectId: config.projectId || status.projectId,
       configured: Boolean(firestoreInstance || productionDb) && status.configured,
       mode,
+      allowedProjectId: allowedProductionProjectId,
     });
     return new FirebaseTrackToZeroRepository(firestoreInstance || productionDb);
   }

@@ -8,6 +8,7 @@
     "emulators:v2": "node scripts/start-v2-local-emulators.mjs",
     "dev:v2-local": "vite --mode v2-local --port 5184",
     "build": "vite build",
+    "build:beta": "vite build --mode beta",
     "perf:check": "node scripts/check-bundle-budget.mjs",
     "test": "vitest run",
     "test:watch": "vitest",

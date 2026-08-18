@@ -706,6 +706,12 @@ const getRuntimeConfig = () => {
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean),
+    // BETA-2: which project id firebaseProduction mode expects to be
+    // running against. Unset (real production builds) falls through to
+    // repositoryRuntime.js's own default (TRACKTOZERO_V2_PRODUCTION_PROJECT_ID,
+    // "budgetapp-c9306") - only a beta build's own .env.beta ever sets this,
+    // to the dedicated beta project's id instead.
+    allowedProductionProjectId: env.VITE_TRACKTOZERO_V2_ALLOWED_PROJECT_ID || undefined,
   };
 };
 
@@ -715,6 +721,7 @@ const getRuntimeRepository = () => {
     mode: runtime.mode,
     firebaseConfig: runtime.firebaseConfig,
     emulatorHost: runtime.emulatorHost,
+    allowedProductionProjectId: runtime.allowedProductionProjectId,
   });
 };
 

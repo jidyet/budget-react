@@ -125,4 +125,59 @@ describe("TrackToZero v2 repository runtime", () => {
       projectId: "demo-budget-react-v2",
     })).toThrow(/Production Firebase is not configured/i);
   });
+
+  it("BETA-2: the allowed production project id defaults to TRACKTOZERO_V2_PRODUCTION_PROJECT_ID but is overridable for a dedicated beta project, and still fails closed against anything else", () => {
+    // No override supplied: identical to the pre-BETA-2 contract above.
+    expect(() => assertTrackToZeroV2ProductionConfig({
+      mode: TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction,
+      configured: true,
+      projectId: TRACKTOZERO_V2_PRODUCTION_PROJECT_ID,
+    })).not.toThrow();
+
+    // A dedicated beta project id is accepted ONLY when explicitly passed as
+    // the allowed project - it is never implicitly trusted.
+    const betaProjectId = "tracktozero-beta-example";
+    expect(() => assertTrackToZeroV2ProductionConfig({
+      mode: TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction,
+      configured: true,
+      projectId: betaProjectId,
+      allowedProjectId: betaProjectId,
+    })).not.toThrow();
+
+    // Once a beta allowedProjectId is set, the REAL production project id no
+    // longer passes - proves this never widens what's accepted, only shifts
+    // which single id is expected.
+    expect(() => assertTrackToZeroV2ProductionConfig({
+      mode: TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction,
+      configured: true,
+      projectId: TRACKTOZERO_V2_PRODUCTION_PROJECT_ID,
+      allowedProjectId: betaProjectId,
+    })).toThrow(/Production Firebase is not configured/i);
+
+    // A stray/misconfigured third project id is rejected even with an
+    // explicit beta allowedProjectId in play.
+    expect(() => assertTrackToZeroV2ProductionConfig({
+      mode: TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction,
+      configured: true,
+      projectId: "some-other-project",
+      allowedProjectId: betaProjectId,
+    })).toThrow(/Production Firebase is not configured/i);
+  });
+
+  it("BETA-2: createTrackToZeroRepository's allowedProductionProjectId threads through to the fail-closed check", () => {
+    const betaProjectId = "tracktozero-beta-example";
+    const fakeDb = { fake: true };
+    expect(() => createTrackToZeroRepository({
+      mode: TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction,
+      firestoreInstance: fakeDb,
+      firebaseConfig: { projectId: betaProjectId },
+      allowedProductionProjectId: betaProjectId,
+    })).not.toThrow();
+    expect(() => createTrackToZeroRepository({
+      mode: TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction,
+      firestoreInstance: fakeDb,
+      firebaseConfig: { projectId: "some-other-project" },
+      allowedProductionProjectId: betaProjectId,
+    })).toThrow(/Production Firebase is not configured/i);
+  });
 });

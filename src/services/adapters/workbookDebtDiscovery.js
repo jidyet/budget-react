@@ -111,12 +111,30 @@ export const normalizeCreditorName = (value = "") => {
   return compactKey(text);
 };
 
+// BETA-3.1 bug fix (found via the real-workbook Gate-10 truth test): a
+// trailing parenthetical is not always an owner - some real workbooks use
+// it as a debt-type/category descriptor instead (e.g. "SOFI (Personal
+// Loan)", "CITI (Credit Card)"), while ANOTHER sheet in the SAME workbook
+// names the exact same real account with the owner in parens instead
+// (e.g. Balance Tracker's "SOFI (Babajide)"). Before this fix, both
+// parenthetical styles were treated as owner suggestions - "Personal
+// Loan"/"Credit Card" is not junk and not BUSINESS_RE, so it sailed
+// through unchallenged. Since entityKeyFor folds ownerSuggestion into the
+// entity key, "SOFI"+owner:"Babajide" and "SOFI"+owner:"Personal Loan"
+// produced two DIFFERENT keys for the same real account, splitting one
+// debt's evidence across two separate half-populated candidates instead
+// of consolidating it into one well-evidenced candidate. Rejecting a
+// category-vocabulary parenthetical (reusing the exact same DEBT_CATEGORY_RE/
+// BILL_CATEGORY_RE this file already uses for row classification, so this
+// stays generalized rather than a one-off word list) fixes the split at
+// its root: neither sheet contributes a bogus owner, so the entity keys
+// match again.
 export const parseOwnerSuggestion = (label = "") => {
   const raw = safeString(label);
   if (!raw || JUNK_OWNER_RE.test(raw)) return "";
   const paren = raw.match(/\(([^)]+)\)\s*$/);
   const candidate = safeString(paren?.[1] || "");
-  if (!candidate || JUNK_OWNER_RE.test(candidate) || BUSINESS_RE.test(candidate)) return "";
+  if (!candidate || JUNK_OWNER_RE.test(candidate) || BUSINESS_RE.test(candidate) || DEBT_CATEGORY_RE.test(candidate) || BILL_CATEGORY_RE.test(candidate)) return "";
   return candidate;
 };
 
@@ -514,7 +532,25 @@ const extractRowsFromSheet = ({ topologySheet, sheet, XLSX, fileName }) => {
       const effectiveCategoryText = categoryText || currentSectionLabel;
       const debtType = normalizeDebtType(effectiveCategoryText, `${accountText} ${topologySheet.sheetName}`);
       const dueCell = columnMap.dueDate != null ? sheet[cellRef(XLSX, r, columnMap.dueDate)] : null;
-      const dueDate = dueCell ? normalizeDateField(dueCell.w ?? dueCell.v) || (Number.isInteger(Number(dueCell.v)) ? `day:${Number(dueCell.v)}` : null) : null;
+      // BETA-3.1 bug fix (found via code review while verifying the real
+      // workbook's Due Date column, prompted by the Gate-10 truth test): a
+      // due-date cell holding a bare day-of-month integer (no year/month -
+      // e.g. a spreadsheet that just says "15" for "due on the 15th") was
+      // meant to fall back to this "day:N" encoding, but never actually
+      // reached it - normalizeDateField(15) doesn't fail, it silently
+      // succeeds by treating the bare number as a millisecond timestamp
+      // (JS's own `new Date(15)` behavior), producing a nonsense
+      // "1970-01-01" due date instead. `cellDates: true` is passed to
+      // XLSX.read for this whole module, so a GENUINE date cell's `.v` is
+      // always a real Date instance (typeof "object"), never a bare
+      // number - checking typeof + a 1-31 range up front distinguishes a
+      // true day-of-month cell from a real date with no ambiguity, and
+      // fixes the check by making it the FIRST test rather than an
+      // unreachable fallback after a normalizer that never actually fails
+      // for small numbers.
+      const dueCellRawValue = dueCell?.v;
+      const isBareDayOfMonth = typeof dueCellRawValue === "number" && Number.isInteger(dueCellRawValue) && dueCellRawValue >= 1 && dueCellRawValue <= 31;
+      const dueDate = dueCell ? (isBareDayOfMonth ? `day:${dueCellRawValue}` : normalizeDateField(dueCell.w ?? dueCell.v)) : null;
       const balanceCells = [columnMap.currentBalance, columnMap.startingBalance]
         .filter((col) => col != null)
         .map((col) => ({ col, cell: sheet[cellRef(XLSX, r, col)], header: headerCells[col]?.text || "" }))
@@ -532,7 +568,28 @@ const extractRowsFromSheet = ({ topologySheet, sheet, XLSX, fileName }) => {
         };
       });
       const aprCell = columnMap.apr != null ? sheet[cellRef(XLSX, r, columnMap.apr)] : null;
-      const apr = normalizeAprField(aprCell?.w ?? aprCell?.v);
+      let apr = normalizeAprField(aprCell?.w ?? aprCell?.v);
+      // BETA-3.1 bug fix (found via the real-workbook Gate-10 truth test): a
+      // CROSS-SHEET formula that resolves to exactly 0 is frequently an
+      // artifact of a broken/misaligned reference - e.g. a monthly sheet's
+      // APR cell references a specific Balance Tracker row, but that row
+      // number no longer lines up with the intended account (rows were
+      // inserted/removed in one sheet but not the other), and the formula
+      // ends up pointing at a genuinely blank cell. Excel evaluates a blank
+      // referenced cell as numeric 0, and normalizeAprField (correctly, for
+      // its normal contract) reports any literal 0 as confident "no_interest" -
+      // but nothing here actually proves the creditor's real APR is 0%, only
+      // that the formula's target cell happened to be empty. This is exactly
+      // the "blank -> 0%" outcome the financial-truth contract forbids,
+      // just arriving indirectly through the SOURCE WORKBOOK's own formula
+      // rather than through this parser. A LITERAL (non-formula) 0, or a
+      // same-sheet formula's 0, is unaffected - only a cross-sheet
+      // reference resolving to exactly 0 gets downgraded back to unknown,
+      // so a genuinely-entered 0% APR (the common case) still reports
+      // confidently.
+      if (apr.aprStatus === "no_interest" && aprCell?.f && formulaReferences(aprCell.f).length) {
+        apr = { apr: null, aprStatus: "unknown" };
+      }
       const minimumCells = (columnMap.minimumPaymentColumns || [columnMap.minimumPayment])
         .filter((col) => col != null)
         .map((col) => ({ col, cell: sheet[cellRef(XLSX, r, col)] }))
@@ -550,7 +607,20 @@ const extractRowsFromSheet = ({ topologySheet, sheet, XLSX, fileName }) => {
         categoryText: effectiveCategoryText,
         sheetName: topologySheet.sheetName,
         hasBalanceEvidence: balanceEvidence.some((item) => item.value != null),
-        hasAprEvidence: apr.aprStatus !== "unknown" || !!aprCell,
+        // BETA-3.1 bug fix (found while building the sanitized structural
+        // regression fixture): `|| !!aprCell` treated the mere PRESENCE of
+        // an APR-column cell object as evidence, even when that cell's own
+        // value was empty/blank - a real household workbook column layout
+        // where an "Interest Rate" column exists but is simply left blank
+        // for ordinary bill rows (utilities, storage, subscriptions...)
+        // would count as "APR evidence" purely because a cell happened to
+        // exist there, sometimes pushing an ordinary bill over the
+        // debt-signal threshold into a fake Debt candidate.
+        // apr.aprStatus !== "unknown" is already the complete, correct
+        // signal - normalizeAprField already returns "unknown" for
+        // null/empty/unparseable values, so the additional `!!aprCell`
+        // fallback added no real capability, only this bug.
+        hasAprEvidence: apr.aprStatus !== "unknown",
         hasMinimumEvidence: minimumPayment != null,
       });
       const sectionHeadingContext = currentSectionLabel ? matchSectionHeading(currentSectionLabel) : null;

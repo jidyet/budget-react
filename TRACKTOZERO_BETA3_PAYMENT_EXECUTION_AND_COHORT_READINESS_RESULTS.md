@@ -222,3 +222,75 @@ Every constraint from this phase's governing instructions was followed: work hap
 - **Gate 10**: server-enforced access control proven both by a 16-test automated emulator suite and by live QA against the real deployed environment (which found and fixed one real defect along the way) — self-serve signup is closed, invite acceptance requires both a valid invite and beta approval, and the only way onto the allowlist is the operator CLI, which cannot reach production even accidentally.
 - **Full automated validation**: green across every suite (Section 5).
 - **Zero real tester data, emails, or invitations exist anywhere in this phase's output.**
+
+## 11. REAL-WORKBOOK XLSX VALIDATION (BETA-3.1)
+
+Gate 10 was held pending a mandatory real-world import truth test: running the product owner's own real household budget workbook through TrackToZero's actual XLSX import pipeline before any real tester ever touches it. Full detail in the dedicated `TRACKTOZERO_BETA3_1_REAL_WORKBOOK_IMPORT_RESULTS.md` report; summarized here.
+
+**The real workbook itself was never committed, copied into this repository, uploaded to production, or persisted as authoritative Debt data anywhere.** It lives only at a private, untracked path outside `budget-react`, was read locally for analysis, and was uploaded exactly once (twice, for a before/after fix comparison) to the isolated `tracktozero-beta` project via a synthetic, isolated QA account that was fully deleted afterward, stopping explicitly before any "add these debts" confirmation.
+
+### 11.1 Workbook structure — verified, not assumed
+
+14 sheets (January–December, Balance Tracker, Bank Holidays), exactly as expected. January is confirmed as a genuine master sheet (its own header row contains an explicit "MASTER SHEET — edit here, other months update automatically" note). February–December are confirmed almost entirely formula-derived from January via cross-sheet references (e.g. one sampled month's Due Date column: 28/28 cells formula-derived, 100% cross-sheet). Balance Tracker's `Adj Due Date`-equivalent bank-holiday logic (`WORKDAY(DueDate-1, 1, BankHolidayDates)`) was confirmed directly from the workbook's own formulas — `Due Date` and `Adj Due Date` are independent columns; the importer's header-alias matching already used exact-string matching, so `Adj Due Date` was never at risk of being read as the due-date source.
+
+### 11.2 Before/after: running the CURRENT importer against the real workbook
+
+Before any fix: 53 candidate debts, 412 correctly-excluded non-debt rows (Insurance 97 / Subscriptions 61 / Home expenses 109 / Utilities 25 / Storage 120), 0 ambiguous items, 0 bare section-heading/subtotal rows leaked into either bucket — the existing structural-row exclusion already handled this real workbook's exact vocabulary correctly. 17 of the 53 candidates were sourced only from Balance Tracker, never merged with a matching monthly-sheet candidate — the first sign of the split-identity bug described below.
+
+### 11.3 Five real, generalized bugs found and fixed
+
+None of these were filename-specific hacks; all are covered by new synthetic regression tests using fabricated identities (Alex/Jordan/Test Business) and fabricated values.
+
+1. **Owner-suggestion false positive** (`parseOwnerSuggestion`, `workbookDebtDiscovery.js`): a debt-type/category parenthetical (e.g. "SOFI (Personal Loan)") was indistinguishable from a real owner name (e.g. Balance Tracker's "SOFI (Babajide)" for the exact same account), so the same real account's identity key differed between sheets and split into two half-evidenced candidates. Fixed by rejecting category vocabulary (reusing the file's own existing `DEBT_CATEGORY_RE`/`BILL_CATEGORY_RE`) as a valid owner suggestion.
+2. **A cross-sheet formula APR resolving to exactly 0 was reported as confident "no_interest"**: a broken/misaligned formula in the source workbook (found via direct inspection: the identity-bearing Balance Tracker row and the row the APR formula actually referenced were two different, unrelated rows) resolved to Excel's own "blank cell = 0" convention. Downgraded to "unknown" specifically for cross-sheet-formula-derived zeros, never for a literal or same-sheet-formula zero (which still correctly report confident 0%).
+3. **A bare day-of-month due-date cell (no year/month) was silently misread as 1970-01-01**: `new Date(15)` succeeds (treating 15 as milliseconds since epoch) rather than failing, so an already-anticipated `"day:N"` fallback path was unreachable. Fixed at the detection point (bare-integer check now runs before date parsing, not after) and completed the previously half-built `"day:N"` handling all the way through to `Debt.dueDay` and the Review UI's display copy.
+4. **A merely-present-but-empty APR cell was counted as APR evidence**, capable of pushing an ordinary bill (in a section that happens to have an Interest Rate column, left blank for that row) over the threshold into a fake debt candidate. Found while building the sanitized structural fixture. The redundant `|| !!aprCell` fallback was removed; `apr.aprStatus !== "unknown"` alone was already complete and correct.
+5. **The Review candidate list displayed "$0.00" for an unresolved balance** instead of indicating "unknown" — found via a live screenshot of the real workbook's actual Review screen, where 41 of 45 needs-review candidates showed a misleading "$0.00." Fixed to show "Balance unknown" whenever `balanceStatus !== "confirmed"`.
+
+Bug 5 was found and fixed *after* the first live pass against the real workbook and *before* the second, giving a genuine live before/after comparison against the actual deployed site (not just local tests): "$0.00" appeared 41 times before the fix and 0 times after (the only two remaining occurrences are a legitimately-zero "Total confirmed balance" summary line, since nothing had been approved yet).
+
+### 11.4 Financial-truth contracts re-proven, specifically against the real workbook's own structure
+
+Same lender ≠ same Debt (two distinct Aidvantage student loan rows stayed separate, never merged); same account repeated across 12 monthly sheets ≠ 12 Debts (entity-key consolidation correctly reduced 12-13 sheet-sources down to one candidate per real account); formula-derived balance ≠ automatically-confirmed observed truth (every formula/projected-sourced balance stayed `balanceStatus: "unresolved"`); missing/unresolved balance never displayed as $0 (bug 5 above); unknown APR never silently became 0% (bug 2 above, plus the pre-existing `-1`-sentinel discipline); Business section membership required real debt evidence, not just section placement (a literal "BUSINESS" heading and an ordinary "Business storage fee" both correctly excluded, while genuine business credit remained eligible with a scope-confirmation flag); free-text owner suggestions (including "Stallion," correctly recognized as a business marker via the pre-existing `BUSINESS_RE`) never became verified workspace membership.
+
+### 11.5 Sanitized structural regression fixture
+
+`src/services/adapters/__fixtures__/householdBudgetStructural.fixture.xlsx` (new, committed) — a fully synthetic household budget (fabricated identities: Alex, Jordan, Test Business; fabricated dollar amounts) reproducing every real structural challenge found above: the master-sheet note, formula-derived monthly sheets, a deliberately-misaligned cross-sheet formula (reproducing bug 2 exactly), the split-identity naming pattern (reproducing bug 1 exactly), business debt alongside an ordinary business bill, and subtotal/section-heading rows throughout. Verified end-to-end through the actual public `readExcelFileToCandidates` entry point (the same call a real upload makes) in a new locked-in regression test, plus 9 additional targeted synthetic tests for each specific bug. No real financial values appear anywhere in this file or the tests that use it.
+
+### 11.6 Live Gate-10 QA against the REAL workbook (tracktozero-beta only)
+
+Two full live passes via a synthetic, isolated QA account (approved through `tools/betaAccess.cjs`, fully deleted afterward): Upload → Parse → Review, explicitly stopping before "Add these debts to TrackToZero" both times. Zero console errors, zero unexpected network requests, either pass. Final live Review summary matched the local scan exactly: 465 financial items analyzed, 53 possible debts (8 ready, 45 need review), $41,292.13 found in file with explicit "Not saved yet — only official after you approve it" language, 412 ordinary bill/expense rows correctly ignored.
+
+A separate, unrelated inventory of leftover synthetic accounts/workspaces from BETA-2's own earlier live testing was discovered during this phase's own cleanup pass (25 Auth accounts, 21 workspaces) — flagged to the product owner before deleting (a genuine bulk destructive action, even though scoped to synthetic data) and removed with explicit approval, preserving only the real owner's own account/workspace untouched.
+
+### 11.7 Synthetic persistence test
+
+Using the sanitized fixture (never the real workbook) through a full authenticated flow: Upload → Parse → Review → Confirm → create real Debts + opening BalanceSnapshots → Home (Upcoming Payments renders) → Debts (no structural/subtotal rows ever appeared as debt cards) → Plan (renders without error) → re-login → hard refresh — data persisted correctly at every step, never regressed to onboarding. Direct Firestore inspection of the resulting Debt documents confirmed real, correct balances/APRs/due-days/business-exclusion, matching what Review had shown. Fully cleaned up afterward (synthetic workspace, debts, balance snapshots, Auth account, allowlist entry all deleted; verified `beta_allowlist` empty and only the real owner's account/workspace remain).
+
+### 11.8 Payment execution integration re-verified
+
+The sanitized fixture's due dates (including the bare-day-of-month case) flowed correctly through `NormalizedImportCandidate → Review → Debt.dueDay → paymentTiming.js → Home's Upcoming Payments`, using the deterministic 2026-08-18 as-of date established in BETA-3. Required-payment timing remained distinct from the extra-payoff-target concept throughout — nothing in this phase's import fixes touched that separation.
+
+### 11.9 Full validation re-run after all fixes
+
+| Check | Result |
+|---|---|
+| Unit tests | **888/888 passed** (up from 876 pre-BETA-3.1, +12 new tests) |
+| Lint | 0 errors, same 4 pre-existing warnings |
+| Firestore legacy | 12/12 |
+| Firestore V2 (production `firestore.rules`) + parity | 69/69 both, zero drift |
+| Firestore beta allowlist | 16/16 |
+| Build (production + beta) | both green |
+| `npm audit --omit=dev` | 0 vulnerabilities |
+| `npm run perf:check` | PASS — TrackToZero V2 bundle 444.60 kB / 450 kB budget (unchanged from before this phase; these were logic fixes, no new dependencies) |
+| Live beta console/network | 0 errors, 0 unexpected requests, both real-workbook passes and the persistence test |
+
+### 11.10 Production non-touch proof
+
+`firestore.rules` (production's file) was not modified this phase — re-verified via the same 69-test V2 parity suite passing against it unchanged. No deploy command in this phase targeted anything other than the explicitly-verified `tracktozero-beta` literal project id (`scripts/deploy-beta.mjs`'s existing Gate 1 check). `budgetapp-c9306`/`tracktozero.app` were never referenced by any command executed this phase.
+
+### 11.11 Remaining known limitations (workbook-internal, safely surfaced, non-blocking)
+
+The real workbook's own LINE OF CREDIT section has a genuine row-count mismatch between January (3 accounts) and its own monthly formula template (2 rows before the subtotal) — one real account is only ever sourced from January + Balance Tracker (2-3 sources instead of 12-13), correctly landing as a low-confidence, review-blocking candidate rather than a fabricated high-confidence one. Several same-lender-different-naming-convention pairs remain as separate NEEDS REVIEW candidates by design, since the workbook itself doesn't provide unambiguous cross-sheet identity to merge them safely — per the governing policy, a workbook-internal inconsistency that is safely surfaced as "needs review" is an acceptable outcome, never one that must be silently and confidently resolved.
+
+**Gate 10 import status: PASS.**

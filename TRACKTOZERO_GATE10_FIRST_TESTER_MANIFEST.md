@@ -37,3 +37,26 @@ See `TRACKTOZERO_BETA3_PAYMENT_EXECUTION_AND_COHORT_READINESS_RESULTS.md` Sectio
 ## 5. Explicitly not done in this phase
 
 No real tester was invited. No real tester email was added to `beta_allowlist`. No real tester email appears anywhere in this manifest, the results report, the tester guide, or any commit in this phase.
+
+## 6. REAL-WORKBOOK IMPORT GATE (BETA-3.1)
+
+Gate 10 was held after the above was already complete, pending a mandatory real-world import truth test against the product owner's own household workbook. Full detail: `TRACKTOZERO_BETA3_1_REAL_WORKBOOK_IMPORT_RESULTS.md`.
+
+| Item | Status |
+|---|---|
+| Real XLSX tested | **YES** — the product owner's actual private workbook, twice (before/after fix), live against `tracktozero-beta` |
+| Raw workbook committed | **NO** — remains at a private, untracked path outside this repository |
+| Production used | **NO** — every command this phase targeted the explicitly-verified `tracktozero-beta` literal project id only |
+| Real workbook persisted as authoritative Debt | **NO** — confirmed via direct Firestore inspection; the only Firestore trace it ever left (one `import_batches` document, containing candidate data since Review must survive a reload) was deleted along with the synthetic QA workspace that created it |
+| Sanitized regression fixture | **YES** — `src/services/adapters/__fixtures__/householdBudgetStructural.fixture.xlsx`, fully synthetic, committed |
+| Workbook structural parser verified | **YES** — master sheet, formula-derived monthly sheets, Balance Tracker, Bank Holidays, all confirmed against the real file's actual structure |
+| Formula provenance verified | **YES** — including a real cross-sheet-formula-to-blank-cell bug found and fixed |
+| Repeated month dedupe verified | **YES** — entity-key consolidation correctly reduces 12-13 sheet-sources to one candidate per real account |
+| Structural row exclusion verified | **YES** — zero section-heading/subtotal rows leaked into candidates or non-debt items, both before and after fixes |
+| Recurring non-debt exclusion verified | **YES** — 412 real bill/expense rows correctly excluded every pass |
+| Business debt classification verified | **YES** — genuine business credit retained (scope-flagged), ordinary business bills excluded |
+| Due-date mapping verified | **YES** — `Due Date` used, `Adj Due Date` confirmed never used, plus a new bare-day-of-month fix |
+| Payment timing verified | **YES** — re-verified end-to-end through the sanitized fixture and the deterministic 2026-08-18 as-of date |
+| **Gate-10 import status** | **PASS** |
+
+Five real, generalized bugs were found and fixed this phase (owner-suggestion false positive, cross-sheet-formula-derived 0% APR, bare-day-of-month due date, present-but-empty APR cell counted as evidence, and a Review-UI "$0.00"-for-unresolved-balance display bug) — see the dedicated report for full detail. Zero real tester emails were requested, added, or discussed at any point during this sub-phase either.

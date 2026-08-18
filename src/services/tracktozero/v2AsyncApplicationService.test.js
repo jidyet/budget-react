@@ -709,6 +709,20 @@ describe("TrackToZero v2 async application service: DATA-1B import reconciliatio
     expect(repository.listDebts("personal-seed")).toHaveLength(beforeCount + 1);
   });
 
+  it("BETA-3.1: a bare day-of-month due date ('day:N', no calendar year/month) becomes the correct Debt.dueDay, not a garbage date", async () => {
+    const { repository, service } = makeService();
+    const batch = await service.createImportBatch("personal-seed", {
+      sourceType: "excel",
+      sourceFilename: "bare-day.xlsx",
+      candidates: [importCandidate({ candidateId: "bare-day-1", accountReferenceSafe: "", creditorName: "Bare Day Card", accountName: "Bare Day Card", dueDate: "day:15" })],
+    });
+    await service.resolveImportCandidateMatch("personal-seed", batch.id, "bare-day-1", { decision: "new_debt" });
+    const { createdDebts } = await service.commitImportBatch("personal-seed", batch.id);
+    expect(createdDebts).toHaveLength(1);
+    expect(createdDebts[0].dueDay).toBe(15);
+    expect(repository.listDebts("personal-seed").find((debt) => debt.id === createdDebts[0].id).dueDay).toBe(15);
+  });
+
   it("persists an unsure/needs-review decision across reload and commits no authoritative mutation", async () => {
     const { repository, service } = makeService();
     const beforeCount = repository.listDebts("personal-seed").length;

@@ -106,6 +106,16 @@ const parseAsOf = (asOf) => {
 const dueDayFromCandidate = (candidate = {}) => {
   if (candidate.dueDay) return Number(candidate.dueDay);
   if (!candidate.dueDate) return null;
+  // BETA-3.1: a workbook due-date cell with no year/month (a bare
+  // day-of-month) arrives here as "day:N" (see workbookDebtDiscovery.js) -
+  // there is no calendar date to parse, so this must be read directly
+  // rather than handed to `new Date(...)`, which would silently produce
+  // an unrelated (and wrong) day via its own string-parsing fallback.
+  const dayPrefixMatch = /^day:(\d{1,2})$/.exec(String(candidate.dueDate));
+  if (dayPrefixMatch) {
+    const day = Number(dayPrefixMatch[1]);
+    return day >= 1 && day <= 31 ? day : null;
+  }
   const parsed = new Date(candidate.dueDate);
   return Number.isNaN(parsed.getTime()) ? null : parsed.getUTCDate();
 };

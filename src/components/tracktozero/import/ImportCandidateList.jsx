@@ -35,7 +35,17 @@ function CandidateRow({ candidate, active, onSelect }) {
         <div style={{ ...TYPE_SCALE.supporting, color: palette.tx, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {candidate.accountName || "Unnamed"}
         </div>
-        <div style={{ ...TYPE_SCALE.caption, color: palette.tx2 }}>{money(candidate.currentBalance)}</div>
+        {/* BETA-3.1 bug fix (found via the live real-workbook Gate-10 truth
+            test): currentBalance is a placeholder 0 - never a real
+            observed amount - whenever balanceStatus isn't "confirmed"
+            (see candidateFromGroup in workbookDebtDiscovery.js). This row
+            used to render that placeholder through money() unconditionally,
+            showing "$0.00" for an account whose true balance is entirely
+            unknown - visually implying a confirmed zero exactly where none
+            exists. */}
+        <div style={{ ...TYPE_SCALE.caption, color: candidate.balanceStatus === "confirmed" ? palette.tx2 : palette.wa }}>
+          {candidate.balanceStatus === "confirmed" ? money(candidate.currentBalance) : "Balance unknown"}
+        </div>
       </span>
     </button>
   );

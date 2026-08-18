@@ -8,6 +8,17 @@ import Select from "../ui/Select.jsx";
 import Field from "../ui/Field.jsx";
 import { ttzPalette, TYPE_SCALE } from "../theme.js";
 import { formatMoney, formatPercent } from "../formatting.js";
+// BETA-3.1: a workbook due-date cell that holds a bare day-of-month
+// integer (e.g. "15" meaning "due on the 15th") - rather than a full
+// calendar date - is encoded upstream as "day:15" (see
+// workbookDebtDiscovery.js), since there is no year/month to anchor a
+// real date to. Displaying that raw encoding verbatim would read as a
+// parser glitch; this renders it as the plain-language day-of-month
+// phrasing a person actually typed the number to mean.
+const formatDueDateDisplay = (value) => {
+  const dayMatch = /^day:(\d{1,2})$/.exec(String(value || ""));
+  return dayMatch ? `Day ${dayMatch[1]} of each month` : value;
+};
 import { REVIEW_TYPES } from "../../../services/tracktozero/reviewDomain.js";
 import { matchImportedOwnerToIdentity } from "../../../domain/tracktozero/personIdentity.js";
 import { getAssignableDebtOwners } from "../../../domain/tracktozero/ownership.js";
@@ -481,7 +492,7 @@ function ConfirmedEvidenceSummary({ item }) {
   if (!item.types.includes(REVIEW_TYPES.balanceConfirmation) && candidate.currentBalance != null) rows.push(["Balance", formatMoney(candidate.currentBalance)]);
   if (!item.types.includes(REVIEW_TYPES.aprConfirmation) && candidate.aprStatus === "known") rows.push(["APR", formatPercent(candidate.apr)]);
   if (!item.types.includes(REVIEW_TYPES.minimumPaymentConfirmation) && candidate.minimumPayment != null) rows.push(["Minimum due", formatMoney(candidate.minimumPayment)]);
-  if (!item.types.includes(REVIEW_TYPES.dueDateConfirmation) && candidate.dueDate) rows.push(["Due date", candidate.dueDate]);
+  if (!item.types.includes(REVIEW_TYPES.dueDateConfirmation) && candidate.dueDate) rows.push(["Due date", formatDueDateDisplay(candidate.dueDate)]);
   if (candidate.debtType && candidate.debtType !== "other") rows.push(["Debt type", candidate.debtType.replace(/_/g, " ")]);
   if (!rows.length) return null;
   return (

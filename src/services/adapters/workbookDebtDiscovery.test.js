@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import * as XLSX from "xlsx";
-import { discoverWorkbookDebtCandidates, EVIDENCE_TRUTH, CLASSIFICATIONS, SCOPE_SUGGESTIONS } from "./workbookDebtDiscovery.js";
+import { discoverWorkbookDebtCandidates, parseOwnerSuggestion, EVIDENCE_TRUTH, CLASSIFICATIONS, SCOPE_SUGGESTIONS } from "./workbookDebtDiscovery.js";
 import { readExcelFileToCandidates } from "./excelImportReader.js";
 import { FINANCIAL_ITEM_TYPES } from "../../domain/tracktozero/financialItemTaxonomy.js";
 import { HOUSEHOLD_BUDGET_LARGE_ROWS } from "./__fixtures__/householdBudgetLarge.fixture.js";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
+
+const FIXTURES_DIR = `${dirname(fileURLToPath(import.meta.url))}/__fixtures__`;
 
 const addSheet = (wb, name, rows) => {
   const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -407,6 +412,198 @@ describe("DATA-1A workbook debt discovery", () => {
     expect(byLabel("Storage bill").financialItemType).toBe(FINANCIAL_ITEM_TYPES.storageExpense);
     expect(byLabel("Monthly Savings").financialItemType).toBe(FINANCIAL_ITEM_TYPES.savings);
     expect(byLabel("EagleView income").financialItemType).toBe(FINANCIAL_ITEM_TYPES.income);
+  });
+
+  // BETA-3.1: bugs found via a real household workbook's actual structure -
+  // fixed generically, verified here with synthetic data only.
+  describe("BETA-3.1: real-workbook cross-sheet identity/provenance bugs", () => {
+    it("WB-real-01: a debt-type/category parenthetical is never mistaken for an owner suggestion", () => {
+      expect(parseOwnerSuggestion("SOFI (Personal Loan)")).toBe("");
+      expect(parseOwnerSuggestion("CITI (Credit Card)")).toBe("");
+      expect(parseOwnerSuggestion("MOHELA (Student Loan)")).toBe("");
+      expect(parseOwnerSuggestion("WELLS FARGO (Line of Credit)")).toBe("");
+      expect(parseOwnerSuggestion("Auto Insurance (Insurance)")).toBe("");
+      // A genuine person's name in parens is unaffected.
+      expect(parseOwnerSuggestion("SOFI (Babajide)")).toBe("Babajide");
+      expect(parseOwnerSuggestion("SOFI (Kristina)")).toBe("Kristina");
+    });
+
+    it("WB-real-02: a category-descriptor parenthetical never becomes a candidate's ownerSuggestion field", () => {
+      const wb = XLSX.utils.book_new();
+      addSheet(wb, "Sheet1", [
+        ["Account", "Balance", "APR", "Minimum Payment"],
+        ["SOFI (Personal Loan)", 5000, "11.5%", 255],
+      ]);
+      const { candidates } = discoverWorkbookDebtCandidates({ workbook: wb, XLSX, fileName: "sofi.xlsx", importBatchId: "batch" });
+      const sofi = byName(candidates, "SOFI");
+      expect(sofi).toBeTruthy();
+      expect(sofi.ownerSuggestion).toBe("");
+    });
+
+    it("WB-real-03: a cross-sheet formula APR that resolves to exactly 0 is treated as unknown, not confident no_interest", () => {
+      const wb = XLSX.utils.book_new();
+      addSheet(wb, "Balance Tracker", [
+        ["Account / Cardholder", "APR", "Minimum Payment", "Balance"],
+        ["Real Account", "18.5%", 100, 3000],
+      ]);
+      addSheet(wb, "January", [
+        ["Expense", "Amount", "Due Date", "Interest Rate", "Balance"],
+        // Formula references a Balance Tracker cell that is blank (row 9 has
+        // nothing in column B) - simulating a broken/misaligned cross-sheet
+        // reference exactly like the real workbook's Chase-LOC row, which
+        // pointed at the wrong (blank) Balance Tracker row.
+        ["Real Account", 100, "2026-01-15", { f: "'Balance Tracker'!B9", v: 0 }, 3000],
+      ]);
+      const { candidates } = discoverWorkbookDebtCandidates({ workbook: wb, XLSX, fileName: "misaligned.xlsx", importBatchId: "batch" });
+      const account = byName(candidates, "Real Account");
+      expect(account).toBeTruthy();
+      // The January row's own APR evidence (cross-sheet formula -> 0) must
+      // not be confidently "no_interest" - but the Balance Tracker row's
+      // OWN literal 18.5% is still real, known evidence for the same
+      // consolidated candidate.
+      expect(account.aprStatus).toBe("known");
+      expect(account.apr).toBeCloseTo(0.185);
+    });
+
+    it("WB-real-04: a cross-sheet formula APR resolving to 0 with NO corroborating evidence anywhere stays unknown, never a fabricated 0%", () => {
+      const wb = XLSX.utils.book_new();
+      addSheet(wb, "January", [
+        ["Expense", "Amount", "Due Date", "Interest Rate", "Balance"],
+        ["Only Sourced Here", 100, "2026-01-15", { f: "'Balance Tracker'!B99", v: 0 }, 3000],
+      ]);
+      addSheet(wb, "Balance Tracker", [["Account / Cardholder", "APR"], ["Unrelated Account", "9%"]]);
+      const { candidates } = discoverWorkbookDebtCandidates({ workbook: wb, XLSX, fileName: "unresolved-apr.xlsx", importBatchId: "batch" });
+      const account = byName(candidates, "Only Sourced Here");
+      expect(account).toBeTruthy();
+      expect(account.aprStatus).toBe("unknown");
+      expect(account.apr).toBeNull();
+      expect(account.warnings.join(" ")).toMatch(/APR missing or unknown/i);
+    });
+
+    it("WB-real-05: a LITERAL (non-formula) 0% APR still reports as confident no_interest - the fix is scoped to cross-sheet formulas only", () => {
+      const wb = XLSX.utils.book_new();
+      addSheet(wb, "Sheet1", [
+        ["Account", "Balance", "APR", "Minimum Payment"],
+        ["Zero Interest Card", 1000, 0, 50],
+      ]);
+      const { candidates } = discoverWorkbookDebtCandidates({ workbook: wb, XLSX, fileName: "zero-interest.xlsx", importBatchId: "batch" });
+      const card = byName(candidates, "Zero Interest Card");
+      expect(card).toMatchObject({ aprStatus: "no_interest", apr: 0 });
+    });
+
+    it("WB-real-07: a bare day-of-month due-date cell (no year/month) is never silently misread as a 1970 timestamp", () => {
+      const wb = XLSX.utils.book_new();
+      addSheet(wb, "Sheet1", [
+        ["Account", "Balance", "APR", "Due Date"],
+        ["Bare Day Card", 1000, "20%", 15],
+      ]);
+      const { candidates } = discoverWorkbookDebtCandidates({ workbook: wb, XLSX, fileName: "bare-day.xlsx", importBatchId: "batch" });
+      const card = byName(candidates, "Bare Day Card");
+      expect(card).toBeTruthy();
+      expect(card.dueDate).toBe("day:15");
+    });
+
+    it("WB-real-08: a real calendar due date is unaffected by the bare-day-of-month detection", () => {
+      const wb = XLSX.utils.book_new();
+      addSheet(wb, "Sheet1", [
+        ["Account", "Balance", "APR", "Due Date"],
+        ["Dated Card", 1000, "20%", new Date(2026, 0, 15)],
+      ]);
+      const { candidates } = discoverWorkbookDebtCandidates({ workbook: wb, XLSX, fileName: "real-date.xlsx", importBatchId: "batch" });
+      const card = byName(candidates, "Dated Card");
+      expect(card).toBeTruthy();
+      expect(card.dueDate).toBe("2026-01-15");
+    });
+
+    it("WB-real-09: 'Due Date' is used as creditor due-date truth; 'Adj Due Date' (bank-holiday-adjusted scheduling) is never picked up as the due date", () => {
+      const wb = XLSX.utils.book_new();
+      addSheet(wb, "January", [
+        ["Expense", "Amount", "Due Date", "Adj Due Date", "Balance", "APR"],
+        ["Real Creditor", 100, "2026-01-03", "2026-01-05", 2000, "20%"],
+      ]);
+      const { candidates } = discoverWorkbookDebtCandidates({ workbook: wb, XLSX, fileName: "adj-due-date.xlsx", importBatchId: "batch" });
+      const creditor = byName(candidates, "Real Creditor");
+      expect(creditor).toBeTruthy();
+      // Must reflect "Due Date" (the 3rd), never "Adj Due Date" (the 5th) -
+      // if the 2 header columns were ever confused, dueDate would be the
+      // 5th instead.
+      expect(creditor.dueDate).toBe("2026-01-03");
+    });
+
+    it("WB-real-06: a SAME-SHEET formula APR resolving to 0 also still reports as confident no_interest - only cross-sheet references are downgraded", () => {
+      const wb = XLSX.utils.book_new();
+      addSheet(wb, "Sheet1", [
+        ["Account", "Balance", "APR", "Minimum Payment"],
+        ["Promo Card", 1000, 0, 50],
+        ["Linked Row", 1000, { f: "C4", v: 0 }, 50],
+      ]);
+      const { candidates } = discoverWorkbookDebtCandidates({ workbook: wb, XLSX, fileName: "same-sheet-formula.xlsx", importBatchId: "batch" });
+      const linked = byName(candidates, "Linked Row");
+      expect(linked).toMatchObject({ aprStatus: "no_interest", apr: 0 });
+    });
+
+    it("WB-real-10: a section-heading row with an EMPTY (but present) APR cell is never miscounted as APR evidence, never becomes a fake Debt", () => {
+      const wb = XLSX.utils.book_new();
+      addSheet(wb, "Sheet1", [
+        ["Account", "Amount", "Interest Rate", "Balance"],
+        ["UTILITIES", null, null, null],
+        // Interest Rate cell is explicitly an empty string (present cell,
+        // blank value) - a real household workbook column layout where
+        // "Interest Rate" applies to debt rows but is simply left blank
+        // for a bill row, rather than the column being entirely absent.
+        ["Electric Bill", 150, "", null],
+      ]);
+      const { candidates, nonDebtItems } = discoverWorkbookDebtCandidates({ workbook: wb, XLSX, fileName: "blank-apr-cell.xlsx", importBatchId: "batch" });
+      expect(candidates.some((c) => c.accountName === "Electric Bill")).toBe(false);
+      expect(nonDebtItems.some((item) => item.label === "Electric Bill")).toBe(true);
+    });
+
+    // WB-fixture: the actual sanitized structural fixture file (see Section
+    // 31/BETA-3.1) - a synthetic household budget reproducing every
+    // structural challenge found in the real private workbook (master
+    // sheet, formula-derived monthly sheets, a deliberately-misaligned
+    // cross-sheet formula, split-identity same-lender-different-naming,
+    // business debt vs. business bills, subtotal/section-heading rows) -
+    // run through the full public readExcelFileToCandidates entry point,
+    // exactly as a real upload would. Locks in the end-to-end outcome so a
+    // future regression is caught immediately.
+    it("WB-fixture: the sanitized structural fixture produces exactly the expected safe outcome end-to-end", async () => {
+      const buffer = readFileSync(`${FIXTURES_DIR}/householdBudgetStructural.fixture.xlsx`);
+      const file = new File([buffer], "householdBudgetStructural.fixture.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const result = await readExcelFileToCandidates(file, { importBatchId: "structural-fixture" });
+
+      expect(result.topology.sheetCount).toBe(4);
+      expect(result.candidates).toHaveLength(9);
+      // Every structural/subtotal/section-heading row is invisible - never
+      // a candidate, never a non-debt item.
+      const structuralLabels = ["CREDIT CARDS", "CREDIT CARDS SUBTOTAL", "STUDENT LOANS", "STUDENT LOANS SUBTOTAL", "PERSONAL LOANS", "PERSONAL LOANS SUBTOTAL", "LINE OF CREDIT", "LINE OF CREDIT SUBTOTAL", "BUSINESS", "BUSINESS SUBTOTAL", "HOME EXPENSES", "SUBSCRIPTIONS", "STORAGE"];
+      for (const label of structuralLabels) {
+        expect(result.candidates.some((c) => c.accountName === label)).toBe(false);
+        expect(result.nonDebtItems.some((item) => item.label === label)).toBe(false);
+      }
+      // Ordinary bills never enter the debt queue.
+      for (const bill of ["Electricity", "Netflix", "Public Storage", "Business storage fee"]) {
+        expect(result.candidates.some((c) => c.accountName === bill)).toBe(false);
+        expect(result.nonDebtItems.some((item) => item.label === bill)).toBe(true);
+      }
+      // Real debts, correctly identified and never fabricated as confident
+      // when the underlying evidence doesn't support it.
+      const wellsFargoJanuary = result.candidates.find((c) => c.accountName === "WELLS FARGO (Line of Credit)");
+      expect(wellsFargoJanuary).toBeTruthy();
+      // The deliberately-misaligned cross-sheet APR formula (pointing at a
+      // blank Balance Tracker cell) must resolve to unknown, never a
+      // fabricated confident 0%.
+      expect(wellsFargoJanuary.aprStatus).toBe("unknown");
+      const businessCard = result.candidates.find((c) => c.accountName === "Test Business credit card");
+      expect(businessCard).toMatchObject({ debtType: "business_debt", balanceStatus: "confirmed" });
+      expect(businessCard.evidence.scopeSuggestion).toBe(SCOPE_SUGGESTIONS.businessCandidate);
+      // Same-lender, different-owner accounts stay distinct, never merged.
+      const chaseCandidates = result.candidates.filter((c) => c.creditorName.includes("Chase"));
+      expect(chaseCandidates).toHaveLength(2);
+      // Zero candidates are ever auto-committed by this pipeline stage -
+      // every one is `pending_review`.
+      expect(result.candidates.every((c) => c.decision === "pending_review")).toBe(true);
+    });
   });
 });
 

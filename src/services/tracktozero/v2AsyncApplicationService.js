@@ -1089,7 +1089,7 @@ export const createTrackToZeroV2AsyncAppService = ({
             balanceStatus: candidate.balanceStatus || "confirmed",
             aprStatus: candidate.aprStatus,
             apr: candidate.aprStatus === "unknown" ? null : candidate.apr,
-            minimumRequiredPayment: candidate.minimumPayment ?? 0,
+            minimumRequiredPayment: candidate.minimumPayment ?? null,
             dueDay: dueDayFromCandidate(candidate),
             ...ownership,
             includedInCorePayoffPlan: candidate.includedInCorePayoffPlan,

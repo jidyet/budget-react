@@ -63,7 +63,7 @@ export default function AddDebtModal({ open, onClose, snapshot, service, refresh
         debtType: newDebt.debtType,
         currentBalance: Number(newDebt.currentBalance),
         balanceAsOf: dateInputToIso(newDebt.balanceAsOf),
-        minimumRequiredPayment: Number(newDebt.minimumRequiredPayment),
+        minimumRequiredPayment: newDebt.minimumRequiredPayment === "" ? null : Number(newDebt.minimumRequiredPayment),
         aprStatus: newDebt.aprStatus,
         apr: newDebt.aprStatus === "unknown" ? null : newDebt.aprStatus === "no_interest" ? 0 : Number(newDebt.apr),
         dueDay,

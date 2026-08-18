@@ -54,7 +54,7 @@ export default function ReviewEditDebtDrawer({ open, debt, onClose, snapshot, se
         debtType: draft.debtType,
         aprStatus: draft.aprStatus,
         apr: draft.aprStatus === "unknown" ? null : draft.aprStatus === "no_interest" ? 0 : Number(draft.apr),
-        minimumRequiredPayment: Number(draft.minimumRequiredPayment),
+        minimumRequiredPayment: draft.minimumRequiredPayment === "" ? null : Number(draft.minimumRequiredPayment),
         dueDay: draft.dueDay === "" ? null : Number(draft.dueDay),
         ownerType: draft.ownerType,
         ownerId: draft.ownerId,

@@ -183,6 +183,26 @@ describe("TrackToZero v2 async application service", () => {
     expect(mortgage.includedInCorePayoffPlan).toBe(false);
   });
 
+  it("UX-9: an omitted minimum payment stays unknown (null), never a silent confirmed $0, through both creation and later edit", async () => {
+    const { service } = makeService();
+
+    const debt = await service.createNewDebt("personal-seed", {
+      clientRequestId: "manual-unknown-min-001",
+      name: "Unknown Minimum Card",
+      debtType: "credit_card",
+      currentBalance: 400,
+      minimumRequiredPayment: 45,
+      aprStatus: "unknown",
+    });
+    expect(debt.minimumRequiredPayment).toBe(45);
+
+    // Editing the debt to explicitly null out a previously-known minimum
+    // payment (the Review & edit drawer's blank-field case) must clear it
+    // to unknown, not coerce it back to a confirmed $0.
+    const cleared = await service.updateDebt("personal-seed", debt.id, { minimumRequiredPayment: null });
+    expect(cleared.minimumRequiredPayment).toBeNull();
+  });
+
   it("keeps manual debt creation idempotent for the same client request", async () => {
     const { repository, service } = makeService();
 
@@ -254,6 +274,34 @@ describe("TrackToZero v2 async application service", () => {
     expect(retry.createdDebts).toHaveLength(0);
     expect(repository.listDebts("personal-seed")).toHaveLength(debtsBefore + 1);
     expect(repository.listBalanceSnapshots("personal-seed", createdDebts[0].id)).toHaveLength(1);
+  });
+
+  it("UX-9: a committed import candidate with no parsed minimum payment stores unknown (null), never a silent confirmed $0", async () => {
+    const { repository, service } = makeService();
+    const candidate = {
+      candidateId: "cand-no-min",
+      source: "excel",
+      creditorName: "Discover",
+      accountName: "Discover Card",
+      debtType: "credit_card",
+      currentBalance: 900,
+      statementDate: null,
+      apr: null,
+      aprStatus: "unknown",
+      minimumPayment: null,
+      dueDate: null,
+      ownerSuggestion: "",
+      includedInCorePayoffPlan: true,
+      warnings: [],
+      duplicateStatus: "new",
+      decision: "pending_review",
+    };
+    const batch = await service.createImportBatch("personal-seed", { sourceType: "excel", sourceFilename: "import2.xlsx", candidates: [candidate], warnings: [] });
+    await service.decideImportCandidate("personal-seed", batch.id, "cand-no-min", { decision: "confirmed" });
+    const { createdDebts } = await service.commitImportBatch("personal-seed", batch.id);
+
+    expect(createdDebts[0].minimumRequiredPayment).toBeNull();
+    expect(repository.listDebts("personal-seed").find((debt) => debt.id === createdDebts[0].id).minimumRequiredPayment).toBeNull();
   });
 
   it("denies import creation for a role without manageDebts permission", async () => {

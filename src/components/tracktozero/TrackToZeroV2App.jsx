@@ -793,11 +793,24 @@ export default function TrackToZeroV2App() {
   const reviewRequestSeq = useRef(0);
   const activityRequestSeq = useRef(0);
   const asOf = useMemo(() => usesRealAuthUi ? new Date().toISOString() : V2_TEST_NOW, [usesRealAuthUi]);
-  const isFreshLocalBetaSignup = Boolean(
-    isLocalBetaRuntime
-      && authState.user?.metadata?.creationTime
-      && authState.user?.metadata?.creationTime === authState.user?.metadata?.lastSignInTime
-  );
+  // UX-9: this used to be derived from Firebase Auth's own
+  // creationTime === lastSignInTime metadata - a real bug, found while
+  // driving a genuine fresh local-beta signup through a hard refresh: that
+  // equality is set once at account creation and never changes just from
+  // restoring a persisted session, so it stayed "true" forever after the
+  // original signup instant - including after the user went on to create a
+  // real workspace. Every later refresh() (e.g. after a page reload, where
+  // workspaceId resets to "" below) then hit the "skip the workspace
+  // lookup, this must be a brand-new signup with nothing to find yet"
+  // shortcut again, silently sending an existing user with real data back
+  // to the onboarding screen. Firestore data was never actually lost - only
+  // discoverable, which made it worse to diagnose. Now tracked as plain
+  // React state, set only inside the interactive signup handler below, so
+  // it is true for exactly the one moment the shortcut is meant to cover
+  // and always resets to false on reload like the rest of this component's
+  // session state.
+  const [justSignedUpLocalBeta, setJustSignedUpLocalBeta] = useState(false);
+  const isFreshLocalBetaSignup = isLocalBetaRuntime && justSignedUpLocalBeta;
   const service = useMemo(() => createTrackToZeroV2AsyncAppService({ repository, actorId, asOf }), [repository, actorId, asOf]);
 
   useEffect(() => {
@@ -858,8 +871,12 @@ export default function TrackToZeroV2App() {
     setAuthBusy(true);
     setAuthState((state) => ({ ...state, error: "" }));
     try {
-      if (authForm.mode === "signup") await activeSignup(authForm.email, authForm.password);
-      else await activeLogin(authForm.email, authForm.password);
+      if (authForm.mode === "signup") {
+        await activeSignup(authForm.email, authForm.password);
+        if (isLocalBetaRuntime) setJustSignedUpLocalBeta(true);
+      } else {
+        await activeLogin(authForm.email, authForm.password);
+      }
     } catch (error) {
       setAuthState((state) => ({ ...state, error: error?.message || "Authentication failed." }));
     } finally {
@@ -984,6 +1001,22 @@ export default function TrackToZeroV2App() {
     refreshActivity(workspaceId, { limit: tab === "activity" ? 20 : 5 });
   }, [tab, workspaceId, refreshActivity]);
 
+  // UX-9: a raw "create workspace saved."/"add debt saved." confirmation
+  // previously had no auto-dismiss at all - it sat on screen indefinitely
+  // (worst case: it's the very first thing a brand-new user sees, right on
+  // their freshly created, otherwise-empty Home) until they happened to
+  // switch tabs, which is the only other place writeState gets reset (see
+  // navigateTab). Errors deliberately stay sticky - a user should
+  // consciously see and act on those - only a genuine success confirmation
+  // self-clears.
+  useEffect(() => {
+    if (!writeState.success) return undefined;
+    const timer = setTimeout(() => {
+      setWriteState((state) => (state.success ? { ...state, success: "" } : state));
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [writeState.success]);
+
   const runAction = async (action, callback, { write = true } = {}) => {
     setWriteState({ inProgress: write, action, error: "", success: "", errorAction: "" });
     try {
@@ -1011,6 +1044,7 @@ export default function TrackToZeroV2App() {
         email: authState.user?.email || "",
       });
       setWorkspaceId(nextWorkspaceId);
+      setJustSignedUpLocalBeta(false);
       await refresh(nextWorkspaceId);
     });
   };

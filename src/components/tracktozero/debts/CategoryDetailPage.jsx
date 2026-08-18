@@ -60,7 +60,7 @@ function LenderGroupAccountRow({ debt, disambiguator, latestSnapshotsByDebt, isT
           {money(resolveDebtBalance(debt, latestSnapshotsByDebt))} · {debt.aprStatus === "unknown" ? "APR unknown" : percent(debt.apr)}
         </div>
         <div style={{ ...TYPE_SCALE.supporting, color: palette.tx2 }}>
-          Required payment: {money(debt.minimumRequiredPayment)} · Due day: {debt.dueDay || "not set"}
+          Required payment: {debt.minimumRequiredPayment == null ? "not set" : money(debt.minimumRequiredPayment)} · Due day: {debt.dueDay || "not set"}
         </div>
         <DebtBadges debt={debt} isTarget={isTarget} isHousehold={isHousehold} />
       </div>

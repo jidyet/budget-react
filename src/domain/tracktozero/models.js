@@ -21,6 +21,7 @@ import {
 import {
   deepFreezeClone,
   normalizeAprDecimal,
+  optionalMoney,
   optionalString,
   optionalTimestamp,
   requireEnum,
@@ -131,7 +132,13 @@ export const createDebt = (input = {}) => {
     startingBalance: requireMoney(input.startingBalance ?? input.currentBalance, "debt.startingBalance"),
     aprStatus,
     apr: aprStatus === "unknown" ? null : normalizeAprDecimal(input.apr ?? 0, "debt.apr"),
-    minimumRequiredPayment: requireMoney(input.minimumRequiredPayment, "debt.minimumRequiredPayment"),
+    // UX-9: unknown, not silently confirmed-$0 - matches apr's null-when-
+    // unknown handling above. An import candidate whose parser never found
+    // a minimum payment, or a manual/edit form left blank, must not become
+    // indistinguishable from a debt whose $0 minimum was actually confirmed
+    // (see evaluateProjectionWarnings' missing_minimum_payment warning and
+    // debtExplorerView's requiredPaymentSortValue, both already null-aware).
+    minimumRequiredPayment: optionalMoney(input.minimumRequiredPayment, "debt.minimumRequiredPayment"),
     dueDay: input.dueDay == null || input.dueDay === "" ? null : Number(input.dueDay),
     // ownerId is never free text: it is either empty, or the uid of a
     // workspace member verified against the real membership list (enforced

@@ -411,7 +411,7 @@ export const createTrackToZeroV2AppService = ({
             balanceStatus: candidate.balanceStatus || "confirmed",
             aprStatus: candidate.aprStatus,
             apr: candidate.aprStatus === "unknown" ? null : candidate.apr,
-            minimumRequiredPayment: candidate.minimumPayment ?? 0,
+            minimumRequiredPayment: candidate.minimumPayment ?? null,
             dueDay: null,
             ...ownership,
             includedInCorePayoffPlan: candidate.includedInCorePayoffPlan,

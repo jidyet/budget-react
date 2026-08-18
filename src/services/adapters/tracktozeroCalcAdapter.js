@@ -4,7 +4,11 @@ export const debtToEngineAccount = (debt) => ({
   id: debt.id,
   name: debt.name,
   cur_bal: debt.currentBalance,
-  min_due_v: debt.minimumRequiredPayment,
+  // UX-9: unknown minimum payment (null) must still run through the engine
+  // as a real number - mirrors apr_v's own unknown-defaults-to-0 fallback
+  // directly below. The Debt's own stored truth stays null/unknown; this
+  // is purely the engine-input mapping, same as apr_v already was.
+  min_due_v: debt.minimumRequiredPayment == null ? 0 : debt.minimumRequiredPayment,
   planned_v: 0,
   paid_v: 0,
   apr_v: debt.aprStatus === "unknown" ? 0 : debt.apr,

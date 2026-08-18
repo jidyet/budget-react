@@ -55,6 +55,14 @@ describe("debt domain", () => {
     expect(() => baseDebt({ minimumRequiredPayment: -1 })).toThrow(/minimumRequiredPayment/);
   });
 
+  it("UX-9: treats an omitted minimum payment as unknown (null), never a silent confirmed $0 - mirrors unknown APR", () => {
+    expect(baseDebt({ minimumRequiredPayment: undefined }).minimumRequiredPayment).toBeNull();
+    expect(baseDebt({ minimumRequiredPayment: null }).minimumRequiredPayment).toBeNull();
+    expect(baseDebt({ minimumRequiredPayment: "" }).minimumRequiredPayment).toBeNull();
+    expect(baseDebt({ minimumRequiredPayment: 0 }).minimumRequiredPayment).toBe(0);
+    expect(baseDebt({ minimumRequiredPayment: 50 }).minimumRequiredPayment).toBe(50);
+  });
+
   it("excludes mortgage from core payoff by default", () => {
     expect(baseDebt({ debtType: "mortgage" }).includedInCorePayoffPlan).toBe(false);
     expect(baseDebt({ debtType: "mortgage", includedInCorePayoffPlan: true }).includedInCorePayoffPlan).toBe(true);
@@ -152,6 +160,12 @@ describe("calculation adapter and expected schedule", () => {
     expect(payoffSimulate([debtToEngineAccount(debt)], "avalanche", 0, {}, 1, 2026)).toEqual(
       payoffSimulate(legacy, "avalanche", 0, {}, 1, 2026)
     );
+  });
+
+  it("UX-9: maps an unknown (null) minimum payment to 0 for the engine, without mutating the debt's own stored truth", () => {
+    const debt = baseDebt({ currentBalance: 500, minimumRequiredPayment: undefined, apr: 0 });
+    expect(debt.minimumRequiredPayment).toBeNull();
+    expect(debtToEngineAccount(debt).min_due_v).toBe(0);
   });
 
   it("generates deterministic expected checkpoints from a frozen plan version", () => {

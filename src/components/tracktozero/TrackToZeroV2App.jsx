@@ -10,6 +10,7 @@ import {
 import { createTrackToZeroV2AsyncAppService, getUserSafeTrackToZeroError } from "../../services/tracktozero/v2AsyncApplicationService";
 import { V2_TEST_ACTOR_ID, V2_TEST_NOW } from "../../services/tracktozero/v2SeedData";
 import { getLaunchFlags } from "../../config/launchFlags";
+import { APP_COMMIT, APP_VERSION } from "../../config/appMeta.js";
 import { ROLE_PERMISSIONS } from "../../domain/tracktozero/constants.js";
 import { presentedOwnerLabel } from "../../domain/tracktozero/ownership.js";
 import { ttzPalette } from "./theme.js";
@@ -508,6 +509,13 @@ function Settings({ snapshot, repositoryMode, service, refresh, runAction, write
           <p><strong>Workspace type:</strong> {snapshot.workspace.type}</p>
           <p><strong>Your role:</strong> {snapshot.membership?.role}</p>
           <p><strong>Data mode:</strong> {dataMode}</p>
+          {/* BETA-1: a tester/support engineer needs a way to say exactly
+              which build they're on ("Beta - 4715497") without exposing
+              anything sensitive - never a secret, just the version + short
+              commit hash this build was produced from (see appMeta.js).
+              APP_COMMIT is "" for a shallow checkout with no .git history;
+              in that case only the version shows, never a fabricated hash. */}
+          <p><strong>Build:</strong> {APP_VERSION}{APP_COMMIT ? ` • ${APP_COMMIT}` : ""}</p>
         </div>
         <div>
           <h3>Verified members</h3>

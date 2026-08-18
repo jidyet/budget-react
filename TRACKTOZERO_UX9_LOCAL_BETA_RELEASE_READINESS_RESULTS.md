@@ -284,3 +284,99 @@ Two real defects were found by actually driving the current product as a beta us
 - Production non-touch proof: all work performed against `localhost:5184` / local Firebase emulators (`127.0.0.1:8090`/`9199`) only; no production Firebase project (`budgetapp-c9306`) or `tracktozero.app` was reached at any point this pass.
 
 Production deployment remains a separate, later, deliberate decision. BETA-3.1 was not started during this pass, per instruction.
+
+## PART 3 — BROAD RE-VERIFICATION ON A FRESH EMULATOR (2026-08-18, continued)
+
+### P3.1 Purpose and starting state
+
+Continuing UX-9 per explicit instruction, this pass deliberately covers ground Part 2 disclosed as not independently re-driven: sanitized import/review, household/invite/role safety with real distinct accounts, mobile (390×844) and desktop (1440×900) responsive QA, accessibility smoke, and failure UX — run against a genuinely fresh, empty local-beta emulator. Starting state: HEAD `419794d` ("UX-9: complete local beta release readiness", Part 1+2's commit), clean tree, `localhost:5184` / Firestore `127.0.0.1:8090` / Auth `127.0.0.1:9199`.
+
+**Environment note (not a product defect)**: the prior turn's `TaskStop` calls terminated only the `npm` wrapper processes, not their underlying `java` (Firestore emulator) and `node` (Auth emulator, Vite) child processes — a known Windows process-tree quirk. This caused a port collision on the next `emulators:v2` attempt (`Error: Could not start Authentication Emulator, port taken`) and a `dev:v2-local` fallback to port 5185. The stale `java`/`node` processes were identified via `netstat`/`Get-Process` and force-killed directly; both services were then restarted cleanly on their canonical ports (Firestore 8090, Auth 9199, Vite 5184), confirmed via `netstat` showing no stale listeners and both services responding `200`. The resulting emulator was genuinely fresh/empty (no leftover UX-9 accounts, workspaces, debts, or review items from any prior turn).
+
+### P3.2 Fresh user, empty state, manual debt matrix
+
+Fresh signup on the newly-clean emulator → onboarding correctly shown (no stale/sample/founder data) → Personal workspace → empty Home correctly shows the empty state with no phantom review count, debt total, or active plan. Manual debt matrix (5 debts covering normal APR, 0% APR/no-interest, unknown APR, present/missing required payment, present/missing due date, multiple debt types: credit card, personal loan, auto loan, student loan) all persisted correctly: unknown APR stays unknown (never fabricated as 0%), the explicit 0%-APR debt renders as a real, distinct `0.00%`, and the missing required payment renders as "not set" (never `$0.00`). All local traffic confirmed (zero non-`localhost`/`127.0.0.1` network requests observed). 5/5 checks passed, zero console errors.
+
+### P3.3 Sanitized import / Review — full live drive (new ground this pass)
+
+Uploaded the committed, sanitized `householdBudgetLarge.fixture.xlsx` fixture via Debts → "Import statement" → file select → **Analyze file** (a first attempt without explicitly clicking "Analyze file" correctly produced zero candidates, since analysis genuinely hadn't run yet — a test-script sequencing miss, not a product defect; corrected and re-run). Analysis correctly reported: 24 financial items found → 12 debt candidates, 12 non-debt items excluded (categorized: Unclear 3, Utilities 2, Subscriptions 2, Insurance 2, Storage 1, Savings 1, Income 1, all under "Not debt — we won't add these" / "View excluded items"), 6 "ready" and 6 "needs review". Review Center correctly required an explicit **per-item** decision — there is no "approve all" shortcut; each of the 12 candidates must be individually confirmed, skipped, or given missing information, which is a stronger, more conservative "no unreviewed candidate becomes authoritative Debt" guarantee than initially assumed. For genuinely missing fields, the UI is honest ("We're missing your current balance for this debt" / "We don't know the APR for this debt yet"), never fabricating a value.
+
+Drove one "ready" candidate (Capital One, $1,991.99, 26.40% APR, $65 minimum) through its correct two-step resolution (select "Add as a new debt", then "Save this debt") to a real, persisted Debt: `LEFT TO GO` correctly increased by exactly $1,991.99, `ACTIVE DEBTS` 4→5, the Review queue correctly decremented 12→11 (Home's "12 import decisions" and Review's own count agreed), the debt appeared correctly in its category with the right lender filter option, and Activity correctly recorded a "Debt added... Starting balance $1,991.99" entry — confirming the opening BalanceSnapshot is truthful and matches exactly. The other 11 candidates remained untouched and still pending, confirming nothing was silently promoted. Zero console errors throughout. 6/6 explicit checks passed (after correcting one test-script sequencing bug and one test-script click-order bug, neither a product defect).
+
+### P3.4 Reload/session hardening on an import-heavy account (re-confirmed, holds)
+
+On this richer account state (5 manual + 1 import-confirmed debt, 11 pending Review items): hard reload on Home does not regress to onboarding and correctly preserves the "11 import decisions still need review" prompt. Direct-route reload tested on Debts, Plan, Review, Settings, and Activity — none went blank, none regressed to onboarding, and Review state survived fully intact (still exactly 11 pending, Capital One not reverted). See P3.7 for a more precise finding about which of these routes actually preserve the exact tab position vs. fall back to Home.
+
+### P3.5 Confirmed balance truth / progress (new ground this pass)
+
+Confirmed progress correctly reads exactly `0%` before any real balance snapshot exists (no fabricated progress from the import or manual-entry steps). Recorded a confirmed `$500.00` balance reduction via "Update balance" on the Debts tab; Home's "Confirmed progress" then correctly showed `1%`, `Confirmed reduction $500.00`, exactly matching the real change — no celebration of progress from null/missing data being misread as zero. Also reconfirmed live: "Due date passed — confirm payment"-style restrained language (not "Past Due"/"Missed Payment") is in active use on Home's Upcoming Payments card for a debt whose due date has passed, matching the locked payment-timing contract. 5/5 checks passed.
+
+### P3.6 Household, invitations, and role safety — real distinct accounts (new ground this pass)
+
+Created a fresh household-owner account, added a Joint debt (`P3 Joint Mortgage`, $250,000, 6.2% APR), and issued a real invite to a second fresh account at the **Viewer** role. The invited member signed up separately, opened the real invite link, and correctly saw a mismatch-transparent preview ("Invite email: ..." matching their own signed-in email) before joining. After joining:
+
+- The Joint debt was correctly visible and readable to the Viewer with the exact right balance and category (confirmed by drilling into the Mortgage/Home category, which showed `$250,000.00 total · 1 account` — an initial test-script assertion checking for a literal debt-name string at the wrong list depth was corrected, not a product issue).
+- Settings' "Verified members" list correctly showed both the owner and the now-joined Viewer as verified members, while "Pending invitations" correctly transitioned the same entry from "Pending invitation" to "Accepted" — verified membership and invitation history remain visually distinct, per the locked contract.
+- The Viewer could **not** mutate: "Record payment"/"Update balance" controls do not render at all (not merely disabled) on the Debts tab quick-update rail; "+ Add debt" is absent; the household's "Create invite" button and its email field are both genuinely disabled (`isEnabled() === false` on both, verified directly, not just visually), accompanied by an explicit "Only owners and admins can invite people." explanation — a defensible, non-trap disabled-with-reason pattern, distinct from (but equally safe as) the fully-hidden pattern used elsewhere in the app. No global service/mutation handle is exposed on `window` for a Viewer to invoke directly, bypassing the UI.
+- Joint debt appeared exactly once in the member's "YOUR DEBTS" total ($250,000.00, 1 active debt) — no duplication, corroborating the existing unit-tested "Joint counts once" contract (Part 1 §4 #6) with live evidence.
+
+8/8 checks passed (after correcting two test-script assertions that were checking the wrong UI depth/pattern, described above — neither was a product defect). Zero console errors across both the owner and member browser sessions.
+
+### P3.7 Direct-route reload — a real, non-critical finding
+
+Investigating why some direct-route reloads "passed" only by the weak criterion of "not showing the onboarding string," this pass found and confirmed via source (`TrackToZeroV2App.jsx`'s `navigateTab`/mount-time URL parsing) that **only the Plan and Debts tabs have real, deep-linkable URLs** (`/plan/my-plan`, `/debts`) that survive a hard reload with their exact position intact — confirmed directly via `page.url()` before/after reload. Home, Review, Settings, and Activity have never pushed a distinguishing URL (all collapse to `/`), so a hard reload while on any of those three always lands back on Home, not the tab the user was actually on. This is **pre-existing architecture, not a new regression** — it predates this session's fixes and was not touched by any of them.
+
+This does **not** violate any of the specifically-enumerated CRITICAL session-restoration failure modes (no onboarding redirect, no blank screen, no route loop, no lost `activePlanId`, no destructive empty state, no hydration error) — the underlying data (Review's 11 pending items, the workspace, the debts) all survive correctly and reappear the moment the user manually clicks back to that tab, as directly confirmed in P3.4. Given that fixing this properly would mean adding real routes, `pushState` calls, and mount-time URL parsing for three more tabs — genuinely new feature work, not a "smallest structural fix" to a bug — this pass documents it honestly as a **known limitation** (see P3.9) rather than attempting a partial, scope-creeping fix. Both Part 1 and Part 2's own "direct-route reload... PASS" claims for Review/Settings were technically true under their stated (weaker) criterion but did not verify exact-tab-position preservation; this note corrects that precision for the record without rewriting their original sections.
+
+### P3.8 Responsive (desktop 1440×900 / mobile 390×844) and accessibility smoke — new ground this pass
+
+**Responsive**: no horizontal overflow detected (`document.documentElement.scrollWidth` vs. `clientWidth`) on any of Home/Debts/Plan/Review/Activity/Settings at desktop 1440×900, nor on Home/Debts/Plan/Activity at mobile 390×844. The mobile bottom nav renders and is reachable. The mobile "Add Debt" modal opens without introducing overflow and its form fields are visible/reachable. 13/13 responsive checks passed.
+
+**Accessibility**: keyboard `Tab` correctly moves focus to a real interactive element with a visible focus indicator (`outline: auto`, `1px`); the Add Debt modal correctly exposes `role="dialog"`/`aria-modal` for assistive tech, and its fields resolve via `getByLabel` (real, associated `<label>`s, not placeholder-only). **One genuine finding**: Home has **zero** `<h1>`/`<h2>`/`<h3>` elements — every section title ("YOUR NEXT MOVE", "CONFIRMED PROGRESS", "YOUR DEBTS", etc.) is a styled `<div>` (this codebase's established `TYPE_SCALE.overline`/`cardTitle` pattern), not a semantic heading. A screen-reader user navigating by heading landmark — a very common navigation pattern — would find nothing on the entire page. This is a **real accessibility gap**, but it is a systemic, pre-existing pattern used consistently across the whole app, not a new regression from this session's work; fixing it correctly means auditing and adjusting heading levels across every V2 page, which is genuine design-system-scope work, not a "smallest structural fix." Documented as a known limitation (P3.9), not silently fixed or hidden.
+
+### P3.9 Failure UX (new ground this pass)
+
+Uploaded a genuinely corrupt file (plain text renamed to `.xlsx`) through the real Import flow. The app did not crash, showed no raw stack trace or unhandled-exception UI, and reported a clear, human-readable outcome ("Valid workbook parsed, but no likely debt candidates were found.") with zero fabricated debt candidates and zero console errors. Minor, non-blocking polish note: "Valid workbook parsed" is a slightly generous description for input that was not a real workbook at all (the underlying XLSX library appears to tolerate the bytes rather than hard-erroring) — this has no financial-truth or safety consequence and is not treated as a defect.
+
+### P3.10 Known limitations (new, from this pass)
+
+1. **Direct-route reload only fully preserves tab position for Plan and Debts** (P3.7) — Home, Review, Settings, and Activity fall back to Home on a hard reload instead of restoring their exact position. Pre-existing architecture; no data loss; the CRITICAL session-restoration gate (no onboarding regression, no blank screen, no hydration error) is unaffected. Recommended for a future dedicated routing pass, out of scope for a "smallest structural fix."
+2. **No semantic heading hierarchy on Home** (P3.8) — all section titles are styled `<div>`s, not `<h1>`-`<h6>` elements. Systemic, pre-existing pattern across the app. Recommended for a future dedicated accessibility pass.
+3. Minor: the invalid-import-file message ("Valid workbook parsed, but no likely debt candidates were found") is slightly generous for non-workbook input (P3.9) — cosmetic only.
+
+None of these are blockers for a controlled beta with a limited, informed tester cohort; all are honestly disclosed rather than fixed under time pressure or silently omitted.
+
+### P3.11 No code changes this pass
+
+Every finding in Part 3 was either (a) a test-script bug corrected in place (wrong selector, wrong click sequence, assertion checking the wrong UI depth — none were product defects, each was verified against the real underlying behavior before being ruled out), or (b) a genuine but out-of-proportion-for-this-pass known limitation, documented above rather than partially fixed. **No source file was modified in Part 3.** The codebase is unchanged from the `419794d` commit.
+
+### P3.12 Full automated validation (re-run, unchanged code)
+
+Re-run in full to confirm nothing regressed and the environment restart left no side effects:
+
+- Unit tests: **890/890 passed** (58/58 files) — identical to Part 2's final count, confirming no drift.
+- Lint: **0 errors**, **4 warnings** — the same pre-existing, documented warnings.
+- Build: succeeds, same pre-existing >500kB chunk-size advisory.
+- Legacy Firestore rules: **12/12 passed**.
+- Firestore V2 rules: **69/69 passed**, rules parity guard PASS, no drift.
+- perf:check: **all 8 budget checks PASS**.
+- npm audit (`--omit=dev`): **0 vulnerabilities**.
+
+### P3.13 Git review
+
+`git status` after Part 3 showed no tracked-file changes beyond this report update — all `.ux9p3-*` temporary Playwright scripts, logs, and screenshots used during this pass were deleted before this check, per this session's established convention. No BETA-3.1 material, no private workbook data, no unrelated files.
+
+### P3.14 Final verdict (Part 3)
+
+Broader live coverage — sanitized import/review end-to-end, household/invite/role safety with real distinct accounts, mobile and desktop responsive QA, accessibility smoke, and failure UX — found no defect requiring a code change. Two genuine, honestly-disclosed, out-of-scope-for-this-pass known limitations were identified (P3.10) and neither blocks controlled-beta readiness. Full automated validation remains fully green and unchanged.
+
+# YES — UX-9 COMPLETE — READY FOR BETA PREPARATION
+
+- Starting commit for this pass: `419794d` ("UX-9: complete local beta release readiness", Part 1+2). No source changes were made in Part 3, so no new commit is required for code — only this report update.
+- Broader browser QA: fresh user → manual debt matrix → sanitized import/Review (12 candidates, per-item confirmation, correct Debt + opening BalanceSnapshot) → reload/session hardening → confirmed-balance progress truth → household + real invite + Viewer role safety → responsive (mobile/desktop) → accessibility smoke → failure UX. All PASS, all against the local Firebase emulator only.
+- Bugs found requiring a fix this pass: **0**. Known limitations documented, not hidden: 2 (direct-route reload scope, heading hierarchy) plus 1 cosmetic wording nit.
+- Test totals: 890/890 unit (unchanged), 12/12 + 69/69 Firestore rules (parity confirmed).
+- Build/perf/audit: all green, 0 vulnerabilities.
+- Production non-touch proof: all work performed against `localhost:5184` / local Firebase emulators (`127.0.0.1:8090`/`9199`) only; no production Firebase project or `tracktozero.app` was reached at any point.
+
+Production deployment remains a separate, later, deliberate decision. BETA-3.1 was not started during this pass, and the owner's real spreadsheet was not used, per instruction.

@@ -203,3 +203,84 @@ All items in the brief's Section 105 "YES" checklist that were exercised with li
 # YES — READY FOR CONTROLLED BETA / PRODUCTION-PILOT PREPARATION
 
 Production deployment remains a separate, later, deliberate decision.
+
+## PART 2 — RE-VERIFICATION PASS (2026-08-18)
+
+### P2.1 Purpose and starting state
+
+Per explicit instruction, this pass re-verifies UX-9 is still solid against the current codebase, does **not** start BETA-3.1, does **not** touch the owner's real spreadsheet, and does **not** deploy — local-only. Starting state confirmed via Section 0 git audit: branch `beta/v2-controlled`, HEAD `6fae079` ("UX-8.1: close pre-beta consistency gaps"), clean working tree, matching the expected post-UX-8.1/post-BETA-3.1 state (`af0224e` is `6fae079`'s parent). No unfinished BETA-3.1 changes were present in the working tree. This is a re-verification pass on top of the already-complete, already-committed `f06e803`/subsequent history — not a from-scratch redo.
+
+Environment: `npm run emulators:v2` (Firestore `127.0.0.1:8090`, Auth `127.0.0.1:9199`) and `npm run dev:v2-local` (port `5184`) — both real Firebase-emulator-backed local beta, not the seeded in-memory harness. Fresh `@ux9.test` accounts only; nothing touched production.
+
+### P2.2 Scope of live coverage this pass
+
+This pass drove one fresh Personal persona end-to-end through: signup → workspace bootstrap → empty Home → manual debt creation (including a genuinely-missing required payment) → category drill-down (all-debts / grouped view) → Compare Snowball vs Avalanche → first-ever plan activation → Home Next Move → hard reload (Home + direct-route reload on Debts/Plan/Review/Settings) → payment recording → Activity verification → reforecast → plan history. It did not re-drive Household/invite-security, mobile/desktop responsive, or accessibility this pass, since nothing in this session's findings implicated those areas and they already have dedicated, undisturbed prior-phase QA (Part 1 above, plus UX-8/UX-8.1/UX-8.3/UX-8.4) with no regression in their automated coverage.
+
+### P2.3 Bug found and fixed — required payment fabricated as $0.00 in the ungrouped Debt view
+
+**Observed**: `CategoryDetailPage.jsx`'s `DebtCard` component (the ungrouped/"None" group-by rendering) displayed "Required payment: $0.00" for a debt with a genuinely null/missing required payment — violating the locked "missing value != confirmed zero" contract already fixed once, for a different component, in Part 1 §12.
+
+**Root cause**: the sibling `LenderGroupAccountRow` component in the same file already null-guards this exact field (`== null ? "not set" : money(...)`); `DebtCard` never received the same guard — an unfixed sibling of the original §12 defect, not a new regression from unrelated work.
+
+**Fix**: applied the identical null-guard to `DebtCard`'s required-payment line. `src/components/tracktozero/debts/CategoryDetailPage.jsx`.
+
+**Verified live**: fresh account, a debt entered with a blank required payment, ungrouped category view now correctly shows "Required payment: not set" (confirmed via Vite HMR without a server restart, then re-confirmed against a fresh reload).
+
+### P2.4 Bug found and fixed — first-ever plan activation was completely broken (high severity)
+
+**Observed**: on a genuinely fresh workspace with debts but no active plan yet, the only reachable strategy-commit path in the live Plan tab — "Compare Snowball vs Avalanche" → "Inspect Snowball" → "Use Snowball" → confirm → Apply — failed with the visible error `"use snowball: No active plan to reforecast"`. The confirmation modal did not close, leaving a `role="presentation"` overlay that then blocked all further clicks on the page.
+
+**Root cause**: `SnowballView`/`AvalancheView` in `src/components/tracktozero/plan/PlanSection.jsx` unconditionally called `service.applyReforecast(workspaceId, { strategy })` from "Use Snowball"/"Use Avalanche" — a call that requires a pre-existing active plan/version (`v2AsyncApplicationService.js`'s `applyReforecast` explicitly throws `"No active plan to reforecast"` otherwise, by design — reforecast is a new version of an *existing* plan). The correct first-activation pair, `createDraftPlan` + `activatePlan`, exists and works correctly in the service layer, but the only UI that ever called it (`FirstPlanBuilder` in `TrackToZeroV2App.jsx`, with its own "Build my payoff plan" / "Preview my plan" / "Activate this plan" UI) is dead code — never rendered by the current app, superseded by `PlanSection.jsx`'s Compare/Inspect/Use flow without carrying the create-vs-reforecast branch forward. **A brand-new beta user could not activate their first payoff plan at all through the actual, only-reachable UI.**
+
+**Affected contract**: "Plan activation must not silently ignore blocking truth issues" (§11 of the brief) — this is a stronger failure than that: activation didn't just proceed incorrectly, it was unconditionally impossible for any first-time user.
+
+**Fix**: added `activateOrReforecastStrategy(service, workspaceId, strategy, hasActivePlan)` (`src/components/tracktozero/plan/planActivation.js`, a new pure module — kept out of `PlanSection.jsx` itself because that file's Fast-Refresh lint rule requires component files to export only components) — branches to `applyReforecast` when a plan is already active, or `createDraftPlan` + `activatePlan` when it isn't. `SnowballView`/`AvalancheView` now pass `hasActivePlan` through and call this helper instead of calling `applyReforecast` directly. `StrategyExperience`'s confirmation modal copy is now also gated on `hasActivePlan`: a genuinely first-time activation shows "Activate Snowball?" / "This creates and activates your first payoff plan." instead of the reforecast-flavored "Switch to Snowball?" / "Your current plan is kept in your plan history, never overwritten" (accurate now that there is no current plan to keep).
+
+**Tests added**: `src/components/tracktozero/plan/planActivation.test.js` — two focused unit tests proving the branch: reforecast is called (and create/activate are not) when a plan is already active; create+activate is called (and reforecast is not) when no plan is active yet.
+
+**Verified live, fully**: a brand-new fresh account (0 workspaces) → 2 manually-added debts → Compare → Inspect Snowball → Use Snowball → confirmation modal now reads "Activate Snowball?" / "This creates and activates your first payoff plan." → Apply → **no error, modal closes cleanly, nav is immediately clickable again** → Home reflects the newly-activated plan (no longer showing the no-plan hero) → **survives a hard reload** → Plan tab now shows an active Snowball plan with a working Reforecast card. All 10/10 checks in this flow passed. Re-verified the reforecast path still works correctly on an already-active plan afterward (no regression to the pre-existing, already-working reforecast-an-active-plan case).
+
+### P2.5 Payment recording / PaymentEvent vs BalanceSnapshot — re-verified, holds
+
+On the same now-active-plan account: recorded a $60 payment via the Debts-tab Quick Update rail ("Record payment" → select debt → amount → "Save payment"). Activity correctly shows a distinct "Payment recorded... $60.00" entry, separate from the earlier "Debt added" and "Plan activated"/"Plan reforecasted" entries. The debt's confirmed balance was **not** silently moved by the payment (still $2,000.00, not $1,940.00) — confirming PaymentEvent != BalanceSnapshot continues to hold exactly as designed. Zero console errors.
+
+### P2.6 Reforecast and plan history — re-verified, holds
+
+Reforecast (extra $50/mo) previewed a before/after payoff-date change (Jan 2030 → Mar 2029) without auto-applying, then applied cleanly on explicit confirmation. Plan history correctly shows both versions: "Version 1 · Snowball — Activated · $0.00/mo extra" and "Version 2 · Snowball — Current — Reforecast · $50.00/mo extra" — the original activation is preserved, not overwritten, exactly per the locked PlanVersion-history contract.
+
+### P2.7 Session/reload hardening — re-verified, holds
+
+Hard reload on Home after first-ever plan activation: PASS (no regression to onboarding). Direct-route hard reload on Debts, Plan, Review, and Settings: all PASS. Zero console/network errors throughout. No regression to the Part 1 §11 fix.
+
+### P2.8 Full automated validation (this pass)
+
+Run to completion after both fixes above, against the current `beta/v2-controlled` branch:
+
+- Unit tests: **890/890 passed** (58/58 files) — up from the 888/888 entering this pass (2 new regression tests for `activateOrReforecastStrategy`, none removed, no flakiness).
+- Lint: **0 errors**, **4 warnings** — the identical pre-existing, documented `react-hooks/exhaustive-deps` warnings (`App.jsx`, `TrackToZeroV2App.jsx`, `useAccounts.js`, `useInstallPrompt.js`). Zero new warnings.
+- Build: succeeds; only the standard pre-existing >500kB chunk-size advisory, unchanged in kind.
+- Legacy Firestore rules: **12/12 passed**.
+- Firestore V2 rules: **69/69 passed**, rules parity guard PASS (`firestore.rules` vs `firestore.v2.rules`), no drift. No rules file was touched by either fix.
+- perf:check: **all 8 budget checks PASS**.
+- npm audit (`--omit=dev`): **0 vulnerabilities**.
+
+### P2.9 Git review and scope of this pass's diff
+
+`git status`/`git diff --stat`/`git diff --check` reviewed before staging: exactly two modified files (`CategoryDetailPage.jsx`, `PlanSection.jsx`) and two new files (`planActivation.js`, `planActivation.test.js`) — no BETA-3.1 material, no private workbook data, no unrelated changes. All temporary Playwright QA scripts and screenshots used during this pass were deleted before staging, per this session's established convention.
+
+### P2.10 Final verdict (this pass)
+
+Two real defects were found by actually driving the current product as a beta user would, both were sibling/successor issues to defects already fixed in Part 1 (the same locked contracts, different code paths that hadn't received the same fix) rather than novel regressions from unrelated work. Both are root-caused, fixed with the smallest structural change, covered by new regression tests, and re-verified live end-to-end including a hard-reload durability check. Full automated validation is green with no regression. No other defect was found in any area this pass tested with live interaction.
+
+# YES — UX-9 COMPLETE — READY FOR BETA PREPARATION
+
+- Commit: see repository log for `"UX-9: complete local beta release readiness"` immediately following this report update.
+- Browser QA: fresh-signup → manual debt entry → first-ever plan activation → payment recording → reforecast → hard reload, all PASS live against the real local-beta Firebase emulator (not the seeded in-memory harness).
+- Fresh-user result: PASS (onboarding, empty Home, debt creation, first-plan activation all correct).
+- Reload/session result: PASS (Home + 4 direct routes, no regression).
+- Bugs found: 2 (required-payment fabrication in `DebtCard`; first-ever plan activation completely broken). Bugs fixed: 2/2.
+- Test totals: 890/890 unit, 12/12 + 69/69 Firestore rules (parity confirmed).
+- Build/perf/audit: all green, 0 vulnerabilities.
+- Production non-touch proof: all work performed against `localhost:5184` / local Firebase emulators (`127.0.0.1:8090`/`9199`) only; no production Firebase project (`budgetapp-c9306`) or `tracktozero.app` was reached at any point this pass.
+
+Production deployment remains a separate, later, deliberate decision. BETA-3.1 was not started during this pass, per instruction.

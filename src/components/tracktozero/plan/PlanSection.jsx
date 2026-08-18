@@ -18,6 +18,7 @@ import { deriveDebtsAwaitingReforecast } from "../../../services/tracktozero/pro
 import { PLAN_DESTINATIONS, resolvePlanDestination, buildPlanPath, navigateToPlanDestination } from "./planRouting.js";
 import { getWorkspacePresentation } from "../workspacePresentation.js";
 import { describeStrategyComparison } from "./strategyComparisonSummary.js";
+import { activateOrReforecastStrategy } from "./planActivation.js";
 
 const GAP = "var(--ttz-space-4, 16px)";
 
@@ -413,7 +414,7 @@ function ManagePlanCard({ snapshot, service, refresh, runAction, writeState, act
 // before/after figure - never an implicit apply-on-click. The confirm step
 // lives here, once, so Snowball/Avalanche (and anything else that reaches
 // this component) can't accidentally skip it.
-function StrategyExperience({ title, subtitle, result, isActive, isHousehold, onApply, onInspect, useLabel, applyActionLabel, runAction, writeState, currentZeroDate, onGoToDebts }) {
+function StrategyExperience({ title, subtitle, result, isActive, isHousehold, hasActivePlan = true, onApply, onInspect, useLabel, applyActionLabel, runAction, writeState, currentZeroDate, onGoToDebts }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const canUse = !!onApply && !isActive;
   const excludedDebts = result?.excludedDebts || [];
@@ -467,12 +468,12 @@ function StrategyExperience({ title, subtitle, result, isActive, isHousehold, on
       {canUse ? (
         <ConfirmationDialog
           open={confirmOpen}
-          title={`Switch to ${title}?`}
+          title={hasActivePlan ? `Switch to ${title}?` : `Activate ${title}?`}
           confirmLabel={writeState?.action === applyActionLabel ? "Applying..." : "Apply"}
           onConfirm={confirmApply}
           onCancel={() => setConfirmOpen(false)}
         >
-          <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx }}>This creates a new plan version. Your current plan is kept in your plan history, never overwritten.</p>
+          <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx }}>{hasActivePlan ? "This creates a new plan version. Your current plan is kept in your plan history, never overwritten." : "This creates and activates your first payoff plan."}</p>
           <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 8 }}>
             Estimated payoff moves from <strong>{currentZeroDate || "n/a"}</strong> to <strong>{result?.projectedZeroDate || "n/a"}</strong>.
           </p>
@@ -504,6 +505,7 @@ function SnowballView({ snapshot, service, refresh, runAction, writeState, onGoT
   if (!result) return <LoadingState label="Loading Snowball" />;
 
   const isActive = (snapshot.activeContext?.version?.strategy || "") === "snowball";
+  const hasActivePlan = !!snapshot.activeContext?.version;
   return (
     <StrategyExperience
       title="Snowball"
@@ -511,6 +513,7 @@ function SnowballView({ snapshot, service, refresh, runAction, writeState, onGoT
       result={result.snowball}
       isActive={isActive}
       isHousehold={snapshot.workspace.type === "household"}
+      hasActivePlan={hasActivePlan}
       useLabel="Use Snowball"
       applyActionLabel="use snowball"
       runAction={runAction}
@@ -518,7 +521,7 @@ function SnowballView({ snapshot, service, refresh, runAction, writeState, onGoT
       currentZeroDate={snapshot.projectedZeroDate}
       onGoToDebts={onGoToDebts}
       onApply={async () => {
-        await service.applyReforecast(workspaceId, { strategy: "snowball" });
+        await activateOrReforecastStrategy(service, workspaceId, "snowball", hasActivePlan);
         await refresh();
       }}
     />
@@ -542,6 +545,7 @@ function AvalancheView({ snapshot, service, refresh, runAction, writeState, onGo
   if (!result) return <LoadingState label="Loading Avalanche" />;
 
   const isActive = (snapshot.activeContext?.version?.strategy || "") === "avalanche";
+  const hasActivePlan = !!snapshot.activeContext?.version;
   return (
     <StrategyExperience
       title="Avalanche"
@@ -549,6 +553,7 @@ function AvalancheView({ snapshot, service, refresh, runAction, writeState, onGo
       result={result.avalanche}
       isActive={isActive}
       isHousehold={snapshot.workspace.type === "household"}
+      hasActivePlan={hasActivePlan}
       useLabel="Use Avalanche"
       applyActionLabel="use avalanche"
       runAction={runAction}
@@ -556,7 +561,7 @@ function AvalancheView({ snapshot, service, refresh, runAction, writeState, onGo
       currentZeroDate={snapshot.projectedZeroDate}
       onGoToDebts={onGoToDebts}
       onApply={async () => {
-        await service.applyReforecast(workspaceId, { strategy: "avalanche" });
+        await activateOrReforecastStrategy(service, workspaceId, "avalanche", hasActivePlan);
         await refresh();
       }}
     />

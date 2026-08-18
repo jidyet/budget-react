@@ -111,7 +111,14 @@ function DebtCard({ debt, disambiguator, latestSnapshotsByDebt, paymentEventsByD
         {money(resolveDebtBalance(debt, latestSnapshotsByDebt))} · {debt.aprStatus === "unknown" ? "APR unknown" : percent(debt.apr)}
       </div>
       <div style={{ ...TYPE_SCALE.supporting, color: palette.tx2 }}>
-        Required payment: {money(debt.minimumRequiredPayment)} · Due day: {debt.dueDay || "not set"}
+        {/* UX-9 regression fix: a null minimumRequiredPayment (the correct
+            "missing, never fabricated as $0" representation) was rendered
+            through money() unconditionally here, silently showing "$0.00" -
+            LenderGroupAccountRow right above already null-guards the exact
+            same field ("not set"); this brings DebtCard (the ungrouped/
+            "None" group-by view) in line with that same, already-established
+            contract instead of duplicating a second, diverging pattern. */}
+        Required payment: {debt.minimumRequiredPayment == null ? "not set" : money(debt.minimumRequiredPayment)} · Due day: {debt.dueDay || "not set"}
       </div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
         <DebtBadges debt={debt} isTarget={isTarget} isHousehold={isHousehold} />

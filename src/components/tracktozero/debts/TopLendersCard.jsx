@@ -36,31 +36,29 @@ export default function TopLendersCard({ debts, onGoToDebts }) {
           </div>
         </div>
 
-        <div style={{ display: "grid", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10, alignItems: "start" }}>
           {visible.map((group) => (
             <div
               key={group.lenderId}
               style={{
                 display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: 12,
-                flexWrap: "wrap",
+                flexDirection: "column",
+                gap: 10,
                 padding: 12,
                 borderRadius: 12,
                 background: ttzPalette.surf2,
                 border: `1px solid ${ttzPalette.border}`,
               }}
             >
-              <LenderIdentity creditorName={group.canonicalName} size="sm" />
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 700 }}>{money(group.total)}</div>
-                  <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>
-                    {group.count} account{group.count === 1 ? "" : "s"}{group.highestKnownApr != null ? ` · ${percent(group.highestKnownApr)} highest APR` : ""}
-                  </div>
-                </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                <LenderIdentity creditorName={group.canonicalName} size="sm" />
                 {onGoToDebts ? <Badge tone="neutral">View</Badge> : null}
+              </div>
+              <div>
+                <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 700 }}>{money(group.total)}</div>
+                <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>
+                  {group.count} account{group.count === 1 ? "" : "s"}{group.highestKnownApr != null ? ` · ${percent(group.highestKnownApr)} highest APR` : ""}
+                </div>
               </div>
             </div>
           ))}

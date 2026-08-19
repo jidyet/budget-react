@@ -525,6 +525,15 @@ function NoActivePlanState({ homeContext, onCompareStrategies, onAddDebt, onGoTo
         </Card>
       </div>
 
+      {/* GATE-10B.1C fix: UpcomingPaymentsCard was previously INSIDE this
+          same summary-card grid (reproduced live: on a wide viewport with
+          both Import review and Household breakdown present, auto-fit
+          packed 5 cards - including the payments list - into one row). It's
+          now its own full-width row, same as every other Home state. The
+          inline hand-rolled "Import review" card is also replaced with the
+          shared ReviewSummaryCard (the same consolidation the main
+          active-plan state already got), so there is exactly one Import
+          Review presentation across all of Home's states, not two. */}
       <div style={gridColumns(280)}>
         <ProgressRing
           progress={homeContext.progress || { confirmed: false, openingBalance: 0, latestBalance: 0, eliminated: 0, percent: 0 }}
@@ -534,31 +543,12 @@ function NoActivePlanState({ homeContext, onCompareStrategies, onAddDebt, onGoTo
 
         <DebtSnapshotCard homeContext={homeContext} onGoToDebts={onGoToDebts || onAddDebt} />
 
-        <UpcomingPaymentsCard homeContext={homeContext} onGoToDebts={onGoToDebts || onAddDebt} onRecordPayment={onRecordPayment} {...paymentActions} />
-
-        <Card variant="default" style={{ padding: 24 }}>
-          <div style={{ display: "grid", gap: 12 }}>
-            <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Import review</div>
-            <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>
-              {homeContext.staleBatchCount > 0
-                ? `${homeContext.staleBatchCount} older import${homeContext.staleBatchCount === 1 ? "" : "s"} need${homeContext.staleBatchCount === 1 ? "s" : ""} a fresh start.`
-                : homeContext.openReviewCount > 0
-                ? `${homeContext.openReviewCount} import decision${homeContext.openReviewCount === 1 ? "" : "s"} still need${homeContext.openReviewCount === 1 ? "s" : ""} review.`
-                : `${homeContext.debtCount} debt${homeContext.debtCount === 1 ? "" : "s"} tracked.`}
-            </div>
-            <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>
-              {homeContext.staleBatchCount > 0
-                ? "Older spreadsheet review data is no longer trustworthy under the current classifier."
-                : homeContext.openReviewCount > 0
-                ? "Clean these up to keep your payoff picture accurate."
-                : "You're ready to compare payoff strategies and choose your plan."}
-            </div>
-            {(homeContext.openReviewCount > 0 || homeContext.staleBatchCount > 0) ? <Button variant="secondary" onClick={onGoToReview}>Open review</Button> : null}
-          </div>
-        </Card>
+        <ReviewSummaryCard homeContext={homeContext} onGoToReview={onGoToReview} />
 
         {homeContext.isHousehold ? <HouseholdBreakdownCard homeContext={homeContext} onGoToDebts={onGoToDebts || onAddDebt} /> : null}
       </div>
+
+      <UpcomingPaymentsCard homeContext={homeContext} onGoToDebts={onGoToDebts || onAddDebt} onRecordPayment={onRecordPayment} {...paymentActions} />
 
       <TrajectoryChart homeContext={homeContext} />
     </div>

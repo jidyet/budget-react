@@ -24,17 +24,51 @@ const REQUIRED_PAYMENT_SOURCE_LABEL = {
   unknown: "Unknown",
 };
 
-const draftFromDebt = (debt) => ({
-  name: debt?.name || "",
-  debtType: debt?.debtType || "other",
-  aprStatus: debt?.aprStatus || "unknown",
-  apr: debt?.aprStatus && debt.aprStatus !== "unknown" && debt.aprStatus !== "no_interest" ? String(Number(debt.apr || 0) * 100) : "",
-  minimumRequiredPayment: debt?.minimumRequiredPayment != null ? String(debt.minimumRequiredPayment) : "",
-  dueDay: debt?.dueDay || "",
-  ownerType: debt?.ownerType || "unassigned",
-  ownerId: debt?.ownerId || "",
-  includedInCorePayoffPlan: debt?.includedInCorePayoffPlan !== false,
-});
+const draftFromDebt = (debt) => {
+  const rule = debt?.minimumPaymentRule || null;
+  return {
+    name: debt?.name || "",
+    debtType: debt?.debtType || "other",
+    aprStatus: debt?.aprStatus || "unknown",
+    apr: debt?.aprStatus && debt.aprStatus !== "unknown" && debt.aprStatus !== "no_interest" ? String(Number(debt.apr || 0) * 100) : "",
+    minimumRequiredPayment: debt?.minimumRequiredPayment != null ? String(debt.minimumRequiredPayment) : "",
+    dueDay: debt?.dueDay || "",
+    ownerType: debt?.ownerType || "unassigned",
+    ownerId: debt?.ownerId || "",
+    includedInCorePayoffPlan: debt?.includedInCorePayoffPlan !== false,
+    // GATE-10B.1A: "" means "Other / I don't know" (no rule) - the only
+    // state that clears minimumPaymentRule on save.
+    ruleType: rule?.ruleType || "",
+    rulePercentage: rule?.percentageComponent != null ? String(rule.percentageComponent * 100) : "",
+    ruleFixedFloor: rule?.fixedFloor != null ? String(rule.fixedFloor) : "",
+    ruleInterestComponent: !!rule?.interestComponent,
+    ruleFeeComponent: !!rule?.feeComponent,
+    ruleFeeAmount: rule?.feeAmount != null ? String(rule.feeAmount) : "",
+  };
+};
+
+// GATE-10B.1A: true only when the chosen ruleType has everything
+// createMinimumPaymentRuleProfile would require - lets the Save button stay
+// disabled on an incomplete rule instead of the user discovering a rejected
+// save only after submitting.
+const isRuleDraftComplete = (draft) => {
+  if (draft.ruleType === "") return true; // "Other / I don't know" - always valid, clears the rule
+  if (draft.ruleType === "fixed_amount") return draft.ruleFixedFloor !== "";
+  if (draft.ruleType === "percentage_of_balance" || draft.ruleType === "percentage_plus_interest_fees") return draft.rulePercentage !== "";
+  return false;
+};
+
+const ruleInputFromDraft = (draft) => {
+  if (draft.ruleType === "") return null;
+  return {
+    ruleType: draft.ruleType,
+    percentageComponent: draft.rulePercentage === "" ? null : Number(draft.rulePercentage),
+    fixedFloor: draft.ruleFixedFloor === "" ? null : Number(draft.ruleFixedFloor),
+    interestComponent: draft.ruleType === "percentage_plus_interest_fees" && draft.ruleInterestComponent,
+    feeComponent: draft.ruleType === "percentage_plus_interest_fees" && draft.ruleFeeComponent,
+    feeAmount: draft.ruleFeeAmount === "" ? null : Number(draft.ruleFeeAmount),
+  };
+};
 
 // UX-8.2: the one place a confirmed Debt (healthy, needs-attention, manual,
 // imported, Joint, unassigned - any state) gets reviewed and corrected.
@@ -88,6 +122,22 @@ export default function ReviewEditDebtDrawer({ open, debt, onClose, snapshot, se
         ownerId: draft.ownerId,
         includedInCorePayoffPlan: !!draft.includedInCorePayoffPlan,
       });
+      // GATE-10B.1A: a separate service call (setMinimumPaymentRule), same
+      // manageDebts trust tier as updateDebt - only actually called when
+      // the rule draft differs from what's already saved, so re-saving
+      // details unrelated to the rule doesn't churn an unnecessary write.
+      const nextRule = ruleInputFromDraft(draft);
+      const currentRule = debt.minimumPaymentRule || null;
+      if (JSON.stringify(nextRule) !== JSON.stringify(currentRule ? {
+        ruleType: currentRule.ruleType,
+        percentageComponent: currentRule.percentageComponent,
+        fixedFloor: currentRule.fixedFloor,
+        interestComponent: currentRule.interestComponent,
+        feeComponent: currentRule.feeComponent,
+        feeAmount: currentRule.feeAmount,
+      } : null)) {
+        await service.setMinimumPaymentRule(snapshot.workspace.id, debt.id, nextRule);
+      }
       await refresh();
     });
   };
@@ -182,6 +232,53 @@ export default function ReviewEditDebtDrawer({ open, debt, onClose, snapshot, se
             <Field label="Due day (1-31)">
               <Input type="number" min="1" max="31" value={draft.dueDay} onChange={(event) => setDraft({ ...draft, dueDay: event.target.value })} />
             </Field>
+            <Field label="Minimum payment rule (optional - improves next-cycle estimates)">
+              <Select value={draft.ruleType} onChange={(event) => setDraft({ ...draft, ruleType: event.target.value })}>
+                <option value="">Other / I don&apos;t know</option>
+                <option value="fixed_amount">Lender statement gives me a fixed minimum each cycle</option>
+                <option value="percentage_of_balance">Percentage of balance</option>
+                <option value="percentage_plus_interest_fees">Percentage of balance + interest/fees</option>
+              </Select>
+            </Field>
+            {draft.ruleType === "fixed_amount" ? (
+              <Field label="Fixed minimum amount">
+                <MoneyInput min="0" value={draft.ruleFixedFloor} onChange={(event) => setDraft({ ...draft, ruleFixedFloor: event.target.value })} />
+              </Field>
+            ) : null}
+            {draft.ruleType === "percentage_of_balance" || draft.ruleType === "percentage_plus_interest_fees" ? (
+              <>
+                <Field label="Percentage of balance (%)">
+                  <Input type="number" min="0" step="0.01" value={draft.rulePercentage} onChange={(event) => setDraft({ ...draft, rulePercentage: event.target.value })} />
+                </Field>
+                <Field label="Fixed floor (optional - e.g. 'the greater of X% or $Y')">
+                  <MoneyInput min="0" value={draft.ruleFixedFloor} onChange={(event) => setDraft({ ...draft, ruleFixedFloor: event.target.value })} />
+                </Field>
+              </>
+            ) : null}
+            {draft.ruleType === "percentage_plus_interest_fees" ? (
+              <>
+                <Checkbox
+                  label="Include estimated monthly interest (based on this debt's APR)"
+                  checked={draft.ruleInterestComponent}
+                  onChange={(event) => setDraft({ ...draft, ruleInterestComponent: event.target.checked })}
+                />
+                <Checkbox
+                  label="Include a typical fee amount"
+                  checked={draft.ruleFeeComponent}
+                  onChange={(event) => setDraft({ ...draft, ruleFeeComponent: event.target.checked })}
+                />
+                {draft.ruleFeeComponent ? (
+                  <Field label="Typical fee amount">
+                    <MoneyInput min="0" value={draft.ruleFeeAmount} onChange={(event) => setDraft({ ...draft, ruleFeeAmount: event.target.value })} />
+                  </Field>
+                ) : null}
+              </>
+            ) : null}
+            {draft.ruleType !== "" ? (
+              <p style={{ ...TYPE_SCALE.caption, color: palette.tx2, margin: 0 }}>
+                Only choose this if you&apos;ve actually confirmed it - from your statement, cardholder agreement, or issuer. TrackToZero applies this formula to your balance to estimate next cycle&apos;s minimum; it never invents one on its own.
+              </p>
+            ) : null}
             <OwnerField
               workspace={snapshot.workspace}
               members={snapshot.members}
@@ -202,11 +299,14 @@ export default function ReviewEditDebtDrawer({ open, debt, onClose, snapshot, se
               onChange={(event) => setDraft({ ...draft, includedInCorePayoffPlan: event.target.checked })}
             />
             <div style={{ display: "flex", gap: 8 }}>
-              <Button type="submit" variant="primary" disabled={!canManage || writeState.inProgress}>
+              <Button type="submit" variant="primary" disabled={!canManage || writeState.inProgress || !isRuleDraftComplete(draft)}>
                 {writeState.action === "edit debt details" ? "Saving..." : "Save details"}
               </Button>
             </div>
             {!canManage && <p style={{ ...TYPE_SCALE.caption, color: palette.tx2 }}>Your role is read-only for debt details.</p>}
+            {canManage && !isRuleDraftComplete(draft) ? (
+              <p style={{ ...TYPE_SCALE.caption, color: palette.tx2, margin: 0 }}>Finish or clear the minimum payment rule above before saving.</p>
+            ) : null}
           </form>
         ) : null}
 
@@ -275,6 +375,13 @@ export default function ReviewEditDebtDrawer({ open, debt, onClose, snapshot, se
               <p style={{ ...TYPE_SCALE.caption, color: palette.tx2, margin: 0 }}>
                 {recordedThisCycle.hasCycle ? `${money(recordedThisCycle.total)} recorded this cycle` : `${money(recordedThisCycle.total)} recorded (no due day set, so cycle boundaries are unknown)`}
                 {working.amount != null ? ` · Working balance ${money(working.amount)}${working.isEstimated ? " (estimated)" : ""}` : ""}
+              </p>
+              {/* GATE-10B.1A: a separate, clearly-labeled figure from "This
+                  cycle's required payment" above - never "Next minimum due"
+                  unless lender-confirmed (it never is, here). */}
+              <p style={{ ...TYPE_SCALE.caption, color: palette.tx2, margin: 0 }}>
+                Estimated next minimum: {debt.estimatedNextMinimumPayment != null ? `~${money(debt.estimatedNextMinimumPayment)}` : "Unknown"}
+                {debt.estimatedNextMinimumPayment != null ? " - based on your latest balance and the payment rule saved for this account. Your lender's next statement may differ." : " - set a minimum payment rule under Edit details to enable this."}
               </p>
               <p style={{ ...TYPE_SCALE.caption, color: palette.tx2, margin: 0 }}>
                 Recording a payment does not change the confirmed balance - use Update balance for that.

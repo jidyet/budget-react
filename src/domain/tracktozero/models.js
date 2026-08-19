@@ -7,6 +7,8 @@ import {
   IMPORT_CANDIDATE_DECISIONS,
   INVITATION_STATUSES,
   MEMBER_ROLES,
+  MINIMUM_PAYMENT_RULE_SOURCES,
+  MINIMUM_PAYMENT_RULE_TYPES,
   OWNER_TYPES,
   PAYMENT_SOURCE_TYPES,
   PERSON_KINDS,
@@ -113,6 +115,47 @@ export const createWorkspacePerson = (input = {}) => deepFreezeClone({
   updatedBy: optionalString(input.updatedBy),
 });
 
+// GATE-10B.1A: a Debt's optional, explicitly-confirmed minimum-payment rule
+// profile - the structural FORMULA TrackToZero should apply to compute
+// ESTIMATED NEXT MINIMUM as the working balance moves, never a value
+// TrackToZero invented itself (see minimumPaymentRules.js's computeFromRule,
+// the only reader of this shape). Validates the fields the chosen ruleType
+// actually needs are present, so an incomplete/invalid rule can never be
+// silently saved and later silently ignored.
+export const createMinimumPaymentRuleProfile = (input = {}) => {
+  const ruleType = requireEnum(input.ruleType, MINIMUM_PAYMENT_RULE_TYPES, "minimumPaymentRule.ruleType");
+  const percentageComponent = input.percentageComponent == null || input.percentageComponent === ""
+    ? null
+    : normalizeAprDecimal(input.percentageComponent, "minimumPaymentRule.percentageComponent");
+  const fixedFloor = optionalMoney(input.fixedFloor, "minimumPaymentRule.fixedFloor");
+  if (ruleType === "fixed_amount" && fixedFloor == null) {
+    throw new Error("minimumPaymentRule.fixedFloor is required when ruleType is \"fixed_amount\"");
+  }
+  if ((ruleType === "percentage_of_balance" || ruleType === "percentage_plus_interest_fees") && percentageComponent == null) {
+    throw new Error(`minimumPaymentRule.percentageComponent is required when ruleType is "${ruleType}"`);
+  }
+  const interestComponent = ruleType === "percentage_plus_interest_fees" && !!input.interestComponent;
+  const feeComponent = ruleType === "percentage_plus_interest_fees" && !!input.feeComponent;
+  const feeAmount = feeComponent ? optionalMoney(input.feeAmount, "minimumPaymentRule.feeAmount") : null;
+  return deepFreezeClone({
+    ruleType,
+    ruleSource: requireEnum(input.ruleSource || "USER_CONFIRMED_RULE", MINIMUM_PAYMENT_RULE_SOURCES, "minimumPaymentRule.ruleSource"),
+    percentageComponent,
+    fixedFloor,
+    interestComponent,
+    feeComponent,
+    feeAmount,
+    // Free-text note a human can leave for themselves/other household
+    // members about where this rule came from (e.g. "June 2026 cardholder
+    // agreement, section 4.2") - never a dump of a private document, just a
+    // short reference. Optional.
+    sourceEvidence: optionalString(input.sourceEvidence),
+    effectiveDate: requireTimestamp(input.effectiveDate, "minimumPaymentRule.effectiveDate"),
+    updatedAt: requireTimestamp(input.updatedAt, "minimumPaymentRule.updatedAt"),
+    updatedBy: requireString(input.updatedBy, "minimumPaymentRule.updatedBy"),
+  });
+};
+
 export const createDebt = (input = {}) => {
   const debtType = optionalString(input.debtType) || "other";
   const aprStatus = requireEnum(input.aprStatus || "unknown", APR_STATUSES, "debt.aprStatus");
@@ -156,12 +199,19 @@ export const createDebt = (input = {}) => {
     // required payment) - machine-derived only (see minimumPaymentRules.js/
     // shouldRecalculateEstimate, wired into v2AsyncApplicationService.js),
     // never directly user-editable (excluded from DEBT_EDITABLE_FIELDS).
-    // Ships null/"unknown" for every debt today since no issuer rule is
-    // registered yet - the fields exist so a future rule has somewhere to
-    // write without a schema migration, not because a rule fires now.
+    // GATE-10B.1A: stays null/"unknown" unless minimumPaymentRule (below) is
+    // set to a valid, explicitly-confirmed rule - TrackToZero never
+    // estimates from APR alone or any built-in guessed formula.
     estimatedNextMinimumPayment: optionalMoney(input.estimatedNextMinimumPayment, "debt.estimatedNextMinimumPayment"),
     estimatedNextMinimumSource: requireEnum(input.estimatedNextMinimumSource || "unknown", PAYMENT_SOURCE_TYPES, "debt.estimatedNextMinimumSource"),
     estimatedNextMinimumUpdatedAt: optionalTimestamp(input.estimatedNextMinimumUpdatedAt),
+    // GATE-10B.1A: the explicitly-confirmed rule (if any) TrackToZero should
+    // apply to compute estimatedNextMinimumPayment as the working balance
+    // moves - see createMinimumPaymentRuleProfile above. null (the default)
+    // means "no rule available," and the estimate stays Unknown - this is a
+    // valid, accepted, permanent state for an account with no confirmed
+    // formula, not an error.
+    minimumPaymentRule: input.minimumPaymentRule ? createMinimumPaymentRuleProfile(input.minimumPaymentRule) : null,
     dueDay: input.dueDay == null || input.dueDay === "" ? null : Number(input.dueDay),
     // ownerId is never free text: it is either empty, or the uid of a
     // workspace member verified against the real membership list (enforced

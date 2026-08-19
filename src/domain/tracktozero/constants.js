@@ -44,6 +44,31 @@ export const BALANCE_STATUSES = Object.freeze(["confirmed", "unresolved"]);
 // minimumPaymentRules.js rule (none is registered yet - see that file);
 // "unknown" is the default whenever minimumRequiredPayment itself is null.
 export const PAYMENT_SOURCE_TYPES = Object.freeze(["statement_confirmed", "user_confirmed", "issuer_rule_estimate", "imported_requires_review", "unknown"]);
+// GATE-10B.1A: structural SHAPE of a minimum-payment rule, never a specific
+// guessed number - only "how is this account's minimum computed" (fixed
+// amount / percentage of balance / percentage plus a simple interest+fee
+// estimate), matching the three real, representable options this gate's UX
+// offers (ReviewEditDebtDrawer's "Minimum payment rule" field). The actual
+// percentage/floor/fee VALUES always come from an explicit human
+// confirmation (see MINIMUM_PAYMENT_RULE_SOURCES) - never inferred.
+export const MINIMUM_PAYMENT_RULE_TYPES = Object.freeze(["fixed_amount", "percentage_of_balance", "percentage_plus_interest_fees"]);
+// Provenance for a RULE (the formula/structure itself), distinct from
+// PAYMENT_SOURCE_TYPES (provenance for a single dollar AMOUNT).
+// LENDER_TERMS_CONFIRMED/STATEMENT_TERMS_CONFIRMED/PRODUCT_RULE_VERIFIED are
+// reserved for a future phase where a rule can genuinely be captured from a
+// confirmed lender document or vetted product database - no such capture
+// pipeline exists yet (confirmed: statement parsing today extracts a
+// minimum-payment AMOUNT and one matched source line, never calculation
+// methodology). Every rule saved through this gate's UI is stamped
+// USER_CONFIRMED_RULE - a human is always the one asserting "this is how my
+// account's minimum works," TrackToZero never guesses it.
+export const MINIMUM_PAYMENT_RULE_SOURCES = Object.freeze([
+  "LENDER_TERMS_CONFIRMED",
+  "STATEMENT_TERMS_CONFIRMED",
+  "USER_CONFIRMED_RULE",
+  "PRODUCT_RULE_VERIFIED",
+  "NO_RULE_AVAILABLE",
+]);
 // UX-4: a SavedScenario is a persisted, non-authoritative "what if" a user
 // chose to keep - it never controls execution on its own (see
 // resolveActivePlanContextAsync's pointer chain, which a scenario is never

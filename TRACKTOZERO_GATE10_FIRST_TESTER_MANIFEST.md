@@ -1,16 +1,18 @@
 # TrackToZero — Gate 10: First Tester Cohort Manifest
 
-**Do NOT commit real tester emails to this file, ever.** This manifest documents the *mechanism and process* for authorizing Cohort 1, not the people. As of this writing, zero real testers have been invited, approved, or contacted.
+**Do NOT commit real tester emails to this file, ever.** This manifest documents the *mechanism and process* for authorizing Cohort 1, not the people — use **Tester 1 / Tester 2 / Tester 3** aliases only. Sections 1–5 below describe the state as of the *original* pre-Gate-10A writing of this manifest (zero real testers, empty allowlist) — that is no longer the current state. **See Section 9 ("GATE 10B — HUMAN COHORT 1 PREPARATION") for the actual, verified-live current state of real-tester allowlisting/invitations.**
 
-## 1. Status
+## 1. Status (historical — as of original writing, superseded by Section 9)
 
-| Item | Status |
+| Item | Status (at original writing) |
 |---|---|
 | Server-enforced beta access control | Live on `tracktozero-beta`, verified (16/16 emulator tests + live Gate-10 QA — see `TRACKTOZERO_BETA3_PAYMENT_EXECUTION_AND_COHORT_READINESS_RESULTS.md` Sections 3.4–3.5) |
 | `beta_allowlist` current contents | **Empty** (confirmed via `node tools/betaAccess.cjs list` immediately before this manifest was written) |
 | Real testers invited | **Zero** |
 | Real tester emails added to the allowlist | **Zero** |
 | Public/self-serve signup | Closed (proven live — an unapproved signup is shown an invite-only screen and is denied at the rules level even if it bypasses the UI) |
+
+**This table is a historical snapshot, not the current state.** As of Gate 10B preparation (Section 9), the allowlist is no longer empty and one real household invitation is pending. Do not read this table as describing today's system.
 
 ## 2. How to authorize Cohort 1 (once the owner decides to proceed)
 
@@ -34,9 +36,9 @@ See `TRACKTOZERO_BETA3_PAYMENT_EXECUTION_AND_COHORT_READINESS_RESULTS.md` Sectio
 - [x] All synthetic QA data cleaned up; `beta_allowlist` confirmed empty.
 - [ ] **Explicit owner authorization to proceed with Cohort 1** — not granted as part of this phase; this manifest exists so that authorization, when given, has a ready mechanism to act on immediately.
 
-## 5. Explicitly not done in this phase
+## 5. Explicitly not done in this phase (historical — describes the pre-Gate-10A phase only)
 
-No real tester was invited. No real tester email was added to `beta_allowlist`. No real tester email appears anywhere in this manifest, the results report, the tester guide, or any commit in this phase.
+No real tester was invited. No real tester email was added to `beta_allowlist`. No real tester email appears anywhere in this manifest, the results report, the tester guide, or any commit in this phase. **This describes the phase in which it was written — see Section 9 for what has since changed.**
 
 ## 6. REAL-WORKBOOK IMPORT GATE (BETA-3.1)
 
@@ -122,7 +124,24 @@ A production-like live rehearsal against the real deployed `tracktozero-beta.web
 
 One real defect was found and fixed this phase: a deployment-tooling gap (not a TrackToZero product defect) where `scripts/deploy-beta.mjs` could deploy a `dist/` build accidentally configured with production's Firebase credentials to the public beta URL. A permanent, automatic verification gate was added to the script itself, tested in both directions (correct build passes, incorrect build is refused), before any cohort testing began. Zero real tester emails were requested, added, or discussed at any point during this sub-phase.
 
-## 9. GATE 10B.1 — PAYMENT / PLAN / RESPONSIVE HOTFIX
+## 9. GATE 10B — HUMAN COHORT 1 PREPARATION
+
+**This is the current, verified-live ground truth as of GATE-10B.1A** (checked via a read-only Admin SDK audit against `tracktozero-beta`, not reconstructed from memory). Real identities are referred to only as Tester 1/2/3, per this cohort's locked composition (owner, household member/import tester, viewer).
+
+| Item | Tester 1 (Owner) | Tester 2 (Household Member) | Tester 3 (Viewer/Contributor) |
+|---|---|---|---|
+| Allowlisted (`beta_allowlist`, status=active) | **YES** | **YES** | **YES** |
+| Real household invitation issued (`member_invites` document exists) | N/A — already the workspace owner | **NO** — no invite document exists for this identity despite being allowlisted | **YES** — role `contributor`, status `pending` |
+| Invitation email delivered/opened | N/A | N/A (no invite was ever issued) | **NOT CONFIRMED** — this session has no visibility into email delivery/inbox state |
+| Invitation accepted | N/A | **NO** | **NO** — invite status is `pending`, no `acceptedAt` |
+| Household membership | **YES** — role `owner`, status `active` (pre-existing; this is the real product owner's own account, not a new addition) | **NO** — not a member of the household workspace at all | **NO** — not a member yet |
+| Actively tested by a real human this phase | **NOT CONFIRMED by this session** — Tester 1 was asked to retry sign-in after an allowlist fix; no further confirmation of successful use was recorded before this session's context was compacted | **NO** | **NO** |
+
+**Plain-language summary**: all three real identities are allowlisted (can pass the beta's access gate if they sign in with the correct email). Only Tester 3 has an actual pending household invitation. Tester 2 was allowlisted but was **never actually invited** to the household — allowlisting alone does not grant workspace membership; a real invitation must still be issued and accepted through the app's own invite flow. Nobody has yet accepted an invitation or been independently confirmed as having actively used the app this phase, per the records this session can verify.
+
+**Gate 10B was PAUSED** shortly after this preparation (before Tester 2's invitation was ever issued, and before Tester 3's pending invitation was accepted) to fix real defects surfaced by the owner's own use — see Section 10 (Gate 10B.1). It has not yet resumed.
+
+## 10. GATE 10B.1 — PAYMENT / PLAN / RESPONSIVE HOTFIX
 
 Real human beta use surfaced genuine product defects (money overflow, missing payment actions, conflated minimum/actual/estimated payment concepts, a P1 plan-activation blocker, a desktop layout stretch bug, an unbounded mobile payment list). Gate 10B cohort progression was paused for this hotfix. Full detail: `TRACKTOZERO_GATE10B1_PAYMENT_PLAN_RESPONSIVE_HOTFIX_RESULTS.md`.
 
@@ -154,3 +173,30 @@ Real human beta use surfaced genuine product defects (money overflow, missing pa
 | **Gate 10B.1 status** | **COMPLETE** |
 
 Gate 10B (real human cohort) may resume once the owner personally verifies the fixes look correct on their own device against their own real data — no further engineering work is pending this hotfix.
+
+## 11. GATE 10B.1A — DYNAMIC MINIMUM ACTIVATION + RELEASE HYGIENE
+
+Makes ESTIMATED NEXT MINIMUM PAYMENT genuinely usable (previously architecture-only, always "Unknown") without inventing any lender/generic formula, and reconciles the repository/deployment state left open by Gate 10B.1. Full detail: `TRACKTOZERO_GATE10B1A_DYNAMIC_MINIMUM_RELEASE_HYGIENE_RESULTS.md`.
+
+| Item | Status |
+|---|---|
+| Rule provenance model | **YES** — `minimumPaymentRule` on Debt (`ruleType`/`ruleSource`/`percentageComponent`/`fixedFloor`/`interestComponent`/`feeComponent`/`sourceEvidence`/`effectiveDate`), validated in `models.js` |
+| APR alone cannot create a minimum | **YES** — structurally impossible; regression-tested (a known/no-interest/promotional APR with no confirmed rule stays Unknown) |
+| Evidence-backed rule can be saved/used | **YES** — `setMinimumPaymentRule` service call, `manageDebts`-gated, wired into a real "Minimum payment rule" UI in the Debt drawer |
+| Existing import data investigated for evidence | **YES** — confirmed no existing infrastructure captures minimum-payment calculation methodology (only the dollar amount), so the safe user-configuration UX was built instead of an (unsupported) automatic-detection path |
+| Unknown rule stays Unknown | **YES** — verified live and by regression test; no universal coverage manufactured |
+| Balance decrease recalculates the estimate downward | **YES** — verified live (2% rule, balance confirmed lower → estimate fell) and by regression test |
+| Balance increase recalculates the estimate upward | **YES** — verified live (2% rule, balance confirmed at $9,000 → estimate rose to $180) and by regression test |
+| Current-cycle minimum unaffected by estimate changes | **YES** — verified live and by regression test (MIN-DYN/MIN-CALC-10) |
+| Actual payment remains independent | **YES** — unchanged from Gate 10B.1 |
+| New lender-confirmed minimum supersedes the estimate | **YES** — the two fields are independent by construction; regression-tested |
+| Plan retains intended payoff power | **YES** — proven directly: `estimatedNextMinimumPayment`/`minimumPaymentRule` have zero effect on `buildProjectionWithWarnings`' output; PlanVersion history, projected $0 date, and payoff order/target are all unaffected by configuring a rule |
+| Viewer cannot alter rules | **YES** — regression-tested (`setMinimumPaymentRule` rejected) and verified live (zero payment-action entry points reachable) |
+| Contributor permission scope | **YES** — Contributor correctly refused on rule configuration (a debt-terms decision), while ordinary payment/balance recording remains unaffected |
+| Real owner email redacted from committed report | **PARTIAL** — fixed in the not-yet-pushed commit; a broader, already-pushed historical leak (several older commits) was found and is documented, not remediated (would require a history rewrite/force-push out of this gate's authority) |
+| Remote beta branch reconciled | **YES** — see Section 4/6 of the results report for the exact push/verification |
+| Full validation | **YES** — 1000/1000 unit, 12/12 legacy rules, 69/69 V2 rules, 0 lint errors, build/perf/audit green |
+| Production untouched | **YES** |
+| **Gate 10B.1A status** | **COMPLETE** |
+
+Gate 10B (real human cohort) may resume once the owner personally verifies the dynamic-minimum feature (configuring a rule, seeing the estimate move) looks correct on their own device.

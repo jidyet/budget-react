@@ -1,5 +1,5 @@
 import { ROLE_PERMISSIONS } from "../../domain/tracktozero/constants.js";
-import { createStartingDebtSnapshotItem } from "../../domain/tracktozero/models.js";
+import { createMinimumPaymentRuleProfile, createStartingDebtSnapshotItem } from "../../domain/tracktozero/models.js";
 import { isDebtNeedsReview, resolveDebtOwnership } from "../../domain/tracktozero/ownership.js";
 import { resolveWorkingBalance } from "../../domain/tracktozero/paymentCycle.js";
 import { estimateNextMinimum, shouldRecalculateEstimate } from "../../domain/tracktozero/minimumPaymentRules.js";
@@ -885,6 +885,35 @@ export const createTrackToZeroV2AsyncAppService = ({
     });
     await recalculateEstimatedNextMinimum(workspaceId, debtId);
     return snapshot;
+  };
+
+  // GATE-10B.1A: the only way a Debt's minimumPaymentRule is ever set -
+  // makes ESTIMATED NEXT MINIMUM genuinely usable (previously architecture-
+  // only, always "unknown" - see minimumPaymentRules.js). Gated on
+  // manageDebts (the same tier as updateDebt/confirmDebtPaidOff): choosing
+  // "this is how my account's minimum is calculated" is a debt-terms
+  // decision, not a plain observation - a Contributor may record a payment
+  // but may not decide the formula TrackToZero uses to project this
+  // account's future obligations. Pass `rule: null` to clear a
+  // previously-configured rule (the "Other / I don't know" UI option) -
+  // estimatedNextMinimumPayment reverts to Unknown on the next
+  // recalculation, exactly like a debt that never had a rule.
+  const setMinimumPaymentRule = async (workspaceId, debtId, rule) => {
+    assertInteractive();
+    const { membership } = await getWorkspaceContext(workspaceId);
+    if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot configure a minimum-payment rule for this debt.");
+    const current = (await repository.listDebts(workspaceId)).find((debt) => debt.id === debtId);
+    if (!current) throw new Error("Debt not found");
+    const nextRule = rule == null
+      ? null
+      : createMinimumPaymentRuleProfile({ ...rule, effectiveDate: rule.effectiveDate || asOf, updatedAt: asOf, updatedBy: actorId });
+    const updated = await repository.saveDebt({ ...current, minimumPaymentRule: nextRule, updatedAt: asOf, updatedBy: actorId });
+    // The caller already holds manageDebts (checked above), so the
+    // recalculation write below is always authorized - no permission gate
+    // needed here, unlike recordPayment/recordBalanceSnapshot's Contributor-
+    // safe gating.
+    await recalculateEstimatedNextMinimum(workspaceId, debtId);
+    return updated;
   };
 
   // Zero-write preview for a plan that doesn't exist yet (first-run flow):
@@ -2250,6 +2279,7 @@ export const createTrackToZeroV2AsyncAppService = ({
     recordPayment,
     recordBalanceSnapshot,
     confirmDebtPaidOff,
+    setMinimumPaymentRule,
     createImportBatch,
     // Read-only resume support (UX-5 Part 51): lets the UI reload an
     // already-created, still-open ImportBatch (e.g. after navigating away

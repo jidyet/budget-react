@@ -9,6 +9,35 @@ import { statementResultToCandidate } from "./statementCandidateAdapter.js";
 // and mapping the parsed result onto the V2 candidate contract.
 export const MAX_IMPORT_FILE_BYTES = 10 * 1024 * 1024;
 
+// BETA-3.2: some real statement PDFs render an emphasized figure (a summary
+// balance, a due date) as individually positioned character glyphs rather
+// than one text run - pdf.js then reports each digit/punctuation mark as
+// its own text item, which the line-reconstruction below would otherwise
+// join into "5 , 2 4 6 . 2 5" instead of "5,246.25", silently breaking
+// every currency/date regex downstream. A run of 3+ CONSECUTIVE
+// single-character tokens that are each a digit or common numeric/currency
+// punctuation is never legitimate prose (a real sentence never contains
+// three-plus one-character "words" in a row - "Page 2 of 2" only ever has
+// isolated single digits surrounded by real words), so collapsing such a
+// run's internal spacing is safe.
+const SPACED_GLYPH_RE = /^[\d.,$%/]$/;
+export const collapseSpacedDigitRuns = (tokens) => {
+  const result = [];
+  let i = 0;
+  while (i < tokens.length) {
+    let j = i;
+    while (j < tokens.length && SPACED_GLYPH_RE.test(tokens[j])) j += 1;
+    if (j - i >= 3) {
+      result.push(tokens.slice(i, j).join(""));
+      i = j;
+    } else {
+      result.push(tokens[i]);
+      i += 1;
+    }
+  }
+  return result;
+};
+
 const extractTextFromPdf = async (file) => {
   const { pdfjsLib, workerSrc } = await loadPdfJs();
   if (!pdfjsLib) throw new Error("PDF reader is not available");
@@ -45,13 +74,13 @@ const extractTextFromPdf = async (file) => {
         if (!chunk) continue;
         const y = Number(item?.transform?.[5] ?? 0);
         if (lastY != null && Math.abs(y - lastY) > 2.5) {
-          if (currentLine.length) lines.push(currentLine.join(" ").replace(/\s+/g, " ").trim());
+          if (currentLine.length) lines.push(collapseSpacedDigitRuns(currentLine).join(" ").replace(/\s+/g, " ").trim());
           currentLine = [];
         }
         currentLine.push(chunk);
         lastY = y;
       }
-      if (currentLine.length) lines.push(currentLine.join(" ").replace(/\s+/g, " ").trim());
+      if (currentLine.length) lines.push(collapseSpacedDigitRuns(currentLine).join(" ").replace(/\s+/g, " ").trim());
       fullText += `${lines.join("\n")}\n`;
     } catch {
       // Skip an individual page that fails to render text (e.g. unsupported color space) -

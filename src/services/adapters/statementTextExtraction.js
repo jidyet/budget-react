@@ -193,19 +193,34 @@ const MONTH_NAMES = {
   december: 12, dec: 12,
 };
 
+// BETA-3.2: real statements routinely print "MM/DD/YY" (2-digit year, e.g.
+// Chase's "Statement Date: 12/06/25") alongside the 4-digit form - this
+// pipeline previously only recognized 4-digit years, so a perfectly valid,
+// clearly-stated date silently came back null. A financial statement is
+// always effectively "recent" (never genuinely 19xx), so a simple, safe
+// pivot resolves the century without guessing: 00-79 -> 20xx, 80-99 -> 19xx
+// (the conventional two-digit-year pivot), which comfortably covers any
+// statement TrackToZero will ever import.
+export function resolveTwoDigitYear(yy) {
+  const n = Number(yy);
+  if (!Number.isFinite(n) || n < 0 || n > 99) return null;
+  return n <= 79 ? 2000 + n : 1900 + n;
+}
+
 // Converts a raw date string as matched by extractLabeledDate (US-format
-// "MM/DD/YYYY" or "Month D, YYYY") into ISO "YYYY-MM-DD" for use in an
-// <input type="date">. Only ever called on a string that already matched
-// extractLabeledDate's own strict date pattern, so this never guesses at an
-// ambiguous format - it just reformats a date the statement already stated.
+// "MM/DD/YYYY", "MM/DD/YY", or "Month D, YYYY") into ISO "YYYY-MM-DD" for
+// use in an <input type="date">. Only ever called on a string that already
+// matched extractLabeledDate's own strict date pattern, so this never
+// guesses at an ambiguous format - it just reformats a date the statement
+// already stated.
 export function dateStringToIso(dateStr) {
   if (!dateStr) return null;
-  const slash = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const slash = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
   if (slash) {
     const month = Number(slash[1]);
     const day = Number(slash[2]);
-    const year = Number(slash[3]);
-    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    const year = slash[3].length === 2 ? resolveTwoDigitYear(slash[3]) : Number(slash[3]);
+    if (month < 1 || month > 12 || day < 1 || day > 31 || year == null) return null;
     return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   }
   const word = dateStr.match(/^([A-Za-z]+) (\d{1,2}),?\s*(\d{4})$/);
@@ -322,7 +337,7 @@ export function extractLabeledCurrencyWithProvenance(text, labelPatterns, option
 // A garbled/misaligned match (e.g. day 79) must never outrank - or stand in
 // for - a genuinely valid date elsewhere in the search window.
 const isPlausibleDateString = (value) => {
-  const slash = value.match(/^(\d{1,2})\/(\d{1,2})\/\d{4}$/);
+  const slash = value.match(/^(\d{1,2})\/(\d{1,2})\/(?:\d{2}|\d{4})$/);
   if (slash) {
     const month = Number(slash[1]);
     const day = Number(slash[2]);
@@ -333,9 +348,9 @@ const isPlausibleDateString = (value) => {
   return true;
 };
 
-const collectLabeledDateCandidates = (text, labelPatterns, { searchLines = 2, stopPatterns = [] } = {}) => {
+const collectLabeledDateCandidates = (text, labelPatterns, { searchLines = 2, stopPatterns = [], preferLastInRange = false } = {}) => {
   const lines = getTextLines(text);
-  const dateValueRe = /(\d{2}\/\d{2}\/\d{4}|\w+ \d{1,2},?\s*\d{4})/i;
+  const dateValueRe = /(\d{2}\/\d{2}\/\d{4}|\d{2}\/\d{2}\/\d{2}(?!\d)|\w+ \d{1,2},?\s*\d{4})/i;
   const candidates = [];
 
   lines.forEach((line, index) => {
@@ -352,7 +367,15 @@ const collectLabeledDateCandidates = (text, labelPatterns, { searchLines = 2, st
       if (!dateMatches.length) return;
       let score = 100 - labelIndex * 10 - index;
       if (index < 12) score += 18;
-      candidates.push({ value: dateMatches[0], score, matchedLabel: match[0].trim(), matchedText: line });
+      // BETA-3.2: a combined "Opening/Closing Date 11/07/25 - 12/06/25"
+      // header line incidentally matches a "closing date"/"statement date"
+      // label pattern (the label text is a substring of the header), then
+      // the forward window contains BOTH dates in the range - the opening
+      // date first, closing date last. For statement/closing-date-style
+      // searches (preferLastInRange), the closing date is definitionally
+      // the later one in a two-date range, never the first.
+      const value = preferLastInRange && dateMatches.length > 1 ? dateMatches[dateMatches.length - 1] : dateMatches[0];
+      candidates.push({ value, score, matchedLabel: match[0].trim(), matchedText: line });
     });
   });
 
@@ -473,6 +496,15 @@ export function normalizeAprCandidate(value, context = "", priority = 0) {
   // Explicitly exclude non-purchase rate rows — these should never become the selected APR.
   if (/cash advance|penalty apr|balance transfer|overdraft|default rate/.test(source)) return null;
   if (/maximum|will not exceed/.test(source)) return null;
+  // BETA-3.2: a whole-document percentage sweep (see APR_TABLE_ROW_RE's
+  // fallback usage below) also matches non-APR percentages that happen to
+  // sit next to a short run of words - rewards/cashback rates and
+  // transaction/program fees, none of which are an interest rate on a
+  // carried balance. Left unfiltered, these inflated the "N different APR
+  // values were found" warning with noise (e.g. a real 2-APR statement
+  // reporting 10+ "candidates") on statements whose marketing/fee-schedule
+  // boilerplate mentions several unrelated percentages.
+  if (/cash\s*back|reward|\bearn\b|bonus|\bpoints?\b|foreign transaction|annual fee|late fee|pay over time|program fee/.test(source)) return null;
 
   let score = priority;
   // Purchase APR rows get the strongest boost so they beat any other candidate.
@@ -534,8 +566,22 @@ export function extractAprDetails(text) {
   }
 
   for (const match of text.matchAll(APR_TABLE_ROW_RE)) {
-    const candidate = normalizeAprCandidate(match[2], match[0], 40);
+    // BETA-3.2: a rewards/cashback or fee phrase naming its percentage
+    // (e.g. "earn unlimited 1% cash back", "a fixed monthly fee of up to
+    // 1.72%") puts the disqualifying word either just before OR just after
+    // the percentage depending on phrasing - APR_TABLE_ROW_RE only captures
+    // the text immediately preceding the "%" (capped at 80 chars,
+    // non-greedy), so normalizeAprCandidate's context-based exclusion
+    // (checked against match[0] alone) can miss a disqualifying word that
+    // sits just outside that window on either side. Widening the exclusion
+    // check to also look a short distance before and after the match
+    // catches both phrasings without touching the match/score text used
+    // everywhere else.
+    const leadingContext = text.slice(Math.max(0, match.index - 40), match.index);
+    const trailingContext = text.slice(match.index + match[0].length, match.index + match[0].length + 40);
+    const candidate = normalizeAprCandidate(match[2], `${leadingContext} ${match[0]} ${trailingContext}`, 40);
     if (candidate) {
+      candidate.source = match[0];
       candidate.score += scoreAprRowContext(match[0], candidate.value);
       pushCandidate(candidate);
     }
@@ -656,8 +702,8 @@ export function extractAprRateComponents(text, { aprSelected = null } = {}) {
   }));
 }
 
-export const HOLDER_NAME_BLOCKLIST = /^(?:payable|payment|balance|transfer|minimum|account|statement|interest|previous|current|new|due|date|total|amount|fee|charge|purchase|credit|debit|available|billing|return|transaction|activity|summary|account number|routing)$/i;
-export const HOLDER_NAME_BAD_PHRASE_RE = /\b(?:account notifications|your account|my account|notifications|statement for|account summary|rewards|customer service|payment options|minimum payment|new balance|debt|shared|solo|owner|viewer|member|admin|undeliverable|service requested|current resident|current occupant|postal customer|boxholder|or resident|forwarding service|visa signature|visa platinum|visa infinite|visa business|mastercard|world elite|signature card|platinum card|business card)\b/i;
+export const HOLDER_NAME_BLOCKLIST = /^(?:payable|payment|balance|transfer|minimum|account|statement|interest|previous|current|new|due|date|total|amount|fee|charge|purchase|credit|debit|available|billing|return|transactions?|activity|summary|account number|routing)$/i;
+export const HOLDER_NAME_BAD_PHRASE_RE = /\b(?:account notifications|your account|my account|notifications|statement for|account summary|rewards|customer service|payment options|minimum payment|new balance|debt|shared|solo|owner|viewer|member|admin|undeliverable|service requested|current resident|current occupant|postal customer|boxholder|or resident|forwarding service|visa signature|visa platinum|visa infinite|visa business|mastercard|world elite|signature card|platinum card|business card|make\s*\/\s*mail|mail to|card services|address below|mobile app|download the|manage your account)\b/i;
 export const BANK_NAME_RE = /^(?:discover|chase|bank of america|capital one|citi|wells fargo|navy federal|us bank|sofi|navient|mohela|nelnet|sallie mae|aes|affirm|synchrony|american express|firstmark services|firstmark)$/i;
 export const PERSON_SUFFIX_RE = /^(?:jr|sr|ii|iii|iv|v)$/i;
 export const INSTITUTION_HINT_KEYWORDS_RE = /\b(?:bank|federal|credit|financial|services|capital|citi|chase|discover|affirm|synchrony|nelnet|navient|mohela|sallie|aes|american express|firstmark|wells fargo|sofi|navy)\b/i;
@@ -880,12 +926,24 @@ export const PROVIDER_DETECT = [
   ["Citi",                       /citi(?:bank)?/i],
 ];
 
+// BETA-3.2: a statement's own footer/legal boilerplate often discloses a
+// PARENT or affiliated company by name (e.g. "Discover, a division of
+// Capital One, N.A., Member FDIC.") - naively matching "Capital One"
+// anywhere in the text would misattribute the whole statement to the
+// parent instead of the actual issuing brand named right before it. Only
+// suppresses a match that is genuinely introduced this way; the true
+// subject entity (here, "Discover") is unaffected and still matches
+// normally via its own pattern.
+const PARENT_COMPANY_CONTEXT_RE = /\b(?:a\s+division\s+of|a\s+subsidiary\s+of|a\s+brand\s+of|member\s+of)\s+$/i;
+const isParentCompanyMention = (source, matchIndex) => PARENT_COMPANY_CONTEXT_RE.test(source.slice(Math.max(0, matchIndex - 40), matchIndex));
+
 export function detectProviderName(text) {
   const source = String(text || "");
   const providerLabels = PROVIDER_DETECT;
 
   for (const [label, regex] of providerLabels) {
-    if (regex.test(source)) return label;
+    const match = source.match(regex);
+    if (match && !isParentCompanyMention(source, match.index)) return label;
   }
 
   const genericHeaderMatch = source.match(/(?:^|\n)\s*([A-Z][A-Za-z&.,'()/ -]{2,40})\s+(?:statement|account statement|monthly statement|billing statement)\b/i);
@@ -924,14 +982,27 @@ export function detectProductName(text) {
 // statements don't describe themselves as a "credit card."
 export function detectDocumentType(text) {
   const source = String(text || "");
-  // Many real card statements never literally say "credit card" - they name
-  // the card network/product instead ("Visa Signature", "Mastercard", ...).
-  if (/\bcredit card\b|\bvisa\b|\bmastercard\b/i.test(source)) return "CREDIT_CARD_STATEMENT";
+  // BETA-3.2: LOC must be checked BEFORE credit-card (matching this
+  // function's own original intent, stated above, which the check order
+  // had drifted out of sync with) - a genuine line-of-credit statement's
+  // own boilerplate dispute-rights/legal section routinely says "credit
+  // card" several times (standard card-network disclosure language present
+  // on many statement types), while its actual product-identity evidence
+  // ("Personal Line", "draw period") is comparatively sparse. Checking
+  // credit-card first let that generic boilerplate outvote the real
+  // product signal every time.
+  //
   // Deliberately does NOT trigger on a bare "advance" - "cash advance" is
   // normal credit-card vocabulary too, so that alone would misclassify most
   // credit card statements as a line of credit. Only genuinely LOC-specific
-  // terms count here.
-  if (/line of credit|personal line|draw period/i.test(source)) return "LOC_STATEMENT";
+  // terms count here. Also deliberately excludes "revolving line of
+  // credit" specifically - some issuers (e.g. US Bank) use that exact
+  // phrase as their own generic label for an ordinary credit card's credit
+  // LIMIT field, not as evidence the account itself is an LOC product.
+  if (/(?<!revolving\s)line of credit|personal line|draw period/i.test(source)) return "LOC_STATEMENT";
+  // Many real card statements never literally say "credit card" - they name
+  // the card network/product instead ("Visa Signature", "Mastercard", ...).
+  if (/\bcredit card\b|\bvisa\b|\bmastercard\b/i.test(source)) return "CREDIT_CARD_STATEMENT";
   if (/principal balance|amortization|loan servicer|payoff amount/i.test(source)) return "LOAN_STATEMENT";
   return "UNKNOWN";
 }
@@ -1050,7 +1121,7 @@ export function enrichStatement(result, text) {
   // <a full date>" and mistaking that unrelated date for its own).
   const dueDateFromLabels = extractLabeledDate(text, DUE_DATE_LABELS, { searchLines: 2, stopPatterns: STATEMENT_DATE_LABELS });
   const dueDateProvenance = extractLabeledDateWithProvenance(text, DUE_DATE_LABELS, { searchLines: 2, stopPatterns: STATEMENT_DATE_LABELS });
-  const statementDateFromLabels = extractLabeledDate(text, STATEMENT_DATE_LABELS, { searchLines: 2, stopPatterns: DUE_DATE_LABELS });
+  const statementDateFromLabels = extractLabeledDate(text, STATEMENT_DATE_LABELS, { searchLines: 2, stopPatterns: DUE_DATE_LABELS, preferLastInRange: true });
   const statementDateIso = statementDateFromLabels ? dateStringToIso(statementDateFromLabels) : null;
   // Only tried when no full (with-year) due date was found anywhere in the
   // window - a statement that prints its due date as just "Feb 10" still
@@ -1144,11 +1215,28 @@ export function parseStatement(text) {
     }
   }
 
-  if (balance == null && minDue == null) return null;
-  return enrichStatement(
+  const enriched = enrichStatement(
     { balance, min_due: minDue, due_day: dueDateStr ? extractDay(dueDateStr) : null, bank: "", account_hint: "" },
     text,
   );
+
+  // BETA-3.2: only bail out entirely when NOTHING useful was found anywhere
+  // in the document, even after the full enrichment pass (lender, balance,
+  // minimum payment, APR, due date). The previous guard checked only this
+  // function's own narrow, cheap balance/minDue scan (lines above) - a
+  // statement whose key balance/payment figures happen to be rendered in a
+  // way that scan doesn't match (e.g. some real-world PDFs render
+  // emphasized numbers as individually spaced characters, "5 , 2 4 6 . 2
+  // 5") would return null here and never even reach enrichStatement,
+  // silently discarding genuinely-extractable evidence (lender name, due
+  // date, APR) that the fuller enrichment pass can still find independently
+  // of the balance field. Deliberately excludes holder_name from this
+  // check - it's the noisiest/most heuristic-prone field (a false-positive
+  // name-shaped phrase can be "found" in almost any prose), so on its own
+  // it isn't strong enough evidence that this is a real financial document.
+  const hasAnyEvidence = enriched.balance != null || enriched.min_due != null || enriched.apr_percent != null || !!enriched.bank || !!enriched.due_date;
+  if (!hasAnyEvidence) return null;
+  return enriched;
 }
 
 export function matchAccount(parsed, accounts) {

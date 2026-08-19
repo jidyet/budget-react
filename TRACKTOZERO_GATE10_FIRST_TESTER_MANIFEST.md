@@ -60,3 +60,30 @@ Gate 10 was held after the above was already complete, pending a mandatory real-
 | **Gate-10 import status** | **PASS** |
 
 Five real, generalized bugs were found and fixed this phase (owner-suggestion false positive, cross-sheet-formula-derived 0% APR, bare-day-of-month due date, present-but-empty APR cell counted as evidence, and a Review-UI "$0.00"-for-unresolved-balance display bug) — see the dedicated report for full detail. Zero real tester emails were requested, added, or discussed at any point during this sub-phase either.
+
+## 7. REAL PDF CORPUS GATE (BETA-3.2)
+
+Gate 10 was held again pending a mandatory real-world PDF statement corpus truth test against every real credit-card/line-of-credit statement in the owner's private review directory. Full detail: `TRACKTOZERO_BETA3_2_REAL_PDF_CORPUS_RESULTS.md`.
+
+| Item | Status |
+|---|---|
+| All discovered PDFs tested | **YES** — 22 of 22, enumerated via a direct filesystem listing, not assumed |
+| Real PDFs committed | **NO** — remain at a private, untracked path outside this repository |
+| Real PDF data written to production | **NO** — no cloud-changing command targeted anything other than the local Firestore/Auth emulator this phase |
+| Real financial candidates authoritatively persisted | **NO** — the bulk "add/confirm" action was never invoked at any point during browser QA |
+| Lender detection verified | **YES** — 7/7 issuers correctly identified after fixes (was 5/7 before; two lenders — Discover, Navy Federal — came back with an empty creditor name before this phase's fixes) |
+| Product/debt type verified | **YES** — all 3 US Bank "Personal Line" statements corrected from `credit_card` to `line_of_credit`, verified live in the Review UI |
+| Balance extraction verified | **YES** — the single highest-impact fix this phase (a digit-by-digit spaced-character rendering bug) restored balance extraction for an entire lender family (4 files) that previously came back completely blank |
+| Minimum-payment extraction verified | **YES** — correct throughout; genuinely absent on 2 sparse files, never fabricated as $0 |
+| Due-date extraction verified | **YES** — fixed for the same lender family; correct throughout after fixes |
+| Multi-APR handling verified | **YES** — a rewards/cashback/fee-percentage false-positive bug fixed, cutting one lender's inflated APR-candidate count from 10-11 to 4-5 |
+| Same-lender multi-account behavior verified | **YES** — US Bank's 3 distinct real products (personal/LOC/business) remained correctly distinct throughout |
+| Cross-month account grouping verified | **YES** (via existing, unmodified account-matching logic — no code in that layer was touched this phase; full persistence-level re-verification performed with the sanitized fixture, not the real corpus) |
+| Duplicate statements verified | **YES** (pre-existing logic, unaffected and unmodified this phase) |
+| Non-debt rejection verified | **N/A this corpus** — every real file in this specific corpus genuinely is a debt statement; the underlying gap (no dedicated non-debt detector for PDFs) is real, pre-existing, and disclosed as a known limitation, not hidden |
+| Unsupported PDF rejection verified | **YES** (pre-existing password/corrupt/image-only handling, re-confirmed via source review, unmodified this phase) |
+| Sanitized regression fixtures added | **YES** — 25 new tests, including newly-activated end-to-end coverage of 3 previously-orphaned, already-committed synthetic binary PDF fixtures |
+| Full validation | **PASS** — 915/915 unit (up from 890/890), 12/12 + 69/69 Firestore rules (unaffected), 0 lint errors, build/perf/audit green |
+| **Gate-10 PDF-corpus status** | **PASS** |
+
+Eight real, generalized bugs were found and fixed this phase (a `parseStatement` early-exit that discarded all enrichment on a narrow initial check; digit-spaced-character PDF rendering breaking currency/date extraction; a parent-company footer mention winning lender detection over the statement's own brand; a document-type check-order bug that let generic "credit card" boilerplate outrank genuine line-of-credit evidence, plus an adjacent "Revolving Line of Credit" credit-limit-label false positive caught during verification; a whole-document APR sweep counting rewards/fee percentages as APR evidence; unsupported 2-digit-year dates across the entire date-extraction pipeline; and a combined "Opening/Closing Date" range picking the wrong date) — see the dedicated report for full detail. Two additional lower-severity owner-name boilerplate false positives were also fixed. Zero real tester emails were requested, added, or discussed at any point during this sub-phase either.

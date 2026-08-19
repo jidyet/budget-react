@@ -121,3 +121,36 @@ A production-like live rehearsal against the real deployed `tracktozero-beta.web
 | **Gate 10A status** | **PASS** |
 
 One real defect was found and fixed this phase: a deployment-tooling gap (not a TrackToZero product defect) where `scripts/deploy-beta.mjs` could deploy a `dist/` build accidentally configured with production's Firebase credentials to the public beta URL. A permanent, automatic verification gate was added to the script itself, tested in both directions (correct build passes, incorrect build is refused), before any cohort testing began. Zero real tester emails were requested, added, or discussed at any point during this sub-phase.
+
+## 9. GATE 10B.1 — PAYMENT / PLAN / RESPONSIVE HOTFIX
+
+Real human beta use surfaced genuine product defects (money overflow, missing payment actions, conflated minimum/actual/estimated payment concepts, a P1 plan-activation blocker, a desktop layout stretch bug, an unbounded mobile payment list). Gate 10B cohort progression was paused for this hotfix. Full detail: `TRACKTOZERO_GATE10B1_PAYMENT_PLAN_RESPONSIVE_HOTFIX_RESULTS.md`.
+
+| Item | Status |
+|---|---|
+| Money overflow fixed | **YES** — verified live-browser at 390×844 with a synthetic $12.3M balance + long lender name |
+| Debt payment action | **YES** — direct "Record payment" button added beside "Review & edit" on every debt row |
+| Home payment action | **YES** — opens the correct debt's payment form directly, verified end-to-end in a live browser |
+| Current-cycle minimum modeled | **YES** — existing `minimumRequiredPayment` field, now with a `requiredPaymentSource` provenance field |
+| Actual payment modeled separately | **YES** — unchanged append-only `PaymentEvent[]`, new cycle-aggregation logic |
+| Estimated next minimum modeled | **YES** — new fields, architecture only, zero built-in rules (no invented formulas) |
+| Dynamic minimum recalculation | **YES** — wired into recordPayment/recordBalanceSnapshot/updateDebt, gated on `manageDebts` |
+| APR-alone fake minimum prevented | **YES** — empty rule registry makes it structurally impossible; regression-tested |
+| Working balance updates after payment | **YES** — new `resolveWorkingBalance`, verified live |
+| Confirmed-vs-working truth preserved | **YES** — `isEstimated` flag, "Estimated" disclosure copy, never presented as lender-confirmed |
+| Double-subtraction prevented | **YES** — boundary-based reconciliation, regression-tested (BAL-04/05/06) |
+| Paid-off confirmation path | **YES** — new `confirmDebtPaidOff`, explicit checkbox-gated UI, gated on `manageDebts` |
+| First Plan activation fixed | **YES** — Saved Scenarios and Finish By now branch to create+activate when no plan is active |
+| Plan persists after reload | **YES** — unchanged persistence mechanism, only the routing decision changed |
+| Reforecast still works | **YES** — unchanged code path for workspaces with an active plan |
+| PlanVersion immutability preserved | **YES** — no change to version-history contracts |
+| Desktop Home stretch fixed | **YES** — `alignItems:start`, verified live at 1440×900 |
+| Mobile payment-list wall fixed | **YES** — 3-item preview + "View all N", verified live |
+| Review count audited | **LEGITIMATE** — 43 current unresolved decisions, all from one fresh, non-stale Excel batch; no counting bug found |
+| Contributor permission regression | **FOUND AND FIXED before deploy** — caught by the V2 Firestore emulator suite (67/69 → 69/69) |
+| Full validation | **YES** — 971/971 unit, 12/12 legacy rules, 69/69 V2 rules, 0 lint errors, build/perf/audit green |
+| Production untouched | **YES** — hosting-only deploy to `tracktozero-beta`, verified via live bundle content |
+| Live post-deploy verification | **YES** — deployed commit `11b6cbc` confirmed present in the live bundle; zero production Firebase requests |
+| **Gate 10B.1 status** | **COMPLETE** |
+
+Gate 10B (real human cohort) may resume once the owner personally verifies the fixes look correct on their own device against their own real data — no further engineering work is pending this hotfix.

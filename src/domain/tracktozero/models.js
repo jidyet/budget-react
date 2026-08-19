@@ -8,6 +8,7 @@ import {
   INVITATION_STATUSES,
   MEMBER_ROLES,
   OWNER_TYPES,
+  PAYMENT_SOURCE_TYPES,
   PERSON_KINDS,
   PERSON_STATUSES,
   PLAN_STATUSES,
@@ -139,6 +140,28 @@ export const createDebt = (input = {}) => {
     // (see evaluateProjectionWarnings' missing_minimum_payment warning and
     // debtExplorerView's requiredPaymentSortValue, both already null-aware).
     minimumRequiredPayment: optionalMoney(input.minimumRequiredPayment, "debt.minimumRequiredPayment"),
+    // GATE-10B.1: provenance for minimumRequiredPayment (the current-cycle
+    // required payment) - defaults to "unknown" when the amount itself is
+    // null (never silently claim a source for a value that isn't there),
+    // "user_confirmed" when a person typed a value with no explicit source
+    // (the common manual-entry/edit-form case). The import path passes its
+    // own explicit source ("statement_confirmed"/"imported_requires_review").
+    requiredPaymentSource: requireEnum(
+      input.requiredPaymentSource || (input.minimumRequiredPayment == null ? "unknown" : "user_confirmed"),
+      PAYMENT_SOURCE_TYPES,
+      "debt.requiredPaymentSource",
+    ),
+    // GATE-10B.1: TrackToZero's own estimate of what NEXT cycle's minimum
+    // might be, distinct from minimumRequiredPayment (this cycle's actual
+    // required payment) - machine-derived only (see minimumPaymentRules.js/
+    // shouldRecalculateEstimate, wired into v2AsyncApplicationService.js),
+    // never directly user-editable (excluded from DEBT_EDITABLE_FIELDS).
+    // Ships null/"unknown" for every debt today since no issuer rule is
+    // registered yet - the fields exist so a future rule has somewhere to
+    // write without a schema migration, not because a rule fires now.
+    estimatedNextMinimumPayment: optionalMoney(input.estimatedNextMinimumPayment, "debt.estimatedNextMinimumPayment"),
+    estimatedNextMinimumSource: requireEnum(input.estimatedNextMinimumSource || "unknown", PAYMENT_SOURCE_TYPES, "debt.estimatedNextMinimumSource"),
+    estimatedNextMinimumUpdatedAt: optionalTimestamp(input.estimatedNextMinimumUpdatedAt),
     dueDay: input.dueDay == null || input.dueDay === "" ? null : Number(input.dueDay),
     // ownerId is never free text: it is either empty, or the uid of a
     // workspace member verified against the real membership list (enforced

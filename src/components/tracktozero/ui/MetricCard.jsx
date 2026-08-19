@@ -11,7 +11,7 @@ export default function MetricCard({ label, value, supporting, variant = "defaul
   return (
     <Card variant={variant} style={style} {...rest}>
       <div style={{ ...TYPE_SCALE.overline, color: palette.tx2, marginBottom: 8 }}>{label}</div>
-      <div style={{ ...TYPE_SCALE.metric, color: tone || palette.tx }}>{value}</div>
+      <div style={{ ...TYPE_SCALE.metric, color: tone || palette.tx, minWidth: 0 }}>{value}</div>
       {supporting ? (
         <div style={{ ...TYPE_SCALE.supporting, color: palette.tx2, marginTop: 6 }}>{supporting}</div>
       ) : null}

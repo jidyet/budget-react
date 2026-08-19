@@ -8,11 +8,24 @@
 // an active plan already exists: reforecast (new version of the existing
 // plan) when one does, create-then-activate (the real first plan) when it
 // doesn't.
-export async function activateOrReforecastStrategy(service, workspaceId, strategy, hasActivePlan) {
+//
+// GATE-10B.1: the same "no active plan" gap turned out to exist in two more
+// places that reached applyReforecast directly - Saved Scenarios' Apply
+// button (service.applyScenario) and Finish By's "Apply this payment
+// increase" - both reproduced live as "apply scenario: No active plan to
+// reforecast" against a real, brand-new household. applyPlanChange
+// generalizes this branch (any set of PlanVersion overrides, not just
+// {strategy}) so all three call sites share one first-activation-vs-
+// reforecast decision instead of three copies of the same branch.
+export async function applyPlanChange(service, workspaceId, hasActivePlan, { draftOverrides = {}, reforecastOverrides = {} } = {}) {
   if (hasActivePlan) {
-    await service.applyReforecast(workspaceId, { strategy });
+    await service.applyReforecast(workspaceId, reforecastOverrides);
     return;
   }
-  const { plan, version } = await service.createDraftPlan(workspaceId, { strategy });
+  const { plan, version } = await service.createDraftPlan(workspaceId, draftOverrides);
   await service.activatePlan(workspaceId, plan.id, version.id);
+}
+
+export async function activateOrReforecastStrategy(service, workspaceId, strategy, hasActivePlan) {
+  await applyPlanChange(service, workspaceId, hasActivePlan, { draftOverrides: { strategy }, reforecastOverrides: { strategy } });
 }

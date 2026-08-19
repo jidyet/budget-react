@@ -31,8 +31,12 @@ import { TYPE_SCALE, ttzPalette } from "../theme.js";
 // whichever form is active) flowing inline on the right, wrapping onto a
 // new line only at narrow widths. The caller (DebtsCenter.jsx) renders this
 // full-width above the main content instead of beside it.
-export default function QuickUpdateRail({ snapshot, service, refresh, runAction, writeState, canObserve }) {
-  const [mode, setMode] = useState(null); // null | "payment" | "balance"
+// GATE-10B.1: `initialMode` lets a caller (the mobile QuickActionSheet's
+// generic "Record payment"/"Update balance" actions, which have no specific
+// debt to jump straight to) open this rail's form pre-expanded instead of
+// requiring one more tap after navigating to Debts.
+export default function QuickUpdateRail({ snapshot, service, refresh, runAction, writeState, canObserve, initialMode = null }) {
+  const [mode, setMode] = useState(canObserve ? initialMode : null); // null | "payment" | "balance"
   const [payment, setPayment] = useState({ debtId: snapshot.debts[0]?.id || "", amount: "" });
   const [balance, setBalance] = useState({ debtId: snapshot.debts[0]?.id || "", amount: "" });
   const palette = ttzPalette;

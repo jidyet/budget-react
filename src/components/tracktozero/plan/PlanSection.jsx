@@ -18,7 +18,7 @@ import { deriveDebtsAwaitingReforecast } from "../../../services/tracktozero/pro
 import { PLAN_DESTINATIONS, resolvePlanDestination, buildPlanPath, navigateToPlanDestination } from "./planRouting.js";
 import { getWorkspacePresentation } from "../workspacePresentation.js";
 import { describeStrategyComparison } from "./strategyComparisonSummary.js";
-import { activateOrReforecastStrategy } from "./planActivation.js";
+import { activateOrReforecastStrategy, applyPlanChange } from "./planActivation.js";
 
 const GAP = "var(--ttz-space-4, 16px)";
 
@@ -31,9 +31,9 @@ function PlanMetric({ label, value, tone = "default" }) {
   }[tone] || { bg: ttzPalette.surf2, border: ttzPalette.border, color: ttzPalette.tx };
 
   return (
-    <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${colors.border}`, background: colors.bg }}>
+    <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${colors.border}`, background: colors.bg, minWidth: 0 }}>
       <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>{label}</div>
-      <div style={{ ...TYPE_SCALE.metricSm, color: colors.color, marginTop: 6 }}>{value}</div>
+      <div style={{ ...TYPE_SCALE.metricSm, color: colors.color, marginTop: 6, minWidth: 0 }}>{value}</div>
     </div>
   );
 }
@@ -801,6 +801,12 @@ function FinishByView({ snapshot, service, refresh, runAction, writeState }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const workspaceId = snapshot.workspace.id;
   const debtOptions = [{ id: "", name: "All included debts" }, ...(snapshot.payoffQueue || [])];
+  // GATE-10B.1: previously called service.applyReforecast unconditionally,
+  // which requires a pre-existing active plan/version - a workspace with no
+  // active plan yet would throw "No active plan to reforecast" here too
+  // (same class of bug as ScenarioCard.apply, see applyPlanChange's own
+  // comment in planActivation.js).
+  const hasActivePlan = !!snapshot.activeContext?.version;
 
   const check = () => runAction("check feasibility", async () => {
     if (!targetMonth) return;
@@ -809,7 +815,8 @@ function FinishByView({ snapshot, service, refresh, runAction, writeState }) {
   }, { write: false });
 
   const applyIt = () => runAction("apply finish by", async () => {
-    await service.applyReforecast(workspaceId, { extraMonthlyPayment: result.requiredMonthlyExtra });
+    const overrides = { extraMonthlyPayment: result.requiredMonthlyExtra };
+    await applyPlanChange(service, workspaceId, hasActivePlan, { draftOverrides: overrides, reforecastOverrides: overrides });
     setConfirmOpen(false);
     setResult(null);
     await refresh();
@@ -880,12 +887,12 @@ function FinishByView({ snapshot, service, refresh, runAction, writeState }) {
 
       <ConfirmationDialog
         open={confirmOpen}
-        title="Apply this to your real plan?"
+        title={hasActivePlan ? "Apply this to your real plan?" : "Start this payoff plan?"}
         confirmLabel={writeState.action === "apply finish by" ? "Applying..." : "Apply"}
         onConfirm={applyIt}
         onCancel={() => setConfirmOpen(false)}
       >
-        <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx }}>This creates a new plan version. Your current plan is kept in your plan history, never overwritten.</p>
+        <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx }}>{hasActivePlan ? "This creates a new plan version. Your current plan is kept in your plan history, never overwritten." : "This will make this payment increase your active plan. You can reforecast later as balances, payments, or goals change."}</p>
         {result ? (
           <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 8 }}>
             Extra payment becomes <strong>{money(result.requiredMonthlyExtra)}/mo</strong>, projected payoff <strong>{result.projectedZeroDate}</strong>.
@@ -923,6 +930,8 @@ function SavedScenariosView({ snapshot, service, refresh, runAction, writeState 
     );
   }
 
+  const hasActivePlan = !!snapshot.activeContext?.version;
+
   return (
     <div style={{ display: "grid", gap: GAP }}>
       {scenarios.map((scenario) => (
@@ -932,6 +941,7 @@ function SavedScenariosView({ snapshot, service, refresh, runAction, writeState 
           service={service}
           workspaceId={workspaceId}
           currentZeroDate={snapshot.projectedZeroDate}
+          hasActivePlan={hasActivePlan}
           runAction={runAction}
           writeState={writeState}
           refresh={refresh}
@@ -967,7 +977,7 @@ const scenarioProjectedZeroDate = (scenario, preview) => {
   return "";
 };
 
-function ScenarioCard({ scenario, service, workspaceId, currentZeroDate, runAction, writeState, refresh, onChanged }) {
+function ScenarioCard({ scenario, service, workspaceId, currentZeroDate, hasActivePlan, runAction, writeState, refresh, onChanged }) {
   const [loaded, setLoaded] = useState(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const canApply = APPLICABLE_SCENARIO_TYPES.includes(scenario.type);
@@ -1028,12 +1038,12 @@ function ScenarioCard({ scenario, service, workspaceId, currentZeroDate, runActi
 
       <ConfirmationDialog
         open={confirmOpen}
-        title="Apply this to your real plan?"
+        title={hasActivePlan ? "Apply this to your real plan?" : "Start this payoff plan?"}
         confirmLabel={writeState.action === "apply scenario" ? "Applying..." : "Apply"}
         onConfirm={apply}
         onCancel={() => setConfirmOpen(false)}
       >
-        <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx }}>This creates a new plan version. Your current plan is kept in your plan history, never overwritten.</p>
+        <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx }}>{hasActivePlan ? "This creates a new plan version. Your current plan is kept in your plan history, never overwritten." : "This will make this scenario your active plan. You can reforecast later as balances, payments, or goals change."}</p>
         {loaded?.isStale ? <WarningCallout style={{ marginTop: 8 }}>Your plan has changed since this scenario was saved - the numbers above were just re-checked, but double-check they still look right.</WarningCallout> : null}
       </ConfirmationDialog>
     </Card>

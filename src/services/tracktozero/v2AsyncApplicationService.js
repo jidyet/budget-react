@@ -1,6 +1,8 @@
 import { ROLE_PERMISSIONS } from "../../domain/tracktozero/constants.js";
 import { createStartingDebtSnapshotItem } from "../../domain/tracktozero/models.js";
 import { isDebtNeedsReview, resolveDebtOwnership } from "../../domain/tracktozero/ownership.js";
+import { resolveWorkingBalance } from "../../domain/tracktozero/paymentCycle.js";
+import { estimateNextMinimum, shouldRecalculateEstimate } from "../../domain/tracktozero/minimumPaymentRules.js";
 import { findDuplicateMember, findDuplicatePerson, matchImportedOwnerToIdentity, normalizePersonName } from "../../domain/tracktozero/personIdentity.js";
 import { buildExpectedCheckpoints } from "../adapters/tracktozeroCalcAdapter.js";
 import { calculateWhatIfComparison } from "../calc/scenarioComparison.js";
@@ -122,8 +124,15 @@ const dueDayFromCandidate = (candidate = {}) => {
 
 const metadataPatchFromCandidate = (metadataUpdates = {}) => {
   const allowed = ["apr", "aprStatus", "minimumRequiredPayment", "dueDay", "includedInCorePayoffPlan", "debtType", "ownerType", "ownerId", "ownerLabel", "accountReferenceSafe"];
-  return Object.fromEntries(Object.entries(metadataUpdates)
+  const patch = Object.fromEntries(Object.entries(metadataUpdates)
     .filter(([key, value]) => allowed.includes(key) && value !== undefined));
+  // GATE-10B.1: confirming a minimum-payment field from an import candidate
+  // is a statement-confirmed claim, not a guess - stamp the same provenance
+  // updateDebt derives for a direct manual edit (see below).
+  if ("minimumRequiredPayment" in patch) {
+    patch.requiredPaymentSource = patch.minimumRequiredPayment == null ? "unknown" : "statement_confirmed";
+  }
+  return patch;
 };
 
 export const getUserSafeTrackToZeroError = (error) => {
@@ -686,6 +695,46 @@ export const createTrackToZeroV2AsyncAppService = ({
   // schema validation on whatever this ends up passing it.
   const DEBT_EDITABLE_FIELDS = ["name", "debtType", "aprStatus", "apr", "minimumRequiredPayment", "dueDay", "ownerType", "ownerId", "includedInCorePayoffPlan"];
 
+  // GATE-10B.1: recomputes and persists the debt's estimatedNextMinimum-
+  // Payment/-Source/-UpdatedAt whenever a relevant input changed - never
+  // touches minimumRequiredPayment itself (the current-cycle lender-
+  // required amount stays exactly what it was until an explicit statement/
+  // edit changes it). Only called from explicit user mutations (a recorded
+  // payment, a confirmed balance, a relevant debt-terms edit), never from a
+  // render/read path, so there is no per-render cost to worry about -
+  // MINIMUM_PAYMENT_RULES is empty today, so this always resolves to
+  // {amount:null, source:"unknown"}, but estimatedNextMinimumUpdatedAt
+  // still advances each time so it's possible to see recalculation
+  // actually ran (Issue 23 - "the user should NOT have to press
+  // Recalculate minimum") rather than silently no-op'ing forever.
+  //
+  // This writes to the Debt document itself, which firestore.rules gates at
+  // v2AdminPlus - a stricter tier than recordPayment/recordBalanceSnapshot's
+  // own v2ContributorPlus (a Contributor may record observations but may
+  // not edit debt terms). Reproduced live via the V2 Firestore emulator
+  // suite: a Contributor's recordPayment call was failing outright with
+  // PERMISSION_DENIED on this secondary write, even though the actual
+  // PaymentEvent it was recording was fully authorized. Callers must only
+  // invoke this when the acting membership actually has manageDebts - never
+  // let a best-effort estimate recalculation block or fail the primary,
+  // authorized financial action a Contributor is recording.
+  const recalculateEstimatedNextMinimum = async (workspaceId, debtId) => {
+    const debt = (await repository.listDebts(workspaceId)).find((candidate) => candidate.id === debtId);
+    if (!debt) return;
+    const [latestSnapshot] = await repository.listBalanceSnapshots(workspaceId, debtId);
+    const paymentEvents = await repository.listPaymentEvents(workspaceId, debtId);
+    const working = resolveWorkingBalance({ debt, latestSnapshot: latestSnapshot || null, paymentEvents });
+    const next = estimateNextMinimum({ debt, workingBalanceAmount: working.amount });
+    await repository.saveDebt({
+      ...debt,
+      estimatedNextMinimumPayment: next.amount,
+      estimatedNextMinimumSource: next.source,
+      estimatedNextMinimumUpdatedAt: asOf,
+      updatedAt: asOf,
+      updatedBy: actorId,
+    });
+  };
+
   const updateDebt = async (workspaceId, debtId, patch = {}) => {
     assertInteractive();
     const { workspace, membership, members, people } = await getWorkspaceContext(workspaceId);
@@ -715,7 +764,23 @@ export const createTrackToZeroV2AsyncAppService = ({
       allowedPatch.ownerLabel = resolved.ownerLabel;
     }
 
-    return repository.saveDebt({ ...current, ...allowedPatch, updatedAt: asOf, updatedBy: actorId });
+    // GATE-10B.1: a direct manual edit of minimumRequiredPayment is an
+    // explicit user claim, not a machine estimate - stamp the matching
+    // provenance (see PAYMENT_SOURCE_TYPES/createDebt's own default).
+    if ("minimumRequiredPayment" in allowedPatch) {
+      allowedPatch.requiredPaymentSource = allowedPatch.minimumRequiredPayment == null ? "unknown" : "user_confirmed";
+    }
+
+    const updated = await repository.saveDebt({ ...current, ...allowedPatch, updatedAt: asOf, updatedBy: actorId });
+
+    if (shouldRecalculateEstimate(
+      { apr: current.apr, aprStatus: current.aprStatus, debtType: current.debtType },
+      { apr: updated.apr, aprStatus: updated.aprStatus, debtType: updated.debtType },
+    )) {
+      await recalculateEstimatedNextMinimum(workspaceId, debtId);
+    }
+
+    return updated;
   };
 
   const recordPayment = async (workspaceId, debtId, { amount, paidAt = asOf, notes = "" } = {}) => {
@@ -723,7 +788,7 @@ export const createTrackToZeroV2AsyncAppService = ({
     const { membership } = await getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "recordObservations")) throw new Error("Your role cannot record payments in this workspace.");
     const activeContext = await getActivePlanContext(workspaceId);
-    return repository.createPaymentEvent({
+    const event = await repository.createPaymentEvent({
       id: id("payment"),
       workspaceId,
       debtId,
@@ -736,13 +801,24 @@ export const createTrackToZeroV2AsyncAppService = ({
       createdAt: asOf,
       createdBy: actorId,
     });
+    // GATE-10B.1: a recorded payment always moves the WORKING balance
+    // (Issue 5) - it may also change what TrackToZero can estimate for next
+    // cycle's minimum, so recalculate every time a payment lands (unlike
+    // updateDebt's edit-driven path, there's no cheaper "did anything
+    // relevant change" predicate here since the payment itself always is
+    // the relevant change). Gated on manageDebts, not just recordObservations
+    // (see recalculateEstimatedNextMinimum's own comment) - a Contributor's
+    // PaymentEvent must never be blocked by the secondary estimate write
+    // they aren't authorized to make.
+    if (hasPermission(membership, "manageDebts")) await recalculateEstimatedNextMinimum(workspaceId, debtId);
+    return event;
   };
 
   const recordBalanceSnapshot = async (workspaceId, debtId, { balance, observedAt = asOf, notes = "" } = {}) => {
     assertInteractive();
     const { membership } = await getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "recordObservations")) throw new Error("Your role cannot update balances in this workspace.");
-    return repository.createBalanceSnapshot({
+    const snapshot = await repository.createBalanceSnapshot({
       id: id("snapshot"),
       workspaceId,
       debtId,
@@ -753,6 +829,62 @@ export const createTrackToZeroV2AsyncAppService = ({
       createdAt: asOf,
       createdBy: actorId,
     });
+    // GATE-10B.1: a new confirmed balance reconciles the working estimate
+    // (Issue 17) and is exactly the kind of input a next-minimum estimate
+    // should react to. Gated on manageDebts - see recordPayment's matching
+    // comment and recalculateEstimatedNextMinimum's own.
+    if (hasPermission(membership, "manageDebts")) await recalculateEstimatedNextMinimum(workspaceId, debtId);
+    return snapshot;
+  };
+
+  // GATE-10B.1: the Debts dashboard already has a "Paid off" bucket
+  // (isConfirmedZero in ownership.js: an active debt whose currentBalance
+  // is confirmed <= 0), but nothing could actually reach it manually -
+  // recordBalanceSnapshot (the existing "Update balance" action) only ever
+  // creates a BalanceSnapshot document, it deliberately never touches
+  // debt.currentBalance (that field otherwise only moves via the import
+  // path's updateDebtFromImportCandidate). A user who paid off a debt and
+  // recorded a $0 balance snapshot would see the $0 BalanceSnapshot exist,
+  // but the debt itself would keep showing its old balance everywhere and
+  // never move to "Paid off". This is the missing explicit pathway: an
+  // intentional, separate action (never triggered by a PaymentEvent alone -
+  // Issue 20/14) that records the same $0 BalanceSnapshot AND updates the
+  // Debt's own confirmed balance so isConfirmedZero actually fires.
+  //
+  // Gated on manageDebts, not recordObservations: this writes
+  // debt.currentBalance directly (a Debt-document mutation), which
+  // firestore.rules already treats as a debt-terms-tier action (v2AdminPlus,
+  // the same tier updateDebt requires) rather than an observation-tier one
+  // (v2ContributorPlus, what recordPayment/recordBalanceSnapshot use for
+  // their own subcollection writes). A Contributor may observe a $0
+  // balance but may not be the one who moves the debt itself to Paid off.
+  const confirmDebtPaidOff = async (workspaceId, debtId, { observedAt = asOf, notes = "" } = {}) => {
+    assertInteractive();
+    const { membership } = await getWorkspaceContext(workspaceId);
+    if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot mark a debt paid off in this workspace.");
+    const current = (await repository.listDebts(workspaceId)).find((debt) => debt.id === debtId);
+    if (!current) throw new Error("Debt not found");
+    const snapshot = await repository.createBalanceSnapshot({
+      id: id("snapshot"),
+      workspaceId,
+      debtId,
+      balance: 0,
+      observedAt,
+      source: "manual",
+      notes: notes || "Confirmed paid off",
+      createdAt: asOf,
+      createdBy: actorId,
+    });
+    await repository.saveDebt({
+      ...current,
+      currentBalance: 0,
+      balanceStatus: "confirmed",
+      paidOffAt: asOf,
+      updatedAt: asOf,
+      updatedBy: actorId,
+    });
+    await recalculateEstimatedNextMinimum(workspaceId, debtId);
+    return snapshot;
   };
 
   // Zero-write preview for a plan that doesn't exist yet (first-run flow):
@@ -1100,6 +1232,10 @@ export const createTrackToZeroV2AsyncAppService = ({
             aprStatus: candidate.aprStatus,
             apr: candidate.aprStatus === "unknown" ? null : candidate.apr,
             minimumRequiredPayment: candidate.minimumPayment ?? null,
+            // GATE-10B.1: a parsed-and-reviewed statement minimum is a
+            // stronger claim than a person's own typed guess - see
+            // PAYMENT_SOURCE_TYPES/createDebt's own default in models.js.
+            requiredPaymentSource: candidate.minimumPayment != null ? "statement_confirmed" : "unknown",
             dueDay: dueDayFromCandidate(candidate),
             ...ownership,
             includedInCorePayoffPlan: candidate.includedInCorePayoffPlan,
@@ -2054,23 +2190,40 @@ export const createTrackToZeroV2AsyncAppService = ({
   // "custom" is never a valid PLAN_STRATEGIES value, and a lump sum is
   // never a PaymentEvent just because it was previewed) and are refused
   // here with a clear, honest reason rather than silently doing nothing.
+  //
+  // GATE-10B.1 fix: this used to call applyReforecast unconditionally, which
+  // requires a pre-existing active plan/version - reproduced live as "apply
+  // scenario: No active plan to reforecast" for a workspace with no active
+  // plan yet (the exact "first activation != reforecast" gap
+  // activateOrReforecastStrategy already closed for Snowball/Avalanche's
+  // "Use X" buttons, planActivation.js, but this call site never adopted
+  // it). applyOrActivate below is the same branch: no active plan ->
+  // createDraftPlan + activatePlan (this scenario becomes the user's real
+  // first plan), active plan -> applyReforecast, unchanged.
   const applyScenario = async (workspaceId, scenarioId) => {
     assertInteractive();
     const { membership } = await getWorkspaceContext(workspaceId);
     if (!hasPermission(membership, "managePlans")) throw new Error("Your role cannot apply payoff scenarios.");
     const scenario = await repository.getScenario(workspaceId, scenarioId);
     if (!scenario) throw new Error("Scenario not found in this workspace.");
+    const activeContext = await getActivePlanContext(workspaceId);
+    const hasActivePlan = !!activeContext?.plan && !!activeContext?.version;
+    const applyOrActivate = async (overrides) => {
+      if (hasActivePlan) return applyReforecast(workspaceId, overrides);
+      const { plan, version } = await createDraftPlan(workspaceId, overrides);
+      return activatePlan(workspaceId, plan.id, version.id);
+    };
     if (scenario.type === "recurring_extra") {
-      return applyReforecast(workspaceId, { extraMonthlyPayment: Number(scenario.inputs.extraMonthlyPayment || 0) });
+      return applyOrActivate({ extraMonthlyPayment: Number(scenario.inputs.extraMonthlyPayment || 0) });
     }
     if (scenario.type === "strategy_comparison") {
       if (!scenario.inputs.strategy) throw new Error("This scenario doesn't specify which strategy to apply.");
-      return applyReforecast(workspaceId, { strategy: scenario.inputs.strategy });
+      return applyOrActivate({ strategy: scenario.inputs.strategy });
     }
     if (scenario.type === "goal_date") {
       const fresh = await previewGoalDate(workspaceId, scenario.inputs);
       if (!fresh?.feasible) throw new Error("This date is no longer projected to be achievable - open it again to see current options.");
-      return applyReforecast(workspaceId, { extraMonthlyPayment: fresh.requiredMonthlyExtra });
+      return applyOrActivate({ extraMonthlyPayment: fresh.requiredMonthlyExtra });
     }
     throw new Error("This kind of scenario is a preview only and can't be applied directly - it doesn't change your active plan.");
   };
@@ -2096,6 +2249,7 @@ export const createTrackToZeroV2AsyncAppService = ({
     updateDebt,
     recordPayment,
     recordBalanceSnapshot,
+    confirmDebtPaidOff,
     createImportBatch,
     // Read-only resume support (UX-5 Part 51): lets the UI reload an
     // already-created, still-open ImportBatch (e.g. after navigating away

@@ -70,7 +70,7 @@ function DueTimingBadge({ debt, paymentEventsByDebt }) {
   return <Badge tone={DUE_TIMING_TONE[timing.status] || "neutral"}>{paymentTimingLabel(timing)}</Badge>;
 }
 
-function LenderGroupAccountRow({ debt, disambiguator, latestSnapshotsByDebt, paymentEventsByDebt, isTarget, isHousehold, onReviewDebt }) {
+function LenderGroupAccountRow({ debt, disambiguator, latestSnapshotsByDebt, paymentEventsByDebt, isTarget, isHousehold, onReviewDebt, onRecordPayment }) {
   const palette = ttzPalette;
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap", padding: "10px 0", borderTop: `1px solid ${palette.border}` }}>
@@ -89,12 +89,15 @@ function LenderGroupAccountRow({ debt, disambiguator, latestSnapshotsByDebt, pay
           <DueTimingBadge debt={debt} paymentEventsByDebt={paymentEventsByDebt} />
         </div>
       </div>
-      <Button type="button" size="sm" variant="ghost" onClick={() => onReviewDebt?.(debt)}>Review &amp; edit</Button>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {onRecordPayment ? <Button type="button" size="sm" variant="secondary" onClick={() => onRecordPayment(debt)}>Record payment</Button> : null}
+        <Button type="button" size="sm" variant="ghost" onClick={() => onReviewDebt?.(debt)}>Review &amp; edit</Button>
+      </div>
     </div>
   );
 }
 
-function DebtCard({ debt, disambiguator, latestSnapshotsByDebt, paymentEventsByDebt, isTarget, isHousehold, onReviewDebt }) {
+function DebtCard({ debt, disambiguator, latestSnapshotsByDebt, paymentEventsByDebt, isTarget, isHousehold, onReviewDebt, onRecordPayment }) {
   const palette = ttzPalette;
   return (
     <Card variant="default">
@@ -124,7 +127,10 @@ function DebtCard({ debt, disambiguator, latestSnapshotsByDebt, paymentEventsByD
         <DebtBadges debt={debt} isTarget={isTarget} isHousehold={isHousehold} />
         <DueTimingBadge debt={debt} paymentEventsByDebt={paymentEventsByDebt} />
       </div>
-      <Button type="button" size="sm" variant="ghost" style={{ marginTop: 4 }} onClick={() => onReviewDebt?.(debt)}>Review &amp; edit</Button>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+        {onRecordPayment ? <Button type="button" size="sm" variant="secondary" onClick={() => onRecordPayment(debt)}>Record payment</Button> : null}
+        <Button type="button" size="sm" variant="ghost" onClick={() => onReviewDebt?.(debt)}>Review &amp; edit</Button>
+      </div>
     </Card>
   );
 }
@@ -202,7 +208,7 @@ function FilterControls({
 // scope is still the SAME ScopeSelector/state as the portfolio grid (that
 // existing control already satisfies "Owner filter" - a second, redundant
 // owner dropdown is deliberately not added here).
-export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, ownerFilter, onOwnerFilterChange, onBack, people = [], onReviewDebt }) {
+export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, ownerFilter, onOwnerFilterChange, onBack, people = [], onReviewDebt, onRecordPayment }) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [planFilter, setPlanFilter] = useState("all");
   const [qualityFilter, setQualityFilter] = useState("all");
@@ -356,6 +362,7 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
               isTarget={snapshot.targetDebt?.id === debt.id}
               isHousehold={isHousehold}
               onReviewDebt={onReviewDebt}
+              onRecordPayment={onRecordPayment}
             />
           ))}
         </div>
@@ -378,12 +385,12 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
                   onClick={() => toggleGroup(group.lenderId)}
                   aria-expanded={!collapsed}
                   className="ttz-focus-ring"
-                  style={{ all: "unset", display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", cursor: "pointer", boxSizing: "border-box" }}
+                  style={{ all: "unset", display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", width: "100%", cursor: "pointer", boxSizing: "border-box", gap: 10 }}
                 >
                   <LenderIdentity creditorName={group.debts[0].name} size="lg" />
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <div style={{ textAlign: "right" }}>
-                      <div style={{ ...TYPE_SCALE.body, color: palette.tx, fontWeight: 700 }}>{money(group.total)}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                    <div style={{ textAlign: "right", minWidth: 0 }}>
+                      <div style={{ ...TYPE_SCALE.body, color: palette.tx, fontWeight: 700, overflowWrap: "anywhere" }}>{money(group.total)}</div>
                       <div style={{ ...TYPE_SCALE.caption, color: palette.tx2 }}>
                         {group.count} account{group.count === 1 ? "" : "s"}{group.highestKnownApr != null ? ` · Highest APR ${percent(group.highestKnownApr)}` : ""}
                       </div>
@@ -403,6 +410,7 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
                         isTarget={snapshot.targetDebt?.id === debt.id}
                         isHousehold={isHousehold}
                         onReviewDebt={onReviewDebt}
+                        onRecordPayment={onRecordPayment}
                       />
                     ))}
                   </div>
@@ -428,6 +436,7 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
                       isTarget={snapshot.targetDebt?.id === debt.id}
                       isHousehold={isHousehold}
                       onReviewDebt={onReviewDebt}
+                      onRecordPayment={onRecordPayment}
                     />
                   ))}
                 </div>
@@ -454,12 +463,12 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
                   onClick={() => toggleGroup(group.key)}
                   aria-expanded={!collapsed}
                   className="ttz-focus-ring"
-                  style={{ all: "unset", display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", cursor: "pointer", boxSizing: "border-box" }}
+                  style={{ all: "unset", display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", width: "100%", cursor: "pointer", boxSizing: "border-box", gap: 10 }}
                 >
-                  <div style={{ ...TYPE_SCALE.cardTitle, color: palette.tx }}>{group.label}</div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <div style={{ textAlign: "right" }}>
-                      <div style={{ ...TYPE_SCALE.body, color: palette.tx, fontWeight: 700 }}>{money(group.total)}</div>
+                  <div style={{ ...TYPE_SCALE.cardTitle, color: palette.tx, minWidth: 0 }}>{group.label}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                    <div style={{ textAlign: "right", minWidth: 0 }}>
+                      <div style={{ ...TYPE_SCALE.body, color: palette.tx, fontWeight: 700, overflowWrap: "anywhere" }}>{money(group.total)}</div>
                       <div style={{ ...TYPE_SCALE.caption, color: palette.tx2 }}>{group.count} account{group.count === 1 ? "" : "s"}</div>
                     </div>
                     <Badge tone="neutral">{collapsed ? "Show" : "Hide"}</Badge>
@@ -477,6 +486,7 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
                         isTarget={snapshot.targetDebt?.id === debt.id}
                         isHousehold={isHousehold}
                         onReviewDebt={onReviewDebt}
+                        onRecordPayment={onRecordPayment}
                       />
                     ))}
                   </div>

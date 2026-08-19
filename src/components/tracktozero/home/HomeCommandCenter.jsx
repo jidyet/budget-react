@@ -32,10 +32,16 @@ const strategyLabel = (strategy) => strategy === "snowball"
     ? "Avalanche"
     : "No active strategy";
 
+// GATE-10B.1: alignItems defaulted to CSS Grid's "stretch", so a long
+// UpcomingPaymentsCard sharing a row with much shorter cards (DebtSnapshot/
+// HouseholdBreakdown/etc. in the reduced Home states below) forced those
+// siblings to stretch to match its height, producing large blank areas.
+// "start" lets every card size to its own content instead.
 const gridColumns = (min = 260) => ({
   display: "grid",
   gridTemplateColumns: `repeat(auto-fit, minmax(${min}px, 1fr))`,
   gap: GAP_SM,
+  alignItems: "start",
 });
 
 // UX-8.1: Home's financial figures previously used the mono font
@@ -76,6 +82,8 @@ const moneySmStyle = {
   fontSize: 18,
   lineHeight: 1.25,
   color: ttzPalette.tx,
+  overflowWrap: "anywhere",
+  minWidth: 0,
 };
 
 const pathTime = (point) => new Date(point.at).getTime();
@@ -671,7 +679,7 @@ function ProjectionFootnote() {
   );
 }
 
-function NoActivePlanState({ homeContext, onCompareStrategies, onAddDebt, onGoToReview, onGoToDebts }) {
+function NoActivePlanState({ homeContext, onCompareStrategies, onAddDebt, onGoToReview, onGoToDebts, onRecordPayment }) {
   return (
     <div style={{ display: "grid", gap: GAP }}>
       <div style={gridColumns(320)}>
@@ -716,7 +724,7 @@ function NoActivePlanState({ homeContext, onCompareStrategies, onAddDebt, onGoTo
 
         <DebtSnapshotCard homeContext={homeContext} onGoToDebts={onGoToDebts || onAddDebt} />
 
-        <UpcomingPaymentsCard homeContext={homeContext} onGoToDebts={onGoToDebts || onAddDebt} />
+        <UpcomingPaymentsCard homeContext={homeContext} onGoToDebts={onGoToDebts || onAddDebt} onRecordPayment={onRecordPayment} />
 
         <Card variant="default" style={{ padding: 24 }}>
           <div style={{ display: "grid", gap: 12 }}>
@@ -747,7 +755,7 @@ function NoActivePlanState({ homeContext, onCompareStrategies, onAddDebt, onGoTo
   );
 }
 
-function BlockingReviewState({ homeContext, onGoToReview, onGoToDebts }) {
+function BlockingReviewState({ homeContext, onGoToReview, onGoToDebts, onRecordPayment }) {
   return (
     <div style={{ display: "grid", gap: GAP }}>
       <Card variant="warning" style={{ padding: 24 }}>
@@ -778,12 +786,12 @@ function BlockingReviewState({ homeContext, onGoToReview, onGoToDebts }) {
 
       {/* Required-payment timing is independent of whether the plan can be
           fully trusted yet - a real-world due date doesn't wait on review. */}
-      <UpcomingPaymentsCard homeContext={homeContext} onGoToDebts={onGoToDebts} />
+      <UpcomingPaymentsCard homeContext={homeContext} onGoToDebts={onGoToDebts} onRecordPayment={onRecordPayment} />
     </div>
   );
 }
 
-function AllPaidOffState({ homeContext, onViewMyPlan, onGoToDebts }) {
+function AllPaidOffState({ homeContext, onViewMyPlan, onGoToDebts, onRecordPayment }) {
   return (
     <div style={{ display: "grid", gap: GAP }}>
       <Card variant="elevated" style={{ padding: 32, textAlign: "center", background: toneColors(ttzPalette).success.bg }}>
@@ -810,7 +818,7 @@ function AllPaidOffState({ homeContext, onViewMyPlan, onGoToDebts }) {
 
       {/* A debt excluded from the core plan (e.g. a mortgage) can still have
           its own real-world due date even after every INCLUDED debt hits $0. */}
-      <UpcomingPaymentsCard homeContext={homeContext} onGoToDebts={onGoToDebts} />
+      <UpcomingPaymentsCard homeContext={homeContext} onGoToDebts={onGoToDebts} onRecordPayment={onRecordPayment} />
     </div>
   );
 }
@@ -829,6 +837,7 @@ export default function HomeCommandCenter({
   onCompareStrategies,
   onTryWhatIf,
   onGoToDebts,
+  onRecordPayment,
   activityPage,
   onViewAllActivity,
 }) {
@@ -869,7 +878,7 @@ export default function HomeCommandCenter({
   if (homeContext.homeState === "no-plan") {
     return (
       <main style={{ display: "grid", gap: GAP }}>
-        <NoActivePlanState homeContext={homeContext} onCompareStrategies={goToCompare} onAddDebt={onAddDebt} onGoToReview={onGoToReview} onGoToDebts={goToDebts} />
+        <NoActivePlanState homeContext={homeContext} onCompareStrategies={goToCompare} onAddDebt={onAddDebt} onGoToReview={onGoToReview} onGoToDebts={goToDebts} onRecordPayment={onRecordPayment} />
       </main>
     );
   }
@@ -877,7 +886,7 @@ export default function HomeCommandCenter({
   if (homeContext.homeState === "blocking-review") {
     return (
       <main style={{ display: "grid", gap: GAP }}>
-        <BlockingReviewState homeContext={homeContext} onGoToReview={onGoToReview} onGoToDebts={goToDebts} />
+        <BlockingReviewState homeContext={homeContext} onGoToReview={onGoToReview} onGoToDebts={goToDebts} onRecordPayment={onRecordPayment} />
       </main>
     );
   }
@@ -885,7 +894,7 @@ export default function HomeCommandCenter({
   if (homeContext.homeState === "all-paid-off") {
     return (
       <main style={{ display: "grid", gap: GAP }}>
-        <AllPaidOffState homeContext={homeContext} onViewMyPlan={goToMyPlan} onGoToDebts={goToDebts} />
+        <AllPaidOffState homeContext={homeContext} onViewMyPlan={goToMyPlan} onGoToDebts={goToDebts} onRecordPayment={onRecordPayment} />
       </main>
     );
   }
@@ -895,7 +904,7 @@ export default function HomeCommandCenter({
       <NextMoveHero homeContext={homeContext} actions={nextMoveActions} />
       <MilestoneBanner workspaceId={homeContext.workspace?.id} milestones={milestones} />
       <DebtFreedomHero homeContext={homeContext} />
-      <UpcomingPaymentsCard homeContext={homeContext} onGoToDebts={goToDebts} />
+      <UpcomingPaymentsCard homeContext={homeContext} onGoToDebts={goToDebts} onRecordPayment={onRecordPayment} />
 
       <div style={gridColumns(320)}>
         <ThisMonthCard

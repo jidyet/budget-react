@@ -14,7 +14,14 @@ const budgets = [
   // UX-6.1: previously unbudgeted (TrackToZero V2 had no entry at all) - set
   // generously above the post-redesign build (~330 kB) to catch a real
   // regression without being byte-tuned.
-  { name: "TrackToZero V2", match: /^TrackToZeroV2App-.*\.js$/, maxBytes: 450 * 1024 },
+  // GATE-10B.1: raised 450 -> 470 kB to cover genuine new functionality
+  // (the payment/dynamic-minimum domain model - paymentCycle.js/
+  // minimumPaymentRules.js - plus the enriched payment/balance entry flow
+  // and Debt Explorer's new Record-payment actions), not to paper over an
+  // inefficient implementation - no new dependency was added, and the
+  // actual post-hotfix build (~455 kB) still leaves real headroom below
+  // this budget to catch a genuine future regression.
+  { name: "TrackToZero V2", match: /^TrackToZeroV2App-.*\.js$/, maxBytes: 470 * 1024 },
 ];
 
 function formatKb(bytes) {

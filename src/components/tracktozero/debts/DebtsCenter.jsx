@@ -29,17 +29,37 @@ import { resolveDebtsDestination, buildDebtsPath } from "./debtsRouting.js";
 export default function DebtsCenter({ snapshot, service, refresh, refreshReview, runAction, writeState, reviewSnapshot, onGoToReview, initialAction, onInitialActionHandled }) {
   const [destination, setDestination] = useState(() => resolveDebtsDestination(typeof window !== "undefined" ? window.location.pathname : "/debts"));
   const [ownerFilter, setOwnerFilter] = useState("all");
-  // UX-8: mobile quick-action sheet support - `initialAction` ("add-debt" |
-  // "import" | null) is a one-shot navigation intent from
-  // TrackToZeroV2App.jsx's QuickActionSheet, consumed only via this lazy
+  // UX-8: mobile quick-action sheet support - `initialAction` is a one-shot
+  // navigation intent from TrackToZeroV2App.jsx, consumed only via a lazy
   // initializer (never a useEffect+setState mirroring a prop, which this
   // repo's react-hooks/set-state-in-effect rule forbids). The effect below
   // only tells the PARENT the intent has been consumed, so it doesn't
   // reappear on a later, unrelated remount of this component.
-  const [addDebtOpen, setAddDebtOpen] = useState(() => initialAction === "add-debt");
+  //
+  // GATE-10B.1: `initialAction` now has two shapes - a bare string
+  // ("add-debt" | "import-statement" | "record-payment" | "update-balance",
+  // from the generic mobile QuickActionSheet, no specific debt) or an
+  // object ({ action: "record-payment" | "update-balance", debtId }, from a
+  // specific Home/Debts row's "Record payment" button). The bare-string
+  // record-payment/update-balance case opens QuickUpdateRail's own
+  // picker+form (initialQuickUpdateMode below); the debtId case opens
+  // ReviewEditDebtDrawer pre-scoped to that exact debt and section.
+  const initialActionKey = typeof initialAction === "string" ? initialAction : initialAction?.action || null;
+  const initialActionDebtId = initialAction && typeof initialAction === "object" ? initialAction.debtId : null;
+  const [addDebtOpen, setAddDebtOpen] = useState(() => initialActionKey === "add-debt");
   const [addDebtPrefillName, setAddDebtPrefillName] = useState("");
-  const [importOpen, setImportOpen] = useState(() => initialAction === "import-statement");
-  const [reviewDebtId, setReviewDebtId] = useState(null);
+  const [importOpen, setImportOpen] = useState(() => initialActionKey === "import-statement");
+  const [reviewDebtId, setReviewDebtId] = useState(() => (
+    initialActionDebtId && (initialActionKey === "record-payment" || initialActionKey === "update-balance") ? initialActionDebtId : null
+  ));
+  const [reviewSection, setReviewSection] = useState(() => (
+    initialActionKey === "record-payment" ? "payment" : initialActionKey === "update-balance" ? "balance" : "details"
+  ));
+  const [initialQuickUpdateMode] = useState(() => (
+    !initialActionDebtId && initialActionKey === "record-payment" ? "payment"
+      : !initialActionDebtId && initialActionKey === "update-balance" ? "balance"
+      : null
+  ));
 
   useEffect(() => {
     if (initialAction) onInitialActionHandled?.();
@@ -74,8 +94,13 @@ export default function DebtsCenter({ snapshot, service, refresh, refreshReview,
   const portfolio = deriveDebtPortfolioView(snapshot);
 
   const rail = (
-    <QuickUpdateRail snapshot={snapshot} service={service} refresh={refresh} runAction={runAction} writeState={writeState} canObserve={canObserve} />
+    <QuickUpdateRail snapshot={snapshot} service={service} refresh={refresh} runAction={runAction} writeState={writeState} canObserve={canObserve} initialMode={initialQuickUpdateMode} />
   );
+
+  const openReviewDrawer = (debt, section) => {
+    setReviewSection(section);
+    setReviewDebtId(debt.id);
+  };
 
   const mainContent = importOpen ? (
     <ImportCenter
@@ -103,7 +128,8 @@ export default function DebtsCenter({ snapshot, service, refresh, refreshReview,
       onOwnerFilterChange={setOwnerFilter}
       onBack={() => navigate("all")}
       people={people}
-      onReviewDebt={(debt) => setReviewDebtId(debt.id)}
+      onReviewDebt={(debt) => openReviewDrawer(debt, "details")}
+      onRecordPayment={canObserve ? (debt) => openReviewDrawer(debt, "payment") : undefined}
     />
   );
 
@@ -140,9 +166,10 @@ export default function DebtsCenter({ snapshot, service, refresh, refreshReview,
         prefillName={addDebtPrefillName}
       />
       <ReviewEditDebtDrawer
-        key={reviewDebt?.id || "none"}
+        key={`${reviewDebt?.id || "none"}-${reviewSection}`}
         open={!!reviewDebt}
         debt={reviewDebt}
+        initialSection={reviewSection}
         onClose={() => setReviewDebtId(null)}
         snapshot={snapshot}
         service={service}

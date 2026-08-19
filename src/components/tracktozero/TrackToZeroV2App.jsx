@@ -406,6 +406,7 @@ function Home({
   onCompareStrategies,
   onTryWhatIf,
   onGoToDebts,
+  onRecordPayment,
   activityPage,
   onViewAllActivity,
 }) {
@@ -418,7 +419,7 @@ function Home({
       onGoToReview={onGoToReview}
       onUploadBudget={onGoToDebts}
       onAddDebt={onGoToDebts}
-      onRecordPayment={onGoToDebts}
+      onRecordPayment={onRecordPayment || onGoToDebts}
       onViewDetails={onGoToDebts}
       onSeeOptions={onGoToPlan}
       onPreviewScenario={onScenario}
@@ -1443,11 +1444,19 @@ export default function TrackToZeroV2App() {
   // already-existing surfaces (AddDebtModal/ImportCenter/the always-visible
   // QuickUpdateRail) to bring to the front. Same permission gate DebtsCenter
   // already uses for the same actions, not a second permission model.
+  //
+  // GATE-10B.1: "record-payment"/"update-balance" used to be explicitly
+  // no-op'd here (setDebtsInitialAction(null)) - the sheet closed and
+  // navigated to Debts, but nothing was pre-opened, so the user still had
+  // to find and tap QuickUpdateRail's own prompt. These have no specific
+  // debt (unlike Home/Debts per-row actions, which set {action, debtId}) so
+  // the intent is passed through as a bare action key - DebtsCenter opens
+  // QuickUpdateRail's picker+form directly instead of requiring one more tap.
   const canManageDebtsMobile = snapshot.permissions.manageDebts && snapshot.mode !== "legacy_preview";
   const canObserveMobile = snapshot.permissions.recordObservations && snapshot.mode !== "legacy_preview";
   const onSelectQuickAction = (actionKey) => {
     setQuickActionsOpen(false);
-    setDebtsInitialAction(actionKey === "record-payment" || actionKey === "update-balance" ? null : actionKey);
+    setDebtsInitialAction(actionKey);
     navigateTab("debts");
   };
   const mobileBottomNavProps = {
@@ -1501,6 +1510,10 @@ export default function TrackToZeroV2App() {
           onGoToPlan={() => navigateTab("plan")}
           onGoToReview={() => navigateTab("review")}
           onGoToDebts={() => navigateTab("debts")}
+          onRecordPayment={(debtId) => {
+            setDebtsInitialAction({ action: "record-payment", debtId });
+            navigateTab("debts");
+          }}
           onViewMyPlan={() => goToPlanDestination("my-plan")}
           onCompareStrategies={() => goToPlanDestination("compare")}
           onTryWhatIf={() => goToPlanDestination("what-if")}

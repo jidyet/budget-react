@@ -34,6 +34,16 @@ export const PERSON_STATUSES = Object.freeze(["active", "merged"]);
 // or partial import) - a value of 0 here means "unknown", NOT "paid off",
 // and must never be presented or calculated as if it were confirmed.
 export const BALANCE_STATUSES = Object.freeze(["confirmed", "unresolved"]);
+// GATE-10B.1: provenance for a required/minimum payment amount - a lender-
+// confirmed statement minimum ($154.48, exact) is not the same claim as a
+// user's own guess or a rule-derived estimate, even when the numbers match.
+// "statement_confirmed"/"imported_requires_review" are set by the import
+// path (a parsed statement, pending/after review respectively);
+// "user_confirmed" is the default when a person types minimumRequiredPayment
+// directly (updateDebt); "issuer_rule_estimate" is reserved for a future
+// minimumPaymentRules.js rule (none is registered yet - see that file);
+// "unknown" is the default whenever minimumRequiredPayment itself is null.
+export const PAYMENT_SOURCE_TYPES = Object.freeze(["statement_confirmed", "user_confirmed", "issuer_rule_estimate", "imported_requires_review", "unknown"]);
 // UX-4: a SavedScenario is a persisted, non-authoritative "what if" a user
 // chose to keep - it never controls execution on its own (see
 // resolveActivePlanContextAsync's pointer chain, which a scenario is never

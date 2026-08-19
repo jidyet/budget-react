@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { InMemoryTrackToZeroRepository } from "../repositories/tracktozeroRepositories";
 import { createTrackToZeroV2Seed, V2_TEST_NOW } from "./v2SeedData";
 import { createTrackToZeroV2AsyncAppService } from "./v2AsyncApplicationService";
@@ -347,6 +347,64 @@ describe("UX-4: Saved Scenarios", () => {
       const scenario = await service.saveScenario("household-seed", { name: "Debt-free by 2027", type: "goal_date", inputs: { targetMonth: "2027-06" } });
       const result = await service.applyScenario("household-seed", scenario.id);
       expect(result.version.createdBecause).toBe("reforecast");
+    });
+  });
+
+  // GATE-10B.1: live human beta reproduction - Saved Scenarios' Apply button
+  // called service.applyScenario, which unconditionally delegated to
+  // applyReforecast, which requires a pre-existing active plan/version. A
+  // real household with no active plan yet got "apply scenario: No active
+  // plan to reforecast" instead of activating its first plan. Every branch
+  // of applyScenario must instead create-and-activate a first plan when
+  // none is active, exactly like activateOrReforecastStrategy already does
+  // for Snowball/Avalanche's "Use X" buttons.
+  describe("applyScenario - GATE-10B.1: first activation (no active plan yet)", () => {
+    it("PLAN-01/06: recurring_extra with no active plan creates and activates a first plan instead of throwing 'No active plan to reforecast'", async () => {
+      const { repository, service } = makeService();
+      repository.putWorkspace({ ...repository.getWorkspace("household-seed"), activePlanId: "" });
+      const scenario = await service.saveScenario("household-seed", { name: "First plan", type: "recurring_extra", inputs: { extraMonthlyPayment: 150 } });
+      await service.applyScenario("household-seed", scenario.id);
+      const workspace = repository.getWorkspace("household-seed");
+      expect(workspace.activePlanId).toBeTruthy();
+      expect(workspace.activePlanId).not.toBe("household-plan");
+      const plan = repository.getPlan("household-seed", workspace.activePlanId);
+      const version = repository.getPlanVersion("household-seed", plan.id, plan.activeVersionId);
+      expect(version.extraMonthlyPayment).toBe(150);
+      expect(version.createdBecause).toBe("activation");
+      expect(version.versionNumber).toBe(1);
+    });
+
+    it("PLAN-01: strategy_comparison with no active plan creates and activates a first plan with the chosen strategy", async () => {
+      const { repository, service } = makeService();
+      repository.putWorkspace({ ...repository.getWorkspace("household-seed"), activePlanId: "" });
+      const scenario = await service.saveScenario("household-seed", { name: "Try avalanche first", type: "strategy_comparison", inputs: { strategy: "avalanche" } });
+      await service.applyScenario("household-seed", scenario.id);
+      const workspace = repository.getWorkspace("household-seed");
+      const plan = repository.getPlan("household-seed", workspace.activePlanId);
+      const version = repository.getPlanVersion("household-seed", plan.id, plan.activeVersionId);
+      expect(version.strategy).toBe("avalanche");
+      expect(version.createdBecause).toBe("activation");
+    });
+
+    it("PLAN-01: goal_date with no active plan re-checks feasibility and creates+activates a first plan at the required extra payment", async () => {
+      const { repository, service } = makeService();
+      repository.putWorkspace({ ...repository.getWorkspace("household-seed"), activePlanId: "" });
+      const scenario = await service.saveScenario("household-seed", { name: "Debt-free by 2027", type: "goal_date", inputs: { targetMonth: "2027-06" } });
+      await service.applyScenario("household-seed", scenario.id);
+      const workspace = repository.getWorkspace("household-seed");
+      expect(workspace.activePlanId).toBeTruthy();
+      const plan = repository.getPlan("household-seed", workspace.activePlanId);
+      const version = repository.getPlanVersion("household-seed", plan.id, plan.activeVersionId);
+      expect(version.createdBecause).toBe("activation");
+    });
+
+    it("PLAN-06: never calls the reforecast-only repository primitive during first activation", async () => {
+      const { repository, service } = makeService();
+      repository.putWorkspace({ ...repository.getWorkspace("household-seed"), activePlanId: "" });
+      const reforecastSpy = vi.spyOn(repository, "reforecastActivePlan");
+      const scenario = await service.saveScenario("household-seed", { name: "First plan", type: "recurring_extra", inputs: { extraMonthlyPayment: 75 } });
+      await service.applyScenario("household-seed", scenario.id);
+      expect(reforecastSpy).not.toHaveBeenCalled();
     });
   });
 

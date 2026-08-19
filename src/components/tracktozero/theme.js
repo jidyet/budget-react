@@ -134,8 +134,15 @@ export const TYPE_SCALE = Object.freeze({
   pageTitle: { fontFamily: "var(--ttz-font-display)", fontWeight: 700, fontSize: 28, lineHeight: 1.1, letterSpacing: "-0.01em" },
   sectionTitle: { fontFamily: "var(--ttz-font-body)", fontWeight: 700, fontSize: 20, lineHeight: 1.2 },
   cardTitle: { fontFamily: "var(--ttz-font-body)", fontWeight: 700, fontSize: 16, lineHeight: 1.3 },
-  metric: { fontFamily: "var(--ttz-font-mono)", fontWeight: 700, fontSize: 28, lineHeight: 1.1 },
-  metricSm: { fontFamily: "var(--ttz-font-mono)", fontWeight: 600, fontSize: 18, lineHeight: 1.2 },
+  // GATE-10B.1: large monetary totals (e.g. $12,345,678.90) were bleeding
+  // outside their card containers on mobile - these two tiers had no
+  // shrink/wrap escape hatch, unlike Home's own money styles (UX-8.1's
+  // responsiveMetricValueStyle/responsiveHeroValueStyle in
+  // HomeCommandCenter.jsx). clamp() lets the digits shrink at narrow
+  // widths instead of overflowing; overflowWrap is a last-resort backstop.
+  // Font-family/weight are unchanged - this is purely a containment fix.
+  metric: { fontFamily: "var(--ttz-font-mono)", fontWeight: 700, fontSize: "clamp(1.15rem, 0.85rem + 1.3vw, 1.75rem)", lineHeight: 1.1, overflowWrap: "anywhere" },
+  metricSm: { fontFamily: "var(--ttz-font-mono)", fontWeight: 600, fontSize: "clamp(0.95rem, 0.8rem + 0.6vw, 1.125rem)", lineHeight: 1.2, overflowWrap: "anywhere" },
   body: { fontFamily: "var(--ttz-font-body)", fontWeight: 400, fontSize: 15, lineHeight: 1.5 },
   supporting: { fontFamily: "var(--ttz-font-body)", fontWeight: 500, fontSize: 13, lineHeight: 1.4 },
   caption: { fontFamily: "var(--ttz-font-body)", fontWeight: 500, fontSize: 12, lineHeight: 1.3 },

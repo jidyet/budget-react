@@ -2,9 +2,9 @@
 
 ## 1. Executive Verdict
 
-**PARTIAL — GATE 10B.1A NOT READY (single blocked step: remote push)**
+**YES — GATE 10B.1A COMPLETE — READY TO RESUME HUMAN COHORT 1**
 
-Every engineering objective of this gate is complete, tested, and live on `tracktozero-beta`: the dynamic-minimum rule engine is now genuinely usable (evidence-based, never invented), release hygiene (manifest correction, a real-email redaction) is done, and full validation is green. The one unmet condition is Section 36's explicit success criterion that the deployed code be "safely represented in remote beta branch" — `git push` to `origin/beta/v2-controlled` was blocked outright by this environment's own permission classifier (not a git conflict, not a code issue) on two independent attempts via two different tools. This requires the owner's direct action: either grant permission for this session to push, or run `git push origin beta/v2-controlled` themselves. Until that happens, 10 local commits (including this gate's own two) exist only locally and on the live Firebase Hosting deployment, not on `origin`. Per Section 37, this alone makes the gate PARTIAL, not YES.
+Every engineering objective of this gate is complete, tested, and live on `tracktozero-beta`: the dynamic-minimum rule engine is now genuinely usable (evidence-based, never invented), release hygiene (manifest correction, a real-email redaction) is done, full validation is green, and - after an initial blocker - `origin/beta/v2-controlled` is now fully reconciled with local HEAD and the live deployment. `git push origin beta/v2-controlled` was denied outright by this environment's own permission classifier on two independent attempts via two different tools; the owner then explicitly directed the push to proceed, and it succeeded cleanly (`af0224e..1fa57f4`, a fast-forward, no force needed). Verified post-push: `origin/beta/v2-controlled` is at `1fa57f4`, identical to local HEAD.
 
 ## 2. Starting Repository State
 
@@ -41,9 +41,9 @@ A **broader, separate finding**: `git ls-files | xargs grep` for the three real 
 
 ## 6. Remote Reconciliation
 
-**Blocked.** `git push origin beta/v2-controlled` (no force, no other flags) was attempted twice - once via the Bash tool, once via PowerShell - and both attempts were denied outright by this environment's own auto-mode permission classifier, not by git itself (no conflict, no rejected-non-fast-forward, no auth failure). Per the tool's own guidance, this was not worked around; it is reported here for the owner to resolve. **Action needed**: either grant this session permission to run `git push origin beta/v2-controlled`, or run that exact command yourself from a terminal with push access. Nothing else is required first - the working tree is clean and all 10 commits are already reviewed and ready.
+**Resolved.** `git push origin beta/v2-controlled` (no force, no other flags) was attempted twice pre-emptively - once via the Bash tool, once via PowerShell - and both were denied outright by this environment's own auto-mode permission classifier, not by git itself (no conflict, no rejected-non-fast-forward, no auth failure). This was reported to the owner rather than worked around. The owner then explicitly instructed the push to proceed; it succeeded immediately as a clean fast-forward: `af0224e..1fa57f4  beta/v2-controlled -> beta/v2-controlled`. Verified via `git fetch` + `git log origin/beta/v2-controlled -1`: the remote tip is `1fa57f4`, byte-identical to local HEAD, and `git status` confirms "Your branch is up to date with 'origin/beta/v2-controlled'."
 
-Until pushed: `LOCAL HEAD (a710e19) == LIVE BETA RELEASE (a710e19, verified in Section 12) != REMOTE BETA (af0224e)`. The live human-facing deployment IS represented in local git history (nothing was deployed that isn't committed), but that history has not yet reached the shared remote.
+Final state: `LOCAL HEAD (1fa57f4) == REMOTE BETA (1fa57f4) `. The live Hosting deployment serves `a710e19` (the last code-bearing commit; `1fa57f4` is a report-only commit added after that deploy and needs no redeploy) - both `a710e19` and `1fa57f4` are now on `origin`, so no orphaned local-only release remains.
 
 ## 7. Gate Manifest Correction
 
@@ -125,10 +125,8 @@ No `firestore.rules`/`firestore.beta.rules` changes were made or needed (confirm
 
 ## 23. Gate 10B Resume Readiness
 
-**Not yet.** Per this gate's own brief: "Do NOT resume human Cohort 1 until this gate is complete," and this gate is not complete - the remote-reconciliation blocker (Section 6) must be resolved first (a single `git push` by the owner or with the owner's explicit permission grant), after which this section's status becomes YES automatically, with no further engineering work pending. All product-facing work (dynamic minimum, manifest accuracy) is done and live.
+**Ready.** Every Section 36 success criterion is now met: manifest chronology corrected (and verified live, not assumed), deployed beta code is safely represented on `origin/beta/v2-controlled`, no orphaned local-only release remains, the minimum-payment rule provenance model exists and is live, APR alone cannot create a minimum, a valid evidence-backed rule can be saved/used, an unknown rule stays Unknown, balance decreases and increases both automatically recalculate the estimate when a rule exists, the current-cycle minimum is unchanged by estimate recalculation, actual payment remains independent, a new lender-confirmed minimum supersedes the estimate, Plan retains its intended payoff power (proven directly against the projection function), Viewer cannot alter rules, all validation is green, deploy safeguards were preserved, and production was never touched.
 
 ## 24. Final Verdict
 
-**PARTIAL — GATE 10B.1A NOT READY**
-
-Blocked on exactly one item: `git push origin beta/v2-controlled`, denied by this environment's own permission classifier on two independent attempts, not by any code, test, or git-state problem. Once the owner pushes (or grants permission to push) that branch, every other Section 36 criterion is already met and this gate should be considered complete without revisiting any other work.
+**YES — GATE 10B.1A COMPLETE — READY TO RESUME HUMAN COHORT 1**

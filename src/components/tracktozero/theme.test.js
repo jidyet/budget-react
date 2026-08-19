@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { ttzPalette, toneColors } from "./theme.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { applyTheme, ttzPalette, toneColors } from "./theme.js";
+import { resolveInitialTheme } from "./themeStorage.js";
 
 // UX-8: locks in the contrast fix so a future palette/token edit can't
 // silently regress Badge/StatusBadge text back below WCAG AA. Ratios are
@@ -55,5 +56,104 @@ describe("UX-8: tone text colors clear WCAG AA (4.5:1) against white and against
 
   it("ac (accent) matches info's corrected value, so accent and info text render identically as before", () => {
     expect(ttzPalette.ac).toBe(ttzPalette.info);
+  });
+});
+
+// GATE-10B.1C: applyTheme mutates the ONE shared ttzPalette object in place
+// rather than replacing the export - every one of the ~60 component files
+// that `import { ttzPalette }` holds onto that same reference for the
+// app's lifetime, so mutation (not reassignment) is what makes a theme
+// change visible to them without touching each file.
+describe("applyTheme", () => {
+  afterEach(() => {
+    applyTheme("light"); // restore the default so later tests/files aren't affected by test order
+  });
+
+  it("THEME-02: mutates the existing ttzPalette object in place (same reference) rather than replacing it", () => {
+    const ref = ttzPalette;
+    applyTheme("dark");
+    expect(ttzPalette).toBe(ref);
+    expect(ttzPalette.bg).not.toBe("#f0f6ff"); // light's bg - proves the values actually changed
+  });
+
+  it("THEME-02: switching to dark applies buildPalette('dark')'s own values, unmodified by the light-only contrast overrides", () => {
+    applyTheme("dark");
+    expect(ttzPalette.bg).toBe("#07131f");
+    expect(ttzPalette.tx).toBe("#f0f8ff");
+    // The light-tuned contrast overrides must never stomp dark's own go/wa/info/ac/da.
+    expect(ttzPalette.go).toBe("#4ade80");
+    expect(ttzPalette.info).toBe("#6bbdff");
+  });
+
+  it("THEME-03: switching back to light restores the exact original light+contrast-override values", () => {
+    const originalGo = ttzPalette.go;
+    const originalBg = ttzPalette.bg;
+    applyTheme("dark");
+    applyTheme("light");
+    expect(ttzPalette.go).toBe(originalGo);
+    expect(ttzPalette.bg).toBe(originalBg);
+  });
+
+  it("falls back to light for an unrecognized theme value rather than leaving a partially-applied palette", () => {
+    applyTheme("dark");
+    const resolved = applyTheme("neon-crypto-mode");
+    expect(resolved).toBe("light");
+    expect(ttzPalette.bg).toBe("#f0f6ff");
+  });
+
+  it("never leaves a stale key from one theme's shape on the other (defensive against future palette-key drift)", () => {
+    applyTheme("dark");
+    applyTheme("light");
+    expect(Object.keys(ttzPalette).sort()).toEqual(Object.keys({ ...ttzPalette }).sort());
+  });
+});
+
+// GATE-10B.1C: resolveInitialTheme is the single source of truth BOTH
+// ThemeProvider and index.html's inline anti-flash script must agree with.
+// This test file's environment is plain Node (vitest.config.js), matching
+// this repo's established convention of pure-function unit tests with no
+// real DOM - `window` is stubbed per test rather than relying on jsdom, and
+// the actual no-flash behavior on a real page load is verified in browser
+// QA, not simulated here.
+const stubWindow = ({ savedTheme, matchesDark }) => {
+  const store = new Map(savedTheme != null ? [["ttz-theme", savedTheme]] : []);
+  vi.stubGlobal("window", {
+    localStorage: {
+      getItem: (key) => (store.has(key) ? store.get(key) : null),
+      setItem: (key, value) => store.set(key, value),
+      removeItem: (key) => store.delete(key),
+    },
+    matchMedia: () => ({ matches: !!matchesDark }),
+  });
+};
+
+describe("resolveInitialTheme", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("THEME-04: a saved localStorage preference wins over system preference", () => {
+    stubWindow({ savedTheme: "dark", matchesDark: false });
+    expect(resolveInitialTheme()).toBe("dark");
+  });
+
+  it("falls back to system preference (matchMedia) when nothing is saved", () => {
+    stubWindow({ savedTheme: null, matchesDark: true });
+    expect(resolveInitialTheme()).toBe("dark");
+  });
+
+  it("falls back to light when neither a saved preference nor a dark system preference exists", () => {
+    stubWindow({ savedTheme: null, matchesDark: false });
+    expect(resolveInitialTheme()).toBe("light");
+  });
+
+  it("ignores a corrupted/unexpected localStorage value rather than throwing", () => {
+    stubWindow({ savedTheme: "sepia", matchesDark: false });
+    expect(resolveInitialTheme()).toBe("light");
+  });
+
+  it("returns light with no window at all (SSR-safe), never throws", () => {
+    vi.unstubAllGlobals();
+    expect(resolveInitialTheme()).toBe("light");
   });
 });

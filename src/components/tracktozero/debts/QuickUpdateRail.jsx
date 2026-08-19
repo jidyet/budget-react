@@ -65,7 +65,7 @@ export default function QuickUpdateRail({ snapshot, service, refresh, runAction,
     <Card variant="elevated" style={{ display: "flex", flexWrap: "wrap", gap: 20, alignItems: "center" }}>
       <div style={{ minWidth: 180 }}>
         <div style={{ ...TYPE_SCALE.overline, color: palette.tx2 }}>Quick update</div>
-        <div style={{ ...TYPE_SCALE.cardTitle, color: palette.tx, marginTop: 2 }}>Keep your debts current</div>
+        <div style={{ ...TYPE_SCALE.cardTitle, color: palette.tx, marginTop: 2 }}>Keep your debts current and avoid late fees</div>
         {!canObserve ? (
           <p style={{ ...TYPE_SCALE.supporting, color: palette.tx2, margin: "6px 0 0" }}>Your role is read-only for payment/balance updates.</p>
         ) : null}

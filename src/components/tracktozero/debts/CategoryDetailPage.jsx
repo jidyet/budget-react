@@ -6,6 +6,7 @@ import Select from "../ui/Select.jsx";
 import Field from "../ui/Field.jsx";
 import EmptyState from "../ui/EmptyState.jsx";
 import Badge from "../ui/Badge.jsx";
+import MetricCard from "../ui/MetricCard.jsx";
 import DebtBadges from "./DebtBadges.jsx";
 import ScopeSelector from "./ScopeSelector.jsx";
 import LenderIdentity from "./LenderIdentity.jsx";
@@ -13,6 +14,7 @@ import FilterSheet from "../layout/FilterSheet.jsx";
 import { TYPE_SCALE, ttzPalette } from "../theme.js";
 import { formatMoney as money, formatPercent as percent } from "../formatting.js";
 import { categoryConfigForSlug } from "./debtCategoryConfig.js";
+import { deriveCategoryMetrics } from "./categoryMetrics.js";
 import { disambiguationSuffixForDebt } from "../../../domain/tracktozero/ownership.js";
 import { getLenderIdentity } from "../../../domain/tracktozero/lenderRegistry.js";
 import { derivePaymentTiming, paymentTimingLabel, PAYMENT_TIMING_STATUS } from "../../../domain/tracktozero/paymentTiming.js";
@@ -215,7 +217,12 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
   const [lenderFilter, setLenderFilter] = useState("all");
   const [balanceFilter, setBalanceFilter] = useState("all");
   const [dueTimingFilter, setDueTimingFilter] = useState("all");
-  const [groupBy, setGroupBy] = useState("lender");
+  // GATE-10B.1C: default changed from "lender" to "none" (flat) to match the
+  // approved redesign's "structured account rows" list - lender/owner
+  // grouping stays available as a Group by option for users who want it,
+  // unchanged from its prior tested behavior.
+  const [groupBy, setGroupBy] = useState("none");
+  const [showAllFlat, setShowAllFlat] = useState(false);
   const [sort, setSort] = useState("payoff_order");
   const [collapsedGroups, setCollapsedGroups] = useState(() => new Set());
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
@@ -266,7 +273,23 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
     [filtered, sort, payoffOrderIndex, latestSnapshotsByDebt, paymentEventsByDebt]
   );
 
+  // GATE-10B.1C: top-5-then-"View all N" slicing for the flat (groupBy ===
+  // "none") view - applied AFTER filter/sort so the first 5 shown are
+  // always the first 5 in the user's chosen order, never an arbitrary
+  // subset. Lender/owner grouping is unaffected (each group already shows
+  // every account it contains, matching prior tested behavior).
+  const visibleFlatDebts = groupBy === "none" && !showAllFlat ? debts.slice(0, 5) : debts;
+  const hiddenFlatCount = debts.length - visibleFlatDebts.length;
+
   const categoryTotal = useMemo(() => categoryScoped.reduce((sum, d) => sum + resolveDebtBalance(d, latestSnapshotsByDebt), 0), [categoryScoped, latestSnapshotsByDebt]);
+  // GATE-10B.1C: category-specific metric cards, scoped to not-yet-paid-off
+  // debts within this category/owner scope (paid-off debts have nothing
+  // left due, so including them would understate "average"/"highest" APR
+  // and inflate the account count with debts no longer relevant to it).
+  const categoryMetrics = useMemo(
+    () => deriveCategoryMetrics(entry?.group, categoryScoped.filter((debt) => !paidOffIds.has(debt.id)), { latestSnapshotsByDebt }),
+    [entry, categoryScoped, paidOffIds, latestSnapshotsByDebt]
+  );
   const filteredTotal = useMemo(() => debts.reduce((sum, d) => sum + resolveDebtBalance(d, latestSnapshotsByDebt), 0), [debts, latestSnapshotsByDebt]);
   const hasActiveFilters = statusFilter !== "all" || planFilter !== "all" || qualityFilter !== "all" || lenderFilter !== "all" || balanceFilter !== "all" || dueTimingFilter !== "all";
   const activeFilterCount = [statusFilter, planFilter, qualityFilter, lenderFilter, balanceFilter, dueTimingFilter].filter((v) => v !== "all").length;
@@ -322,6 +345,19 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
         </div>
       </div>
 
+      {categoryMetrics.length ? (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "var(--ttz-space-4, 16px)" }}>
+          {categoryMetrics.map((card) => (
+            <MetricCard
+              key={card.key}
+              label={card.label}
+              value={card.format === "money" ? money(card.value) : card.format === "percent" ? percent(card.value) : card.value}
+              supporting={card.supporting}
+            />
+          ))}
+        </div>
+      ) : null}
+
       <ScopeSelector snapshot={snapshot} ownerFilter={ownerFilter} onChange={onOwnerFilterChange} people={people} />
 
       {isTablet ? (
@@ -351,20 +387,29 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
           onAction={hasActiveFilters ? clearFilters : undefined}
         />
       ) : groupBy === "none" ? (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "var(--ttz-space-4, 16px)" }}>
-          {debts.map((debt) => (
-            <DebtCard
-              key={debt.id}
-              debt={debt}
-              disambiguator={disambiguationSuffixForDebt(debt, debts, { isHousehold })}
-              latestSnapshotsByDebt={latestSnapshotsByDebt}
-              paymentEventsByDebt={paymentEventsByDebt}
-              isTarget={snapshot.targetDebt?.id === debt.id}
-              isHousehold={isHousehold}
-              onReviewDebt={onReviewDebt}
-              onRecordPayment={onRecordPayment}
-            />
-          ))}
+        <div style={{ display: "grid", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "var(--ttz-space-4, 16px)" }}>
+            {visibleFlatDebts.map((debt) => (
+              <DebtCard
+                key={debt.id}
+                debt={debt}
+                disambiguator={disambiguationSuffixForDebt(debt, debts, { isHousehold })}
+                latestSnapshotsByDebt={latestSnapshotsByDebt}
+                paymentEventsByDebt={paymentEventsByDebt}
+                isTarget={snapshot.targetDebt?.id === debt.id}
+                isHousehold={isHousehold}
+                onReviewDebt={onReviewDebt}
+                onRecordPayment={onRecordPayment}
+              />
+            ))}
+          </div>
+          {hiddenFlatCount > 0 ? (
+            <Button type="button" variant="ghost" onClick={() => setShowAllFlat(true)}>
+              View all {debts.length} {entry ? entry.label.toLowerCase() : "accounts"}
+            </Button>
+          ) : showAllFlat && debts.length > 5 ? (
+            <Button type="button" variant="ghost" onClick={() => setShowAllFlat(false)}>Show fewer</Button>
+          ) : null}
         </div>
       ) : groupBy === "lender" ? (
         <div style={{ display: "grid", gap: 16 }}>

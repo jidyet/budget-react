@@ -33,8 +33,9 @@ export default function PortfolioHeader({ portfolio, workspace, onAddDebt, onImp
           <MetricCard
             key={card.key}
             label={card.label}
-            value={card.key === "leftToGo" ? money(card.value) : card.value}
-            tone={card.tone === "warning" ? palette.wa : card.tone === "danger" ? palette.da : undefined}
+            value={card.key === "leftToGo" || card.key === "monthlyMinDue" ? money(card.value) : card.value}
+            supporting={card.supporting}
+            tone={card.tone === "warning" ? palette.wa : card.tone === "danger" ? palette.da : card.tone === "info" ? palette.info : undefined}
           />
         ))}
       </div>

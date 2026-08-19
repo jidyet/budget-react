@@ -7,6 +7,7 @@ import Card from "../ui/Card.jsx";
 import { presentedOwnerLabel } from "../../../domain/tracktozero/ownership.js";
 import { PAYMENT_TIMING_STATUS } from "../../../domain/tracktozero/paymentTiming.js";
 import LenderIdentity from "../debts/LenderIdentity.jsx";
+import MarkAsPaidConfirm from "./MarkAsPaidConfirm.jsx";
 
 // GATE-10B.1: this used to render every entry unconditionally - on a
 // household with several debts due the same week, that's an unbounded wall
@@ -40,13 +41,40 @@ const summaryLine = (upcoming) => {
   return parts.join(" · ");
 };
 
-export default function UpcomingPaymentsCard({ homeContext, onGoToDebts, onRecordPayment }) {
+// GATE-10B.1C: "Mark as paid" is deliberately NOT a new domain primitive - it
+// is the exact same service.recordPayment(workspaceId, debtId, { amount,
+// paidAt }) call the heavy Record Payment drawer already uses, just invoked
+// with a pre-filled, explicitly-disclosed amount (the debt's own
+// minimumRequiredPayment) instead of a manually-typed one. The confirm click
+// in MarkAsPaidConfirm IS the "user explicitly confirms that exact amount"
+// the financial-truth contract requires - PaymentEvent still never touches
+// currentBalance and never creates a BalanceSnapshot (recordPayment's
+// existing, unchanged behavior).
+export default function UpcomingPaymentsCard({ homeContext, onGoToDebts, onRecordPayment, service, workspaceId, refresh, runAction, canObserve }) {
   const upcoming = homeContext?.upcomingPayments;
   const [expanded, setExpanded] = useState(false);
+  const [confirmingId, setConfirmingId] = useState(null);
+  const [markingBusyId, setMarkingBusyId] = useState(null);
+  const [markedPaidIds, setMarkedPaidIds] = useState(() => new Set());
   if (!upcoming) return null;
   const isHousehold = homeContext?.isHousehold;
   const visibleEntries = expanded ? upcoming.entries : upcoming.entries.slice(0, DEFAULT_PREVIEW_COUNT);
   const hiddenCount = upcoming.entries.length - visibleEntries.length;
+  const canMarkPaid = !!(canObserve && service && workspaceId && runAction);
+
+  const confirmMarkPaid = (entry) => {
+    if (!canMarkPaid) return;
+    setMarkingBusyId(entry.debt.id);
+    runAction("mark payment as paid", async () => {
+      await service.recordPayment(workspaceId, entry.debt.id, {
+        amount: Number(entry.minimumRequiredPayment),
+        paidAt: new Date().toISOString(),
+      });
+      setMarkedPaidIds((prev) => new Set(prev).add(entry.debt.id));
+      setConfirmingId(null);
+      await refresh?.();
+    }).finally(() => setMarkingBusyId(null));
+  };
 
   return (
     <Card variant="default" style={{ padding: 24, borderLeft: `3px solid ${ttzPalette.wa}` }}>
@@ -69,6 +97,9 @@ export default function UpcomingPaymentsCard({ homeContext, onGoToDebts, onRecor
             <div style={{ display: "grid", gap: 10 }}>
               {visibleEntries.map((entry) => {
                 const toneKey = STATUS_TONE_KEY[entry.timing.status] || "info";
+                const isPaid = markedPaidIds.has(entry.debt.id);
+                const isConfirming = confirmingId === entry.debt.id;
+                const canOfferMarkPaid = canMarkPaid && entry.minimumRequiredPayment != null && !isPaid;
                 return (
                   <div
                     key={entry.debt.id}
@@ -91,10 +122,31 @@ export default function UpcomingPaymentsCard({ homeContext, onGoToDebts, onRecor
                         {entry.minimumRequiredPayment != null ? `${money(entry.minimumRequiredPayment)} required` : "Required amount needs review"}
                       </div>
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <Badge tone={toneKey}>{entry.label}</Badge>
-                      <Button variant="secondary" onClick={() => (onRecordPayment ? onRecordPayment(entry.debt.id) : onGoToDebts?.())}>Record payment</Button>
-                    </div>
+
+                    {isConfirming ? (
+                      <MarkAsPaidConfirm
+                        amount={entry.minimumRequiredPayment}
+                        lenderName={entry.debt.name}
+                        busy={markingBusyId === entry.debt.id}
+                        onConfirm={() => confirmMarkPaid(entry)}
+                        onCancel={() => setConfirmingId(null)}
+                        onRecordDetails={() => {
+                          setConfirmingId(null);
+                          (onRecordPayment ? onRecordPayment(entry.debt.id) : onGoToDebts?.());
+                        }}
+                      />
+                    ) : isPaid ? (
+                      <Badge tone="success">Paid</Badge>
+                    ) : (
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <Badge tone={toneKey}>{entry.label}</Badge>
+                        {canOfferMarkPaid ? (
+                          <Button variant="secondary" onClick={() => setConfirmingId(entry.debt.id)}>Mark as paid</Button>
+                        ) : (
+                          <Button variant="secondary" onClick={() => (onRecordPayment ? onRecordPayment(entry.debt.id) : onGoToDebts?.())}>Record payment</Button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}

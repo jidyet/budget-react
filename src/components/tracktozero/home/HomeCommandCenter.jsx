@@ -1,18 +1,12 @@
 import React, { useMemo } from "react";
 import { formatMoney, formatPercent, formatShortDate } from "../formatting.js";
-import { ttzPalette, toneColors, TYPE_SCALE, STATUS_TONE } from "../theme.js";
-import Badge from "../ui/Badge.jsx";
+import { ttzPalette, toneColors, TYPE_SCALE } from "../theme.js";
 import Button from "../ui/Button.jsx";
 import Card from "../ui/Card.jsx";
 import StatusBadge from "../ui/StatusBadge.jsx";
 import { deriveHomeContext } from "./homeViewModels.js";
-import { PERIOD_STATES } from "./homeMonthlyStatus.js";
-import { deriveMilestones } from "./milestones.js";
 import NextMoveHero from "./NextMoveHero.jsx";
-import MilestoneBanner from "./MilestoneBanner.jsx";
-import ActivityPreviewCard from "./ActivityPreviewCard.jsx";
 import UpcomingPaymentsCard from "./UpcomingPaymentsCard.jsx";
-import LenderIdentity from "../debts/LenderIdentity.jsx";
 
 // Below this many observed points, a full-size trend chart would just be a
 // near-empty frame with one or two dots - a compact callout is more honest
@@ -25,7 +19,6 @@ const RADIUS = "var(--ttz-radius-lg, 16px)";
 
 const money = (value) => formatMoney(Number(value || 0));
 const shortDate = (value) => formatShortDate(value);
-const dueDayLabel = (dueDay) => (Number(dueDay) > 0 ? `Due day ${dueDay}` : "");
 const strategyLabel = (strategy) => strategy === "snowball"
   ? "Snowball"
   : strategy === "avalanche"
@@ -43,6 +36,22 @@ const gridColumns = (min = 260) => ({
   gap: GAP_SM,
   alignItems: "start",
 });
+
+// Row 1's "~60-65% / ~35-40%" split (GATE-10B.1C) uses flex, not grid: an
+// unequal flex-grow ratio (1.65 vs 1) on two items with generous min
+// flex-basis values gives NextMoveHero the larger share on wide screens
+// while still wrapping to a clean full-width stack once either item can't
+// fit its basis - the same responsive behavior gridColumns' auto-fit gives
+// the equal-share rows, just with a deliberate weighting instead of 1fr/1fr.
+const row1Style = {
+  display: "flex",
+  gap: GAP_SM,
+  flexWrap: "wrap",
+  // "start" (not "stretch") for the same reason gridColumns uses it above:
+  // Card is a plain block div with no height:100%, so a stretched flex
+  // child would just leave blank space below the shorter card's content.
+  alignItems: "start",
+};
 
 // UX-8.1: Home's financial figures previously used the mono font
 // (var(--ttz-font-mono), DM Mono) at metric sizes - it reads as code, not as
@@ -75,13 +84,22 @@ const responsiveHeroValueStyle = {
 // A smaller money style for compact contexts (ProgressRing's Starting/
 // Current/Reduction rows, card-level single amounts) - same font-family/
 // tabular-nums contract as the two above, just sized down.
+// GATE-10B.1C dark-mode fix: `color` is deliberately NOT baked into this
+// shared constant. moneySmStyle is a plain object built once at module load
+// (not a function re-evaluated per render), so a color captured here would
+// freeze at whatever ttzPalette.tx equaled at import time and never follow a
+// later theme change - unlike an inline `color: ttzPalette.tx` at each call
+// site, which IS a fresh object literal evaluated on every render and so
+// correctly picks up applyTheme's mutation. (Found live: this exact bug made
+// "Your debts" remaining-balance text unreadable in dark mode until color
+// was moved to each usage site.) Every spread of moneySmStyle below must set
+// its own `color`.
 const moneySmStyle = {
   fontFamily: "var(--ttz-font-body, 'Instrument Sans', sans-serif)",
   fontVariantNumeric: "tabular-nums",
   fontWeight: 700,
   fontSize: 18,
   lineHeight: 1.25,
-  color: ttzPalette.tx,
   overflowWrap: "anywhere",
   minWidth: 0,
 };
@@ -197,67 +215,6 @@ function ProgressRing({ progress, title, subtitle }) {
   );
 }
 
-function DebtFreedomHero({ homeContext }) {
-  const {
-    progress,
-    zeroDay,
-    primaryRemainingDebt,
-    primaryDebtScopeLabel,
-    secondaryDebtMetric,
-    excludedDebt,
-    hasActivePlan,
-    debtSnapshot,
-  } = homeContext;
-  return (
-    <Card
-      variant="elevated"
-      style={{
-        padding: 28,
-        background: `linear-gradient(135deg, ${ttzPalette.surf} 0%, ${ttzPalette.acS} 100%)`,
-        border: `1px solid ${ttzPalette.border}`,
-      }}
-    >
-      <div style={{ display: "grid", gap: 18 }}>
-        <div style={{ display: "grid", gap: 8 }}>
-          <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.ac }}>Debt freedom</div>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <Badge tone="info">{debtSnapshot?.activeLabel || `${homeContext.debtCount} debts tracked`}</Badge>
-            {secondaryDebtMetric ? <Badge tone="warning">{money(secondaryDebtMetric.value)} excluded</Badge> : null}
-          </div>
-        </div>
-        <div style={gridColumns(260)}>
-          <MetricBlock
-            label={hasActivePlan ? "Debt remaining" : "Confirmed debt remaining"}
-            value={money(primaryRemainingDebt)}
-            supporting={excludedDebt > 0 ? `${debtSnapshot?.activeLabel || primaryDebtScopeLabel} in your active payoff journey.` : (debtSnapshot?.activeLabel || primaryDebtScopeLabel)}
-            emphasis
-          />
-          <MetricBlock
-            label="Knocked out"
-            value={money(progress?.eliminated || 0)}
-            supporting={progress?.confirmed ? "Confirmed progress only — never projected." : "This stays at $0 until you have confirmed balance movement."}
-          />
-          <MetricBlock
-            label="Progress to $0"
-            value={`${Math.round(progress?.percent || 0)}%`}
-            supporting={progress?.confirmed ? `${money(progress?.latestBalance || 0)} still left.` : "Your starting point is set. Progress gets stronger after another confirmed balance update."}
-          />
-          <MetricBlock
-            label="Projected $0"
-            value={zeroDay ? shortDate(zeroDay) : hasActivePlan ? "Not projected yet" : "Choose a plan"}
-            supporting={zeroDay ? "Projected from your active plan." : hasActivePlan ? "A projected $0 date appears once the plan is reachable." : "A projected $0 date appears after you activate a payoff plan."}
-          />
-        </div>
-        <div style={{ ...TYPE_SCALE.supporting, color: ttzPalette.tx2 }}>
-          {hasActivePlan
-            ? "Home is your fastest snapshot of what remains, what you've already knocked out, and what your active plan is aiming next."
-            : "Home is your fastest snapshot of what you owe now, what you've already confirmed, and what to do next."}
-        </div>
-      </div>
-    </Card>
-  );
-}
-
 function DebtSnapshotCard({ homeContext, onGoToDebts }) {
   const debtSnapshot = homeContext.debtSnapshot;
   if (!debtSnapshot) return null;
@@ -267,79 +224,13 @@ function DebtSnapshotCard({ homeContext, onGoToDebts }) {
       <div style={{ display: "grid", gap: 12 }}>
         <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.ac }}>Your debts</div>
         <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>{debtSnapshot.activeLabel}</div>
-        <div style={{ ...moneySmStyle, fontSize: 20 }}>{money(debtSnapshot.remainingDebt)} <span style={{ ...TYPE_SCALE.supporting, color: ttzPalette.tx2, fontWeight: 500 }}>remaining</span></div>
+        <div style={{ ...moneySmStyle, fontSize: 20, color: ttzPalette.tx }}>{money(debtSnapshot.remainingDebt)} <span style={{ ...TYPE_SCALE.supporting, color: ttzPalette.tx2, fontWeight: 500 }}>remaining</span></div>
         <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>
           {debtSnapshot.highestKnownApr != null
             ? `Highest known APR: ${formatPercent(debtSnapshot.highestKnownApr)}`
             : "Highest known APR: Unknown"}
         </div>
         <Button variant="secondary" onClick={onGoToDebts}>View debts</Button>
-      </div>
-    </Card>
-  );
-}
-
-function ThisMonthCard({ homeContext, onViewDetails, onCompareStrategies }) {
-  const { currentTarget, activeVersion, monthlyStatus, planHealth } = homeContext;
-  if (!activeVersion) return null;
-
-  const toneKey = monthlyStatus?.state === PERIOD_STATES.recorded
-    ? "success"
-    : monthlyStatus?.state === PERIOD_STATES.partially_recorded
-      ? "warning"
-      : monthlyStatus?.state === PERIOD_STATES.more_than_planned
-        ? "info"
-        : STATUS_TONE[planHealth?.code] || "info";
-  const tone = toneColors(ttzPalette)[toneKey];
-
-  if (!currentTarget || !monthlyStatus || monthlyStatus.state === PERIOD_STATES.no_target) {
-    return (
-      <Card variant="elevated" style={{ padding: 24, borderLeft: `4px solid ${tone.fg}` }}>
-        <div style={{ display: "grid", gap: 14 }}>
-          <div style={{ ...TYPE_SCALE.overline, color: tone.fg }}>This month</div>
-          <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>Your plan needs a target before Home can guide this month.</div>
-          <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>
-            Review your debts and plan setup so TrackToZero can point to the right payoff target next.
-          </div>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <Button variant="primary" onClick={onViewDetails}>View debts</Button>
-            <Button variant="secondary" onClick={onCompareStrategies}>Compare strategies</Button>
-          </div>
-        </div>
-      </Card>
-    );
-  }
-
-  return (
-    <Card variant="elevated" style={{ padding: 24, borderLeft: `4px solid ${tone.fg}` }}>
-      <div style={{ display: "grid", gap: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "start" }}>
-          <div style={{ display: "grid", gap: 8 }}>
-            <div style={{ ...TYPE_SCALE.overline, color: tone.fg }}>This month</div>
-            <LenderIdentity creditorName={currentTarget.name} debtType={currentTarget.debtType} lastFour={currentTarget.accountReferenceSafe} size="lg" />
-            <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>{(currentTarget.ownerLabel || "Unassigned")} · Current target</div>
-          </div>
-          <Badge tone="info">Current target</Badge>
-        </div>
-
-        <div style={gridColumns(150)}>
-          <MetricBlock
-            label="Planned this month"
-            value={money(monthlyStatus.plannedAmount)}
-            supporting={`Required ${money(monthlyStatus.requiredPayment)} + extra ${money(monthlyStatus.extraPayment)}`}
-          />
-          <MetricBlock
-            label="Recorded so far"
-            value={money(monthlyStatus.recordedAmount)}
-            supporting={monthlyStatus.paymentCount > 0 ? `${monthlyStatus.paymentCount} payment${monthlyStatus.paymentCount === 1 ? "" : "s"} recorded` : "Nothing recorded yet"}
-          />
-          <MetricBlock label="Status" value={monthlyStatus.headline} supporting={monthlyStatus.supporting} />
-          {dueDayLabel(currentTarget.dueDay) ? <MetricBlock label="Timing" value={dueDayLabel(currentTarget.dueDay)} /> : null}
-        </div>
-
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <Button variant="secondary" onClick={onViewDetails}>View debt details</Button>
-        </div>
       </div>
     </Card>
   );
@@ -529,7 +420,7 @@ function HouseholdBreakdownCard({ homeContext, onGoToDebts }) {
               <div key={`${item.type}-${item.uid || item.displayName}`} style={{ display: "grid", gap: 6 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                   <span style={{ ...TYPE_SCALE.body, color: ttzPalette.tx }}>{item.displayName}</span>
-                  <span style={{ ...moneySmStyle, fontSize: 15 }}>{money(item.totalDebt)}</span>
+                  <span style={{ ...moneySmStyle, fontSize: 15, color: ttzPalette.tx }}>{money(item.totalDebt)}</span>
                 </div>
                 <div style={{ height: 10, borderRadius: 999, background: ttzPalette.surf2, overflow: "hidden" }}>
                   <div
@@ -545,87 +436,6 @@ function HouseholdBreakdownCard({ homeContext, onGoToDebts }) {
             ))}
           </div>
         )}
-      </div>
-    </Card>
-  );
-}
-
-function MomentumCard({ homeContext }) {
-  const momentum = homeContext.momentum;
-  const progress = homeContext.progress;
-  if (!momentum || !progress) return null;
-
-  let movementCopy = "No later confirmed movement yet.";
-  if (momentum.latestMovement) {
-    const delta = Number(momentum.latestMovement.delta || 0);
-    movementCopy = `${delta < 0 ? "-" : "+"}${money(Math.abs(delta))} since ${shortDate(momentum.latestMovement.from)}`;
-  }
-
-  return (
-    <Card variant="default" style={{ padding: 24, borderLeft: `3px solid ${ttzPalette.border2}` }}>
-      <div style={{ display: "grid", gap: 14 }}>
-        <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Momentum</div>
-        <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>{momentum.headline}</div>
-        <div style={{ ...moneySmStyle, fontSize: 18, color: ttzPalette.ac }}>{money(momentum.eliminated || 0)} <span style={{ ...TYPE_SCALE.supporting, color: ttzPalette.tx2, fontWeight: 500 }}>eliminated</span></div>
-        <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>{momentum.supporting || `Latest confirmed movement: ${movementCopy}`}</div>
-      </div>
-    </Card>
-  );
-}
-
-function NextMilestoneCard({ homeContext, onViewMyPlan }) {
-  const milestone = homeContext.nextMilestone;
-  if (!milestone) return null;
-  return (
-    <Card variant="default" style={{ padding: 24 }}>
-      <div style={{ display: "grid", gap: 12 }}>
-        <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Next milestone</div>
-        <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>{milestone.title}</div>
-        <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>{milestone.supporting}</div>
-        <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted }}>Projected · {shortDate(milestone.period)}</div>
-        <Button variant="secondary" onClick={onViewMyPlan}>View My Plan</Button>
-      </div>
-    </Card>
-  );
-}
-
-function InsightCards({ homeContext, onViewMyPlan, onGoToReview, onGoToDebts, onCompareStrategies }) {
-  const actions = { plan: onViewMyPlan, review: onGoToReview, debts: onGoToDebts, compare: onCompareStrategies };
-  const insights = homeContext.insights || [];
-  if (!insights.length) return null;
-  return (
-    <div style={gridColumns(250)}>
-      {insights.map((insight, index) => (
-        <Card key={`${insight.title}-${index}`} variant="default" style={{ padding: 20 }}>
-          <div style={{ display: "grid", gap: 12 }}>
-            <Badge tone={insight.tone || "info"}>
-              {insight.tone === "danger" ? "Needs attention" : insight.tone === "warning" ? "Improve" : "Insight"}
-            </Badge>
-            <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>{insight.title}</div>
-            <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>{insight.body}</div>
-            {insight.cta && actions[insight.action] ? <Button variant="secondary" onClick={actions[insight.action]}>{insight.cta}</Button> : null}
-          </div>
-        </Card>
-      ))}
-    </div>
-  );
-}
-
-function WhatIfCard({ homeContext, onTryWhatIf }) {
-  const scenario = homeContext.whatIf;
-  return (
-    <Card variant="default" style={{ padding: 20 }}>
-      <div style={{ display: "grid", gap: 10 }}>
-        <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>What If?</div>
-        {scenario ? (
-          <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>
-            Projected improvement: {scenario.monthsSaved > 0 ? `${scenario.monthsSaved} months sooner` : "timeline unchanged"}
-            {scenario.interestSaved > 0 ? ` · ${money(scenario.interestSaved)} less interest` : ""}
-          </div>
-        ) : (
-          <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>Preview a safe scenario without changing your active plan.</div>
-        )}
-        <Button variant="secondary" onClick={onTryWhatIf}>{scenario ? "View My Plan What If" : "Try What If"}</Button>
       </div>
     </Card>
   );
@@ -679,7 +489,7 @@ function ProjectionFootnote() {
   );
 }
 
-function NoActivePlanState({ homeContext, onCompareStrategies, onAddDebt, onGoToReview, onGoToDebts, onRecordPayment }) {
+function NoActivePlanState({ homeContext, onCompareStrategies, onAddDebt, onGoToReview, onGoToDebts, onRecordPayment, paymentActions }) {
   return (
     <div style={{ display: "grid", gap: GAP }}>
       <div style={gridColumns(320)}>
@@ -724,7 +534,7 @@ function NoActivePlanState({ homeContext, onCompareStrategies, onAddDebt, onGoTo
 
         <DebtSnapshotCard homeContext={homeContext} onGoToDebts={onGoToDebts || onAddDebt} />
 
-        <UpcomingPaymentsCard homeContext={homeContext} onGoToDebts={onGoToDebts || onAddDebt} onRecordPayment={onRecordPayment} />
+        <UpcomingPaymentsCard homeContext={homeContext} onGoToDebts={onGoToDebts || onAddDebt} onRecordPayment={onRecordPayment} {...paymentActions} />
 
         <Card variant="default" style={{ padding: 24 }}>
           <div style={{ display: "grid", gap: 12 }}>
@@ -755,7 +565,7 @@ function NoActivePlanState({ homeContext, onCompareStrategies, onAddDebt, onGoTo
   );
 }
 
-function BlockingReviewState({ homeContext, onGoToReview, onGoToDebts, onRecordPayment }) {
+function BlockingReviewState({ homeContext, onGoToReview, onGoToDebts, onRecordPayment, paymentActions }) {
   return (
     <div style={{ display: "grid", gap: GAP }}>
       <Card variant="warning" style={{ padding: 24 }}>
@@ -786,12 +596,12 @@ function BlockingReviewState({ homeContext, onGoToReview, onGoToDebts, onRecordP
 
       {/* Required-payment timing is independent of whether the plan can be
           fully trusted yet - a real-world due date doesn't wait on review. */}
-      <UpcomingPaymentsCard homeContext={homeContext} onGoToDebts={onGoToDebts} onRecordPayment={onRecordPayment} />
+      <UpcomingPaymentsCard homeContext={homeContext} onGoToDebts={onGoToDebts} onRecordPayment={onRecordPayment} {...paymentActions} />
     </div>
   );
 }
 
-function AllPaidOffState({ homeContext, onViewMyPlan, onGoToDebts, onRecordPayment }) {
+function AllPaidOffState({ homeContext, onViewMyPlan, onGoToDebts, onRecordPayment, paymentActions }) {
   return (
     <div style={{ display: "grid", gap: GAP }}>
       <Card variant="elevated" style={{ padding: 32, textAlign: "center", background: toneColors(ttzPalette).success.bg }}>
@@ -818,7 +628,7 @@ function AllPaidOffState({ homeContext, onViewMyPlan, onGoToDebts, onRecordPayme
 
       {/* A debt excluded from the core plan (e.g. a mortgage) can still have
           its own real-world due date even after every INCLUDED debt hits $0. */}
-      <UpcomingPaymentsCard homeContext={homeContext} onGoToDebts={onGoToDebts} onRecordPayment={onRecordPayment} />
+      <UpcomingPaymentsCard homeContext={homeContext} onGoToDebts={onGoToDebts} onRecordPayment={onRecordPayment} {...paymentActions} />
     </div>
   );
 }
@@ -838,17 +648,22 @@ export default function HomeCommandCenter({
   onTryWhatIf,
   onGoToDebts,
   onRecordPayment,
-  activityPage,
-  onViewAllActivity,
+  service,
+  refresh,
+  runAction,
+  canObserve,
 }) {
   const homeContext = useMemo(() => deriveHomeContext(snapshot, reviewSnapshot, scenario), [snapshot, reviewSnapshot, scenario]);
-  const milestones = useMemo(() => deriveMilestones(homeContext), [homeContext]);
 
   const goToMyPlan = onViewMyPlan || onGoToPlan;
   const goToCompare = onCompareStrategies || onGoToPlan;
   const goToWhatIf = onTryWhatIf || (() => onPreviewScenario?.(100));
   const goToDebts = onGoToDebts || onViewDetails || onAddDebt || onGoToPlan;
   const nextMoveActions = { review: onGoToReview, plan: goToMyPlan, compare: goToCompare, debts: goToDebts };
+  // GATE-10B.1C: bundled once and spread onto every UpcomingPaymentsCard
+  // render site (main + no-plan/blocking-review/all-paid-off states) so
+  // "Mark as paid" works identically no matter which Home state is showing.
+  const paymentActions = { service, workspaceId: snapshot?.workspace?.id, refresh, runAction, canObserve };
 
   if (!snapshot) {
     return (
@@ -878,7 +693,7 @@ export default function HomeCommandCenter({
   if (homeContext.homeState === "no-plan") {
     return (
       <main style={{ display: "grid", gap: GAP }}>
-        <NoActivePlanState homeContext={homeContext} onCompareStrategies={goToCompare} onAddDebt={onAddDebt} onGoToReview={onGoToReview} onGoToDebts={goToDebts} onRecordPayment={onRecordPayment} />
+        <NoActivePlanState homeContext={homeContext} onCompareStrategies={goToCompare} onAddDebt={onAddDebt} onGoToReview={onGoToReview} onGoToDebts={goToDebts} onRecordPayment={onRecordPayment} paymentActions={paymentActions} />
       </main>
     );
   }
@@ -886,7 +701,7 @@ export default function HomeCommandCenter({
   if (homeContext.homeState === "blocking-review") {
     return (
       <main style={{ display: "grid", gap: GAP }}>
-        <BlockingReviewState homeContext={homeContext} onGoToReview={onGoToReview} onGoToDebts={goToDebts} onRecordPayment={onRecordPayment} />
+        <BlockingReviewState homeContext={homeContext} onGoToReview={onGoToReview} onGoToDebts={goToDebts} onRecordPayment={onRecordPayment} paymentActions={paymentActions} />
       </main>
     );
   }
@@ -894,60 +709,49 @@ export default function HomeCommandCenter({
   if (homeContext.homeState === "all-paid-off") {
     return (
       <main style={{ display: "grid", gap: GAP }}>
-        <AllPaidOffState homeContext={homeContext} onViewMyPlan={goToMyPlan} onGoToDebts={goToDebts} onRecordPayment={onRecordPayment} />
+        <AllPaidOffState homeContext={homeContext} onViewMyPlan={goToMyPlan} onGoToDebts={goToDebts} onRecordPayment={onRecordPayment} paymentActions={paymentActions} />
       </main>
     );
   }
 
   return (
     <main style={{ display: "grid", gap: GAP }}>
-      <NextMoveHero homeContext={homeContext} actions={nextMoveActions} />
-      <MilestoneBanner workspaceId={homeContext.workspace?.id} milestones={milestones} />
-      <DebtFreedomHero homeContext={homeContext} />
-      <UpcomingPaymentsCard homeContext={homeContext} onGoToDebts={goToDebts} onRecordPayment={onRecordPayment} />
-
-      <div style={gridColumns(320)}>
-        <ThisMonthCard
-          homeContext={homeContext}
-          onViewDetails={goToDebts}
-          onCompareStrategies={goToCompare}
-        />
-        <ProgressRing
-          progress={homeContext.progress}
-          title="Confirmed progress"
-          subtitle={homeContext.progress?.confirmed ? "Confirmed debt eliminated vs confirmed debt remaining" : "Your starting point is set. Progress updates after a new confirmed balance snapshot."}
-        />
-      </div>
-
-      <div style={gridColumns(320)}>
-        <TrajectoryChart homeContext={homeContext} />
-        <div style={{ display: "grid", gap: GAP_SM }}>
+      {/* Row 1: the one deterministic next move, plus the active plan's own
+          shape (strategy/target/extra payment) beside it - the two things
+          that together answer "what should I do and why" in one glance. */}
+      <div style={row1Style}>
+        <div style={{ flex: "1.65 1 480px", minWidth: 0 }}>
+          <NextMoveHero homeContext={homeContext} actions={nextMoveActions} />
+        </div>
+        <div style={{ flex: "1 1 320px", minWidth: 0 }}>
           <ActivePlanCard
             homeContext={homeContext}
             onViewMyPlan={goToMyPlan}
             onCompareStrategies={goToCompare}
             onTryWhatIf={goToWhatIf}
           />
-          <ReviewSummaryCard homeContext={homeContext} onGoToReview={onGoToReview} />
         </div>
       </div>
 
+      {/* Row 2: the 4 supporting summary cards - confirmed progress, debt
+          snapshot, import review (unified, reused everywhere), and
+          household breakdown (household workspaces only). */}
       <div style={gridColumns(260)}>
+        <ProgressRing
+          progress={homeContext.progress}
+          title="Confirmed progress"
+          subtitle={homeContext.progress?.confirmed ? "Confirmed debt eliminated vs confirmed debt remaining" : "Your starting point is set. Progress updates after a new confirmed balance snapshot."}
+        />
         <DebtSnapshotCard homeContext={homeContext} onGoToDebts={goToDebts} />
+        <ReviewSummaryCard homeContext={homeContext} onGoToReview={onGoToReview} />
         {homeContext.isHousehold ? <HouseholdBreakdownCard homeContext={homeContext} onGoToDebts={goToDebts} /> : null}
-        <MomentumCard homeContext={homeContext} />
-        <NextMilestoneCard homeContext={homeContext} onViewMyPlan={goToMyPlan} />
-        <ActivityPreviewCard activityPage={activityPage} onViewAllActivity={onViewAllActivity} />
-        <WhatIfCard homeContext={homeContext} onTryWhatIf={goToWhatIf} />
       </div>
 
-      <InsightCards
-        homeContext={homeContext}
-        onViewMyPlan={goToMyPlan}
-        onGoToReview={onGoToReview}
-        onGoToDebts={goToDebts}
-        onCompareStrategies={goToCompare}
-      />
+      {/* Row 3: upcoming payments, full width, own row. */}
+      <UpcomingPaymentsCard homeContext={homeContext} onGoToDebts={goToDebts} onRecordPayment={onRecordPayment} {...paymentActions} />
+
+      {/* Row 4: debt trend / trajectory, full width, own row. */}
+      <TrajectoryChart homeContext={homeContext} />
 
       <ProjectionFootnote />
     </main>

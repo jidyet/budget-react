@@ -32,8 +32,16 @@ body {
   overflow-x: hidden;
 }
 
+/* GATE-10B.1C: data-theme is set by index.html's inline anti-flash script
+   and kept in sync by ThemeProvider.jsx (src/components/tracktozero/) -
+   defaults to light when absent, so V1 (which never sets this attribute)
+   is unaffected. */
 :root {
   color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 body {

@@ -75,6 +75,69 @@ describe("deriveDebtPortfolioView", () => {
   });
 });
 
+describe("DEBTS-UI: 'Monthly min. due' summary card (GATE-10B.1C)", () => {
+  it("DEBTS-UI-01: sums minimumRequiredPayment only across debts with a KNOWN value, never treating an unknown minimum as $0", () => {
+    const snapshot = {
+      workspace: { type: "personal" },
+      debts: [
+        { id: "d1", status: "active", currentBalance: 1000, minimumRequiredPayment: 50, aprStatus: "known", apr: 0.2, includedInCorePayoffPlan: true },
+        { id: "d2", status: "active", currentBalance: 500, minimumRequiredPayment: null, aprStatus: "known", apr: 0.1, includedInCorePayoffPlan: true },
+      ],
+      portfolioSummary: { totalWorkspaceDebt: 1500, includedDebt: 1500, excludedDebt: 0 },
+    };
+    const view = deriveDebtPortfolioView(snapshot);
+    const card = view.summaryCards.find((c) => c.key === "monthlyMinDue");
+    expect(card.value).toBe(50);
+    expect(card.supporting).toMatch(/1 need/);
+  });
+
+  it("DEBTS-UI-02: shows 'All known' supporting text when every active debt has a known minimum", () => {
+    const snapshot = {
+      workspace: { type: "personal" },
+      debts: [{ id: "d1", status: "active", currentBalance: 1000, minimumRequiredPayment: 50, aprStatus: "known", apr: 0.2, includedInCorePayoffPlan: true }],
+      portfolioSummary: { totalWorkspaceDebt: 1000, includedDebt: 1000, excludedDebt: 0 },
+    };
+    const view = deriveDebtPortfolioView(snapshot);
+    expect(view.summaryCards.find((c) => c.key === "monthlyMinDue").supporting).toBe("All known");
+  });
+
+  it("DEBTS-UI-03: excludes paid-off debts from the monthly-min-due sum (nothing left due)", () => {
+    const snapshot = {
+      workspace: { type: "personal" },
+      debts: [
+        { id: "d1", status: "active", currentBalance: 1000, minimumRequiredPayment: 50, aprStatus: "known", apr: 0.2, includedInCorePayoffPlan: true },
+        { id: "d2", status: "active", currentBalance: 0, minimumRequiredPayment: 0, aprStatus: "no_interest", includedInCorePayoffPlan: true },
+      ],
+      portfolioSummary: { totalWorkspaceDebt: 1000, includedDebt: 1000, excludedDebt: 0 },
+    };
+    const view = deriveDebtPortfolioView(snapshot);
+    expect(view.summaryCards.find((c) => c.key === "monthlyMinDue").value).toBe(50);
+  });
+
+  it("DEBTS-UI-04: 'Left to go' supporting text reports the active account count", () => {
+    const snapshot = {
+      workspace: { type: "personal" },
+      debts: [
+        { id: "d1", status: "active", currentBalance: 1000, minimumRequiredPayment: 50, aprStatus: "known", apr: 0.2, includedInCorePayoffPlan: true },
+        { id: "d2", status: "active", currentBalance: 500, minimumRequiredPayment: 20, aprStatus: "known", apr: 0.1, includedInCorePayoffPlan: true },
+      ],
+      portfolioSummary: { totalWorkspaceDebt: 1500, includedDebt: 1500, excludedDebt: 0 },
+    };
+    const view = deriveDebtPortfolioView(snapshot);
+    expect(view.summaryCards.find((c) => c.key === "leftToGo").supporting).toBe("Across 2 accounts");
+  });
+
+  it("DEBTS-UI-05: exactly 5 summary cards are produced (left to go, active, monthly min due, need attention, paid off)", () => {
+    const snapshot = {
+      workspace: { type: "personal" },
+      debts: [{ id: "d1", status: "active", currentBalance: 1000, minimumRequiredPayment: 50, aprStatus: "known", apr: 0.2, includedInCorePayoffPlan: true }],
+      portfolioSummary: { totalWorkspaceDebt: 1000, includedDebt: 1000, excludedDebt: 0 },
+    };
+    const view = deriveDebtPortfolioView(snapshot);
+    expect(view.summaryCards.map((c) => c.key)).toEqual(["leftToGo", "active", "monthlyMinDue", "review", "paidOff"]);
+  });
+});
+
 describe("filterDebtsByOwnerScope (UX-6.1)", () => {
   const debts = [
     { id: "d1", ownerType: "member", ownerId: "a" },

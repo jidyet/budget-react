@@ -6,10 +6,8 @@ import { BRAND_COLORS } from "../../config/brand.js";
 // introduced in commit c282b13 and used throughout src/components/app/*) -
 // V2 simply never adopted it before this phase, and had drifted into its
 // own scattered hex values instead. There is one brand, not two.
-//
-// V2 does not yet offer a theme toggle - buildPalette already supports
-// "dark" for whenever that's built; this just fixes V2 to "light" for now.
-export const TTZ_THEME = "light";
+export const TTZ_THEMES = Object.freeze(["light", "dark"]);
+const DEFAULT_THEME = "light";
 
 // UX-8 contrast fix, SCOPED TO V2 ONLY - go/wa/info/ac/da (measured via a
 // throwaway WCAG relative-luminance script, not eyeballed) fail 4.5:1 text
@@ -30,15 +28,48 @@ export const TTZ_THEME = "light";
 // darkening the foreground only improves its contrast against those
 // already-light tints, and they aren't subject to the text-contrast rule
 // themselves.
-const CONTRAST_SAFE_OVERRIDES = {
-  go: "#2a7c32", // was #39a844 (BRAND_COLORS.green) - 3.06:1 vs white / 2.71:1 vs own tint bg -> 5.21:1 / 4.63:1
-  wa: "#a85b12", // was #ff8a1c (BRAND_COLORS.orange) - 2.36:1 vs white / 2.13:1 vs own tint bg -> 5.04:1 / 4.55:1
-  info: "#11759e", // was #18a7e1 (BRAND_COLORS.blue) - 2.74:1 vs white / 2.46:1 vs own tint bg -> 5.17:1 / 4.58:1
-  ac: "#11759e", // was #18a7e1, identical brand-blue value to `info` - kept in sync
-  da: "#cc2626", // was #d42828 - already 5.08:1 vs white, but only 4.27:1 vs its own tint bg -> 4.56:1
-};
+//
+// GATE-10B.1C: this tuning was measured against LIGHT-theme backgrounds
+// only. Applying it to dark mode too would stomp buildPalette("dark")'s own
+// already-distinct dark values with these light-tuned hexes (info/ac would
+// both go DARKER, the wrong direction on a dark background). Scoped to
+// light only; dark mode uses buildPalette("dark")'s own values unmodified -
+// a deliberate, documented scope limit for this phase (see the theme
+// architecture note on applyTheme below), not an oversight.
+const contrastSafeOverrides = (theme) => (theme === "light" ? {
+  go: "#2a7c32",
+  wa: "#a85b12",
+  info: "#11759e",
+  ac: "#11759e",
+  da: "#cc2626",
+} : {});
 
-export const ttzPalette = { ...buildPalette(TTZ_THEME), ...CONTRAST_SAFE_OVERRIDES };
+// GATE-10B.1C: ttzPalette used to be a value frozen once at module load,
+// hardcoded to "light" - every one of the ~60 V2 component files that
+// `import { ttzPalette }` reads its properties directly as inline style
+// values (`palette.bg`, `palette.tx`, ...), not through a hook or CSS
+// variable. Rewriting all of those call sites to consume a theme-aware
+// hook/CSS-var instead is out of proportion to this phase. Instead,
+// ttzPalette stays a plain (non-frozen) object at the SAME reference for
+// the app's whole lifetime, and applyTheme mutates its properties in
+// place. Every component keeps importing/reading `ttzPalette.xxx` exactly
+// as before; ThemeProvider (ThemeProvider.jsx) is the only thing that ever
+// calls applyTheme, and because nothing in this tree uses React.memo, a
+// theme-state change in ThemeProvider re-renders the whole subtree
+// top-down, so every component's next render picks up the freshly-mutated
+// values - including hand-rolled SVG (TrajectoryChart) that reads
+// ttzPalette.xxx directly as paint attributes, with no extra work needed.
+export const ttzPalette = { ...buildPalette(DEFAULT_THEME), ...contrastSafeOverrides(DEFAULT_THEME) };
+
+export function applyTheme(theme) {
+  const resolved = TTZ_THEMES.includes(theme) ? theme : DEFAULT_THEME;
+  const next = { ...buildPalette(resolved), ...contrastSafeOverrides(resolved) };
+  Object.keys(ttzPalette).forEach((key) => {
+    if (!(key in next)) delete ttzPalette[key];
+  });
+  Object.assign(ttzPalette, next);
+  return resolved;
+}
 
 // UX-0 established the truthful plan-health/status codes (derivePlanHealth,
 // classifyPlanStatus - see services/tracktozero/projectionStatusService.js).

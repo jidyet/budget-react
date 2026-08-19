@@ -16,6 +16,7 @@ import { APP_COMMIT, APP_VERSION } from "../../config/appMeta.js";
 import { ROLE_PERMISSIONS } from "../../domain/tracktozero/constants.js";
 import { presentedOwnerLabel } from "../../domain/tracktozero/ownership.js";
 import { ttzPalette } from "./theme.js";
+import { ThemeProvider } from "./ThemeProvider.jsx";
 import AppShell from "./layout/AppShell.jsx";
 import PageContainer from "./layout/PageContainer.jsx";
 import QaHarnessControls from "./layout/QaHarnessControls.jsx";
@@ -87,10 +88,17 @@ const styles = {
   badgeOwner: { border: "1px solid #86efac", borderRadius: 999, padding: "4px 10px", background: "#f0fdf4", color: "#166534", fontWeight: 800, fontSize: 12 },
 };
 
+// GATE-10B.1C: background/border/eyebrow color read fresh from ttzPalette
+// (not styles.card's frozen light-only values) so every screen built on
+// Section - including the always-visible Settings tab - follows the current
+// theme instead of staying a light card with barely-readable text once the
+// surrounding page goes dark. Only these theme-sensitive properties moved;
+// padding/radius/shadow/layout are unchanged from styles.card.
 function Section({ title, eyebrow, children }) {
+  const palette = ttzPalette;
   return (
-    <section style={{ ...styles.card, marginTop: 16 }}>
-      {eyebrow && <p style={{ margin: "0 0 6px", letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 900, color: "#2f6289", fontSize: 12 }}>{eyebrow}</p>}
+    <section style={{ ...styles.card, background: palette.surf, border: `1px solid ${palette.border}`, color: palette.tx, marginTop: 16 }}>
+      {eyebrow && <p style={{ margin: "0 0 6px", letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 900, color: palette.ac, fontSize: 12 }}>{eyebrow}</p>}
       <h2 style={{ margin: "0 0 12px", fontSize: 24 }}>{title}</h2>
       {children}
     </section>
@@ -98,7 +106,7 @@ function Section({ title, eyebrow, children }) {
 }
 
 function Field({ label, children }) {
-  return <label style={styles.label}><span>{label}</span>{children}</label>;
+  return <label style={{ ...styles.label, color: ttzPalette.tx2 }}><span>{label}</span>{children}</label>;
 }
 
 function getRuntimeErrorTitle(status) {
@@ -407,8 +415,10 @@ function Home({
   onTryWhatIf,
   onGoToDebts,
   onRecordPayment,
-  activityPage,
-  onViewAllActivity,
+  service,
+  refresh,
+  runAction,
+  canObserve,
 }) {
   return (
     <HomeCommandCenter
@@ -427,8 +437,10 @@ function Home({
       onCompareStrategies={onCompareStrategies}
       onTryWhatIf={onTryWhatIf}
       onGoToDebts={onGoToDebts}
-      activityPage={activityPage}
-      onViewAllActivity={onViewAllActivity}
+      service={service}
+      refresh={refresh}
+      runAction={runAction}
+      canObserve={canObserve}
     />
   );
 }
@@ -519,6 +531,7 @@ function MigrationPanel() {
 }
 
 function Settings({ snapshot, repositoryMode, service, refresh, runAction, writeState, latestInvite, setLatestInvite }) {
+  const palette = ttzPalette;
   const flags = getLaunchFlags();
   const canManageMembers = ROLE_PERMISSIONS[snapshot.membership?.role]?.manageMembers;
   const [householdName, setHouseholdName] = useState(snapshot.workspace.name || "");
@@ -566,7 +579,7 @@ function Settings({ snapshot, repositoryMode, service, refresh, runAction, write
       {snapshot.workspace.type === "household" && (
         <>
           <div style={{ ...styles.grid, marginTop: 18 }}>
-            <div style={{ ...styles.card, boxShadow: "none" }}>
+            <div style={{ ...styles.card, background: palette.surf2, border: `1px solid ${palette.border}`, boxShadow: "none" }}>
               <h3 style={{ marginTop: 0 }}>Household details</h3>
               <Field label="Household name">
                 <input style={styles.input} value={householdName} onChange={(event) => setHouseholdName(event.target.value)} disabled={!canManageMembers || writeState.inProgress} />
@@ -583,7 +596,7 @@ function Settings({ snapshot, repositoryMode, service, refresh, runAction, write
                 {writeState.action === "save household name" ? "Saving..." : "Save household name"}
               </button>
             </div>
-            <div style={{ ...styles.card, boxShadow: "none" }}>
+            <div style={{ ...styles.card, background: palette.surf2, border: `1px solid ${palette.border}`, boxShadow: "none" }}>
               <h3 style={{ marginTop: 0 }}>Invite someone</h3>
               <Field label="Email address">
                 <input style={styles.input} type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} disabled={!canManageMembers || writeState.inProgress} placeholder="jamie@example.com" />
@@ -608,11 +621,11 @@ function Settings({ snapshot, repositoryMode, service, refresh, runAction, write
               >
                 {writeState.action === "create invite" ? "Creating..." : "Create invite"}
               </button>
-              {!canManageMembers && <p style={{ color: "#4d6a82", marginBottom: 0 }}>Only owners and admins can invite people.</p>}
+              {!canManageMembers && <p style={{ color: palette.tx2, marginBottom: 0 }}>Only owners and admins can invite people.</p>}
             </div>
           </div>
           {latestInvite && (
-            <div style={{ ...styles.card, marginTop: 16, borderColor: ttzPalette.go }}>
+            <div style={{ ...styles.card, background: palette.surf2, marginTop: 16, border: `1px solid ${palette.go}` }}>
               <h3 style={{ marginTop: 0 }}>Invite ready</h3>
               <p style={{ marginBottom: 8, overflowWrap: "anywhere" }}>{latestInvite.emailNormalized} · expires {new Date(latestInvite.expiresAt).toLocaleDateString()}</p>
               <button
@@ -629,19 +642,19 @@ function Settings({ snapshot, repositoryMode, service, refresh, runAction, write
             </div>
           )}
           <div style={{ ...styles.grid, marginTop: 18 }}>
-            <div style={{ ...styles.card, boxShadow: "none" }}>
+            <div style={{ ...styles.card, background: palette.surf2, border: `1px solid ${palette.border}`, boxShadow: "none" }}>
               <h3 style={{ marginTop: 0 }}>Pending invitations</h3>
               {snapshot.memberInvites?.length ? (
                 <div style={{ display: "grid", gap: 12 }}>
                   {snapshot.memberInvites.map((invite) => (
-                    <article key={invite.id} style={{ border: "1px solid #d7e7f5", borderRadius: 16, padding: 12, background: "#fff" }}>
+                    <article key={invite.id} style={{ border: `1px solid ${palette.border}`, borderRadius: 16, padding: 12, background: palette.surf }}>
                       <p style={{ margin: 0, fontWeight: 800, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                         <span style={{ overflowWrap: "anywhere", minWidth: 0 }}>{invite.emailNormalized}</span>
                         <Badge tone={invite.derivedStatus === "pending" ? "warning" : invite.derivedStatus === "accepted" ? "success" : "neutral"}>
                           {invite.derivedStatus === "pending" ? "Pending invitation" : invite.derivedStatus === "accepted" ? "Accepted" : invite.derivedStatus === "canceled" ? "Canceled" : "Expired"}
                         </Badge>
                       </p>
-                      <p style={{ margin: "6px 0", color: "#4d6a82" }}>{invite.role} · expires {new Date(invite.expiresAt).toLocaleDateString()}</p>
+                      <p style={{ margin: "6px 0", color: palette.tx2 }}>{invite.role} · expires {new Date(invite.expiresAt).toLocaleDateString()}</p>
                       {invite.derivedStatus === "pending" ? (
                         <button
                           type="button"
@@ -658,19 +671,19 @@ function Settings({ snapshot, repositoryMode, service, refresh, runAction, write
                     </article>
                   ))}
                 </div>
-              ) : <p style={{ marginBottom: 0, color: "#4d6a82" }}>No household invites yet.</p>}
+              ) : <p style={{ marginBottom: 0, color: palette.tx2 }}>No household invites yet.</p>}
             </div>
-            <div style={{ ...styles.card, boxShadow: "none" }}>
+            <div style={{ ...styles.card, background: palette.surf2, border: `1px solid ${palette.border}`, boxShadow: "none" }}>
               <h3 style={{ marginTop: 0 }}>Financial profiles not connected to a verified member</h3>
               {unlinkedPeople.length ? (
                 <div style={{ display: "grid", gap: 12 }}>
                   {unlinkedPeople.map((person) => (
-                    <article key={person.id} style={{ border: "1px solid #d7e7f5", borderRadius: 16, padding: 12, background: "#fff" }}>
+                    <article key={person.id} style={{ border: `1px solid ${palette.border}`, borderRadius: 16, padding: 12, background: palette.surf }}>
                       <p style={{ margin: 0, fontWeight: 800, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                         {person.displayName}
                         <Badge tone="neutral">Financial profile</Badge>
                       </p>
-                      <p style={{ margin: "6px 0", color: "#4d6a82" }}>This debt-owner profile is not linked to a verified household member yet.</p>
+                      <p style={{ margin: "6px 0", color: palette.tx2 }}>This debt-owner profile is not linked to a verified household member yet.</p>
                       {canManageMembers ? (
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                           <select
@@ -699,7 +712,7 @@ function Settings({ snapshot, repositoryMode, service, refresh, runAction, write
                     </article>
                   ))}
                 </div>
-              ) : <p style={{ marginBottom: 0, color: "#4d6a82" }}>No unconnected financial profiles right now.</p>}
+              ) : <p style={{ marginBottom: 0, color: palette.tx2 }}>No unconnected financial profiles right now.</p>}
             </div>
           </div>
         </>
@@ -771,7 +784,23 @@ const clearJoinIntent = () => {
   window.history.replaceState({}, "", "/");
 };
 
+// GATE-10B.1C: ThemeProvider wraps the ENTIRE V2 app, including pre-auth
+// screens (AuthScreen etc., rendered inside TrackToZeroV2AppInner before a
+// workspace loads) - "authentication surfaces where practical" per the
+// gate brief. See ThemeProvider.jsx/theme.js's applyTheme for why this is
+// enough to retheme every descendant with no per-component changes.
 export default function TrackToZeroV2App() {
+  return (
+    <ThemeProvider>
+      {/* Function-as-children (render-prop), not a plain element - see
+          ThemeProvider.jsx's own comment on why a plain <TrackToZeroV2AppInner/>
+          here would silently fail to re-theme most of the app on toggle. */}
+      {() => <TrackToZeroV2AppInner />}
+    </ThemeProvider>
+  );
+}
+
+function TrackToZeroV2AppInner() {
   const runtime = useMemo(() => getRuntimeConfig(), []);
   const isProductionRuntime = runtime.mode === TRACKTOZERO_V2_REPOSITORY_MODES.firebaseProduction;
   const isLocalBetaRuntime = runtime.mode === TRACKTOZERO_V2_REPOSITORY_MODES.localBeta;
@@ -1392,9 +1421,16 @@ export default function TrackToZeroV2App() {
     );
   }
 
+  // GATE-10B.1C: these two screens are reached from WITHIN the authenticated,
+  // themed app (including every refresh() call, which briefly nulls
+  // `snapshot` and flashes this loading state) - unlike the pre-auth
+  // SignIn/SignUp/Invite/Onboarding screens below, which keep their existing
+  // light-only `styles.*` look (auth surfaces are explicitly out of this
+  // gate's theme scope). ttzPalette-driven so this brief flash follows the
+  // current theme instead of staying pinned to a light background.
   if (runtimeState.status === "loading" || runtimeState.status === "idle") {
     return (
-      <main style={styles.shell}>
+      <main style={{ minHeight: "100vh", background: ttzPalette.bg, color: ttzPalette.tx, fontFamily: "'Instrument Sans', system-ui, sans-serif" }}>
         <div style={styles.wrap}>
           <Section title="Loading TrackToZero 2.0" eyebrow="Firebase runtime">
             <p aria-live="polite">Loading workspace, debts, active plan, and balance history...</p>
@@ -1406,7 +1442,7 @@ export default function TrackToZeroV2App() {
 
   if (!snapshot) {
     return (
-      <main style={styles.shell}>
+      <main style={{ minHeight: "100vh", background: ttzPalette.bg, color: ttzPalette.tx, fontFamily: "'Instrument Sans', system-ui, sans-serif" }}>
         <div style={styles.wrap}>
           <Section title={getRuntimeErrorTitle(runtimeState.status)} eyebrow={runtimeState.status}>
             <p>{runtimeState.error || "We could not load the TrackToZero 2.0 workspace."}</p>
@@ -1499,7 +1535,23 @@ export default function TrackToZeroV2App() {
           />
         ) : null}
         {(writeState.error || writeState.success) && (
-          <div role="status" aria-live="polite" style={{ ...styles.card, marginTop: 16, borderColor: writeState.error ? ttzPalette.da : ttzPalette.go }}>
+          // GATE-10B.1C: was `styles.card` (a fixed translucent-white
+          // background from the pre-auth style system) - this banner is
+          // shown after every write action across the WHOLE authenticated
+          // app, so it needs to follow the current theme like every other
+          // surface, not just its border color.
+          <div
+            role="status"
+            aria-live="polite"
+            style={{
+              marginTop: 16,
+              borderRadius: 22,
+              padding: 20,
+              background: ttzPalette.surf,
+              color: ttzPalette.tx,
+              border: `1px solid ${writeState.error ? ttzPalette.da : ttzPalette.go}`,
+            }}
+          >
             {writeState.error || writeState.success}
           </div>
         )}
@@ -1520,8 +1572,10 @@ export default function TrackToZeroV2App() {
           onScenario={(extra) => runAction("preview scenario", async () => {
             setScenario(await service.previewScenario(workspaceId, { extraMonthlyPayment: extra }));
           }, { write: false })}
-          activityPage={activityState.page}
-          onViewAllActivity={() => navigateTab("activity")}
+          service={service}
+          refresh={() => refresh(workspaceId)}
+          runAction={runAction}
+          canObserve={snapshot.permissions.recordObservations && snapshot.mode !== "legacy_preview"}
         />}
         {tab === "activity" && (
           <ActivityCenter

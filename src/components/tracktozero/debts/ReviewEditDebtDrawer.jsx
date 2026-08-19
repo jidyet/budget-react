@@ -4,6 +4,7 @@ import Field from "../ui/Field.jsx";
 import Input from "../ui/Input.jsx";
 import Select from "../ui/Select.jsx";
 import MoneyInput from "../ui/MoneyInput.jsx";
+import DateInput from "../ui/DateInput.jsx";
 import Checkbox from "../ui/Checkbox.jsx";
 import Button from "../ui/Button.jsx";
 import WarningCallout from "../ui/WarningCallout.jsx";
@@ -13,7 +14,7 @@ import LenderIdentity from "./LenderIdentity.jsx";
 import { DEBT_TYPE_OPTIONS } from "./debtCategoryConfig.js";
 import { TYPE_SCALE, ttzPalette } from "../theme.js";
 import { formatMoney as money } from "../formatting.js";
-import { describeDebtReviewReasons, disambiguationSuffixForDebt } from "../../../domain/tracktozero/ownership.js";
+import { describeDebtReviewReasons, disambiguationSuffixForDebt, presentedOwnerLabel } from "../../../domain/tracktozero/ownership.js";
 import { describeCycleProgress, resolveCurrentBillingCycle, resolveWorkingBalance, sumActualPaymentsInCycle } from "../../../domain/tracktozero/paymentCycle.js";
 
 const REQUIRED_PAYMENT_SOURCE_LABEL = {
@@ -23,6 +24,19 @@ const REQUIRED_PAYMENT_SOURCE_LABEL = {
   imported_requires_review: "Imported, needs review",
   unknown: "Unknown",
 };
+
+// GATE-10B.1C: the payment section's label/value rows (Current balance,
+// Current minimum due, Estimated next minimum, and the live new-balance
+// preview) - previously these were run-together prose sentences, harder to
+// scan than a real field-by-field breakdown.
+function PaymentFieldRow({ label, value, palette, emphasis = false }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+      <span style={{ ...TYPE_SCALE.supporting, color: palette.tx2 }}>{label}</span>
+      <span style={{ ...TYPE_SCALE.body, fontWeight: emphasis ? 800 : 700, color: palette.tx }}>{value}</span>
+    </div>
+  );
+}
 
 const draftFromDebt = (debt) => {
   const rule = debt?.minimumPaymentRule || null;
@@ -88,7 +102,16 @@ export default function ReviewEditDebtDrawer({ open, debt, onClose, snapshot, se
   const [draft, setDraft] = useState(() => draftFromDebt(debt));
   const [balanceAmount, setBalanceAmount] = useState("");
   const [paymentAmount, setPaymentAmount] = useState("");
+  // GATE-10B.1C: new UI field, passed through to recordPayment's
+  // already-existing `paidAt` parameter (no service-layer change - it has
+  // accepted `paidAt` since GATE-10B.1, just had no UI control until now).
+  const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [confirmPaidOff, setConfirmPaidOff] = useState(false);
+  // GATE-10B.1C: a local, client-computed summary shown after a successful
+  // save - captured from the exact same preview figures already shown to
+  // the user before they submitted, so it never implies lender confirmation
+  // of a number the user hasn't already seen.
+  const [lastPaymentSummary, setLastPaymentSummary] = useState(null);
   const palette = ttzPalette;
 
   if (!debt) return null;
@@ -165,11 +188,19 @@ export default function ReviewEditDebtDrawer({ open, debt, onClose, snapshot, se
     });
   };
 
+  const workingBalancePreview = paymentAmount !== "" ? Math.max(0, working.amount - Number(paymentAmount || 0)) : null;
+
   const savePayment = (event) => {
     event.preventDefault();
+    const amount = Number(paymentAmount);
+    const summary = { amount, newBalance: workingBalancePreview, nextMinimum: debt.estimatedNextMinimumPayment };
     runAction("record payment", async () => {
-      await service.recordPayment(snapshot.workspace.id, debt.id, { amount: Number(paymentAmount) });
+      await service.recordPayment(snapshot.workspace.id, debt.id, {
+        amount,
+        paidAt: paymentDate ? new Date(paymentDate).toISOString() : undefined,
+      });
       setPaymentAmount("");
+      setLastPaymentSummary(summary);
       await refresh();
     });
   };
@@ -364,49 +395,74 @@ export default function ReviewEditDebtDrawer({ open, debt, onClose, snapshot, se
         ) : null}
 
         {section === "payment" ? (
-          <form onSubmit={savePayment} style={{ display: "grid", gap: 12 }}>
-            <div style={{ display: "grid", gap: 4 }}>
-              <p style={{ ...TYPE_SCALE.caption, color: palette.tx2, margin: 0 }}>
-                {debt.minimumRequiredPayment != null
-                  ? `This cycle's required payment: ${money(debt.minimumRequiredPayment)} (${REQUIRED_PAYMENT_SOURCE_LABEL[debt.requiredPaymentSource] || "Unknown"})`
-                  : "This cycle's required payment: not set"}
-                {debt.dueDay ? ` · Due day ${debt.dueDay}` : ""}
-              </p>
-              <p style={{ ...TYPE_SCALE.caption, color: palette.tx2, margin: 0 }}>
-                {recordedThisCycle.hasCycle ? `${money(recordedThisCycle.total)} recorded this cycle` : `${money(recordedThisCycle.total)} recorded (no due day set, so cycle boundaries are unknown)`}
-                {working.amount != null ? ` · Working balance ${money(working.amount)}${working.isEstimated ? " (estimated)" : ""}` : ""}
-              </p>
-              {/* GATE-10B.1A: a separate, clearly-labeled figure from "This
-                  cycle's required payment" above - never "Next minimum due"
-                  unless lender-confirmed (it never is, here). */}
-              <p style={{ ...TYPE_SCALE.caption, color: palette.tx2, margin: 0 }}>
-                Estimated next minimum: {debt.estimatedNextMinimumPayment != null ? `~${money(debt.estimatedNextMinimumPayment)}` : "Unknown"}
-                {debt.estimatedNextMinimumPayment != null ? " - based on your latest balance and the payment rule saved for this account. Your lender's next statement may differ." : " - set a minimum payment rule under Edit details to enable this."}
-              </p>
-              <p style={{ ...TYPE_SCALE.caption, color: palette.tx2, margin: 0 }}>
-                Recording a payment does not change the confirmed balance - use Update balance for that.
-              </p>
+          <form onSubmit={savePayment} style={{ display: "grid", gap: 14 }}>
+            <div style={{ ...TYPE_SCALE.caption, color: palette.tx2 }}>
+              {presentedOwnerLabel(debt)}{debt.dueDay ? ` · Due day ${debt.dueDay}` : ""}
             </div>
-            <Field label="Payment amount">
+
+            <div style={{ display: "grid", gap: 8, padding: 12, borderRadius: "var(--ttz-radius-md, 12px)", background: palette.surf2, border: `1px solid ${palette.border}` }}>
+              <PaymentFieldRow
+                label="Current balance"
+                value={working.amount != null ? `${money(working.amount)}${working.isEstimated ? " (estimated)" : ""}` : "Unknown"}
+                palette={palette}
+              />
+              <PaymentFieldRow
+                label="Current minimum due"
+                value={debt.minimumRequiredPayment != null ? `${money(debt.minimumRequiredPayment)} (${REQUIRED_PAYMENT_SOURCE_LABEL[debt.requiredPaymentSource] || "Unknown"})` : "Not set"}
+                palette={palette}
+              />
+              {/* GATE-10B.1A: a separate, clearly-labeled figure from "Current
+                  minimum due" above - never "Next minimum due" unless
+                  lender-confirmed (it never is, here). */}
+              <PaymentFieldRow
+                label="Estimated next minimum"
+                value={debt.estimatedNextMinimumPayment != null ? `~${money(debt.estimatedNextMinimumPayment)}` : "Unknown"}
+                palette={palette}
+              />
+              <div style={{ ...TYPE_SCALE.caption, color: palette.tx2 }}>
+                {recordedThisCycle.hasCycle ? `${money(recordedThisCycle.total)} recorded this cycle.` : `${money(recordedThisCycle.total)} recorded (no due day set, so cycle boundaries are unknown).`}
+                {" "}Recording a payment does not change the confirmed balance - use Update balance for that.
+              </div>
+            </div>
+
+            <Field label="Actual payment (optional)">
               <MoneyInput min="0" value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} />
             </Field>
-            {paymentAmount !== "" ? (() => {
-              const preview = describeCycleProgress({ required: debt.minimumRequiredPayment, recordedThisCycle: recordedThisCycle.total + (Number(paymentAmount) || 0) });
-              return (
-                <InfoCallout>
-                  {preview.required == null
-                    ? `${money(preview.recorded)} recorded this cycle so far. This debt has no required payment set.`
-                    : preview.isSatisfied
-                    ? `Required payment recorded: ${money(preview.recorded)} of ${money(preview.required)}${preview.aboveRequired > 0 ? ` (${money(preview.aboveRequired)} above required)` : ""}.`
-                    : `${money(preview.recorded)} of ${money(preview.required)} recorded this cycle · ${money(preview.remainingRequired)} still required.`}
-                </InfoCallout>
-              );
-            })() : null}
+            <Field label="Payment date">
+              <DateInput value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} />
+            </Field>
+
+            {paymentAmount !== "" ? (
+              <div style={{ display: "grid", gap: 8 }}>
+                <PaymentFieldRow label="Estimated balance after payment" value={money(workingBalancePreview)} palette={palette} emphasis />
+                {(() => {
+                  const preview = describeCycleProgress({ required: debt.minimumRequiredPayment, recordedThisCycle: recordedThisCycle.total + (Number(paymentAmount) || 0) });
+                  return (
+                    <InfoCallout>
+                      {preview.required == null
+                        ? `${money(preview.recorded)} recorded this cycle so far. This debt has no required payment set.`
+                        : preview.isSatisfied
+                        ? `Required payment recorded: ${money(preview.recorded)} of ${money(preview.required)}${preview.aboveRequired > 0 ? ` (${money(preview.aboveRequired)} above required)` : ""}.`
+                        : `${money(preview.recorded)} of ${money(preview.required)} recorded this cycle · ${money(preview.remainingRequired)} still required.`}
+                    </InfoCallout>
+                  );
+                })()}
+              </div>
+            ) : null}
+
             <div style={{ display: "flex", gap: 8 }}>
-              <Button type="submit" variant="primary" disabled={!canObserve || writeState.inProgress}>
+              <Button type="submit" variant="primary" disabled={!canObserve || writeState.inProgress || paymentAmount === ""}>
                 {writeState.action === "record payment" ? "Recording..." : "Save payment"}
               </Button>
             </div>
+
+            {lastPaymentSummary ? (
+              <InfoCallout>
+                Recorded {money(lastPaymentSummary.amount)}. Estimated balance is now {money(lastPaymentSummary.newBalance)}
+                {lastPaymentSummary.nextMinimum != null ? ` · estimated next minimum ~${money(lastPaymentSummary.nextMinimum)}` : ""}.
+                This reflects your entry, not a lender confirmation.
+              </InfoCallout>
+            ) : null}
           </form>
         ) : null}
       </div>

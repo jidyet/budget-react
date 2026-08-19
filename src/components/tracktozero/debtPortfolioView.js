@@ -45,9 +45,28 @@ export const deriveDebtPortfolioView = (snapshot = {}) => {
       ]
     : [];
 
+  // GATE-10B.1C: "Monthly min. due" only sums debts with a KNOWN
+  // minimumRequiredPayment - never silently treats an unknown minimum as
+  // $0 (same "unknown minimum != $0" contract UpcomingPaymentsCard already
+  // enforces). Scoped to active, not-yet-paid-off debts (actionable +
+  // needs-review) since a paid-off debt has nothing left due.
+  const dueEligibleDebts = [...actionableDebts, ...reviewDebts];
+  const knownMinimumDebts = dueEligibleDebts.filter((debt) => debt.minimumRequiredPayment != null);
+  const monthlyMinDue = knownMinimumDebts.reduce((sum, debt) => sum + Number(debt.minimumRequiredPayment || 0), 0);
+  const monthlyMinDueUnknownCount = dueEligibleDebts.length - knownMinimumDebts.length;
+
   const summaryCards = [
-    { key: "leftToGo", label: "Left to go", value: leftToGo, tone: "primary" },
+    { key: "leftToGo", label: "Left to go", value: leftToGo, tone: "primary", supporting: `Across ${activeDebts.length} account${activeDebts.length === 1 ? "" : "s"}` },
     { key: "active", label: "Active debts", value: actionableDebts.length, tone: "neutral" },
+    {
+      key: "monthlyMinDue",
+      label: "Monthly min. due",
+      value: monthlyMinDue,
+      tone: "info",
+      supporting: monthlyMinDueUnknownCount > 0
+        ? `${knownMinimumDebts.length} known · ${monthlyMinDueUnknownCount} need${monthlyMinDueUnknownCount === 1 ? "s" : ""} review`
+        : "All known",
+    },
     { key: "review", label: "Need attention", value: reviewDebts.length, tone: "warning" },
     { key: "paidOff", label: "Paid off", value: paidOffDebts.length, tone: "success" },
   ];

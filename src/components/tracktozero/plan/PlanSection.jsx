@@ -10,7 +10,7 @@ import WarningCallout from "../ui/WarningCallout.jsx";
 import InfoCallout from "../ui/InfoCallout.jsx";
 import LoadingState from "../ui/LoadingState.jsx";
 import ConfirmationDialog from "../ui/ConfirmationDialog.jsx";
-import { ttzPalette, TYPE_SCALE } from "../theme.js";
+import { ttzPalette, toneColors, TYPE_SCALE } from "../theme.js";
 import { formatMoney as money, formatPercent as percent } from "../formatting.js";
 import { describeDebtReviewReasons, disambiguationSuffixForDebt, presentedOwnerLabel } from "../../../domain/tracktozero/ownership.js";
 import LenderIdentity from "../debts/LenderIdentity.jsx";
@@ -23,11 +23,18 @@ import { activateOrReforecastStrategy, applyPlanChange } from "./planActivation.
 const GAP = "var(--ttz-space-4, 16px)";
 
 function PlanMetric({ label, value, tone = "default" }) {
+  // GATE-10B.1C: warning/success used to be hardcoded light-mode-only hex
+  // values (e.g. "#fff7ed") that bypassed ttzPalette entirely, so they never
+  // followed a theme change (a pale-orange/pale-green box would stay pale
+  // even on the dark background). toneColors(ttzPalette) already provides
+  // theme-aware bg/border/fg for both, exactly like every other tone chip in
+  // the app.
+  const tones = toneColors(ttzPalette);
   const colors = {
     default: { bg: ttzPalette.surf2, border: ttzPalette.border, color: ttzPalette.tx },
     accent: { bg: ttzPalette.acS, border: ttzPalette.ac, color: ttzPalette.ac },
-    warning: { bg: "#fff7ed", border: "#fed7aa", color: "#c2410c" },
-    success: { bg: "#f0fdf4", border: "#bbf7d0", color: "#166534" },
+    warning: { bg: tones.warning.bg, border: tones.warning.border, color: tones.warning.fg },
+    success: { bg: tones.success.bg, border: tones.success.border, color: tones.success.fg },
   }[tone] || { bg: ttzPalette.surf2, border: ttzPalette.border, color: ttzPalette.tx };
 
   return (

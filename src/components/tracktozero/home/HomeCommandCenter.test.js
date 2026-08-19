@@ -74,10 +74,8 @@ const baseProps = {
 };
 
 describe("UX-2.1 Home redesign", () => {
-  it("shows the redesigned first viewport: debt freedom, next move, payoff progress, and plan summary", () => {
+  it("HOME-UI-01: shows the redesigned 4-row layout: next move, active plan, confirmed progress, and your debts", () => {
     const html = render(h(HomeCommandCenter, { ...baseProps, snapshot: activePlanSnapshot(), reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
-    expect(html).toContain("Debt freedom");
-    expect(html).toContain("This month");
     expect(html).toContain("Your next move");
     expect(html).toContain("Confirmed progress");
     expect(html).toContain("Your plan");
@@ -87,14 +85,12 @@ describe("UX-2.1 Home redesign", () => {
   it("keeps Next Move truthful and aligned with the active plan target", () => {
     const html = render(h(HomeCommandCenter, { ...baseProps, snapshot: activePlanSnapshot(), reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
     expect(html).not.toMatch(/Recommended payment/i);
-    expect(html).toContain("Nothing recorded yet this month.");
     expect(html).toContain("Chase Freedom");
-    expect(html).toContain("Due day 21");
   });
 
   it("renders confirmed progress visuals from starting debt vs confirmed remaining debt", () => {
     const html = render(h(HomeCommandCenter, { ...baseProps, snapshot: activePlanSnapshot(), reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
-    expect(html).toContain("Knocked out");
+    expect(html).toContain("Confirmed reduction");
     expect(html).toContain("$500.00");
     expect(html).toContain("50%");
   });
@@ -232,7 +228,6 @@ describe("UX-2.1 Home redesign", () => {
       portfolioSummary: { totalWorkspaceDebt: 500, includedDebt: 500, excludedDebt: 0 },
     });
     const recordedHtml = render(h(HomeCommandCenter, { ...baseProps, snapshot: paymentRecorded, reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
-    expect(recordedHtml).toContain("Payment recorded ✓");
     expect(recordedHtml).toContain("Update balance");
     expect(recordedHtml).toContain("$500.00");
 
@@ -266,24 +261,14 @@ describe("UX-2.1 Home redesign", () => {
     expect(html).not.toContain("On track");
   });
 
-  it("shows What If as preview-only until a scenario result exists", () => {
-    const promptHtml = render(h(HomeCommandCenter, {
+  it("GATE-10B.1C: keeps Try What If reachable from the active plan card (consolidated off Home's own What If card)", () => {
+    const html = render(h(HomeCommandCenter, {
       ...baseProps,
       snapshot: activePlanSnapshot(),
       reviewSnapshot: { openCount: 0, blockingCount: 0 },
       onPreviewScenario: noop,
     }));
-    expect(promptHtml).toContain("Preview a safe scenario without changing your active plan.");
-
-    const resultHtml = render(h(HomeCommandCenter, {
-      ...baseProps,
-      snapshot: activePlanSnapshot(),
-      reviewSnapshot: { openCount: 0, blockingCount: 0 },
-      scenario: { monthsSaved: 4, interestSaved: 120.5 },
-      onPreviewScenario: noop,
-    }));
-    expect(resultHtml).toContain("4 months sooner");
-    expect(resultHtml).toContain("$120.50 less interest");
+    expect(html).toContain("Try What If");
   });
 });
 

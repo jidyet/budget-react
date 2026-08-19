@@ -3,11 +3,12 @@ import PortfolioHeader from "./PortfolioHeader.jsx";
 import ScopeSelector from "./ScopeSelector.jsx";
 import CategoryGrid from "./CategoryGrid.jsx";
 import CategoryDetailPage from "./CategoryDetailPage.jsx";
+import TopLendersCard from "./TopLendersCard.jsx";
 import QuickUpdateRail from "./QuickUpdateRail.jsx";
 import AddDebtModal from "./AddDebtModal.jsx";
 import ReviewEditDebtDrawer from "./ReviewEditDebtDrawer.jsx";
 import ImportCenter from "../import/ImportCenter.jsx";
-import { deriveDebtPortfolioView } from "../debtPortfolioView.js";
+import { deriveDebtPortfolioView, filterDebtsByOwnerScope } from "../debtPortfolioView.js";
 import { resolveDebtsDestination, buildDebtsPath } from "./debtsRouting.js";
 
 // UX-6.1: replaces the monolith's inline Debts component. The root view is
@@ -118,6 +119,10 @@ export default function DebtsCenter({ snapshot, service, refresh, refreshReview,
     <div style={{ display: "grid", gap: "var(--ttz-space-5, 24px)" }}>
       <ScopeSelector snapshot={snapshot} ownerFilter={ownerFilter} onChange={setOwnerFilter} people={people} />
       <CategoryGrid portfolio={portfolio} ownerFilter={ownerFilter} latestSnapshotsByDebt={snapshot.latestSnapshotsByDebt} onSelectCategory={navigate} />
+      <TopLendersCard
+        debts={filterDebtsByOwnerScope([...portfolio.activeDebts, ...portfolio.reviewDebts], ownerFilter)}
+        onGoToDebts={() => navigate("all")}
+      />
     </div>
   ) : (
     <CategoryDetailPage

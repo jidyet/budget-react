@@ -4,6 +4,7 @@ import WorkspaceIdentity from "./WorkspaceIdentity.jsx";
 import PrimaryNav from "./PrimaryNav.jsx";
 import EnvironmentBadge from "./EnvironmentBadge.jsx";
 import UserMenu from "./UserMenu.jsx";
+import ThemeToggle from "./ThemeToggle.jsx";
 import { ttzPalette, ttzGutter } from "../theme.js";
 import { useIsMobile, useIsTablet } from "../useViewport.js";
 
@@ -71,6 +72,7 @@ export default function TopBar({ workspace, repositoryMode, snapshotMode, active
         {!isCompact ? (
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <EnvironmentBadge repositoryMode={repositoryMode} snapshotMode={snapshotMode} />
+            <ThemeToggle />
             <UserMenu name={userName} email={userEmail} role={userRole} onGoToSettings={onGoToSettings} onSignOut={onSignOut} />
           </div>
         ) : null}

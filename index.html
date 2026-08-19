@@ -12,6 +12,24 @@
     <meta name="description" content="Track your debt, build your payoff plan, and get to zero." />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>TrackToZero</title>
+    <script>
+      // GATE-10B.1C: sets data-theme on <html> before the app bundle loads,
+      // so the first paint already matches the saved/system theme instead
+      // of flashing light then swapping to dark. Must resolve the SAME way
+      // ThemeProvider.resolveInitialTheme does (src/components/tracktozero/
+      // ThemeProvider.jsx) - saved choice, then OS preference, then light.
+      (function () {
+        try {
+          var saved = window.localStorage.getItem("ttz-theme");
+          var theme = saved === "light" || saved === "dark"
+            ? saved
+            : (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+          document.documentElement.setAttribute("data-theme", theme);
+        } catch (err) {
+          document.documentElement.setAttribute("data-theme", "light");
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root">If this message remains visible the app JavaScript did not run — open DevTools Console (F12) and check for errors.</div>

@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
+import { Moon, Sun } from "lucide-react";
 import { ttzPalette, TYPE_SCALE } from "../theme.js";
+import { useTheme } from "../useTheme.js";
 
 // Compact account menu (UX-1 Part 25) - replaces the old header's permanent
 // "Signed in as owner" / "Current role: owner" text. Email and role now live
@@ -7,6 +9,8 @@ import { ttzPalette, TYPE_SCALE } from "../theme.js";
 // times.
 export default function UserMenu({ name, email, role, onGoToSettings, onSignOut }) {
   const palette = ttzPalette;
+  const { theme, toggleTheme } = useTheme();
+  const isDark = theme === "dark";
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
 
@@ -73,6 +77,20 @@ export default function UserMenu({ name, email, role, onGoToSettings, onSignOut 
             {email ? <div style={{ ...TYPE_SCALE.caption, color: palette.tx2 }}>{email}</div> : null}
             {role ? <div style={{ ...TYPE_SCALE.caption, color: palette.tx2 }}>Role: {role}</div> : null}
           </div>
+          {/* GATE-10B.1C: mobile/tablet's theme-toggle surface - TopBar's
+              standalone icon button is desktop-only (!isCompact); this menu
+              item is reachable everywhere, matching the same "low-frequency
+              controls live in the account menu" convention this file's own
+              header comment already establishes for Settings. */}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => toggleTheme()}
+            style={{ ...TYPE_SCALE.supporting, display: "flex", alignItems: "center", gap: 8, textAlign: "left", background: "transparent", border: "none", padding: "6px 0", color: palette.tx, cursor: "pointer" }}
+          >
+            {isDark ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}
+            {isDark ? "Switch to light mode" : "Switch to dark mode"}
+          </button>
           {onGoToSettings ? (
             <button
               type="button"

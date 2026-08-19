@@ -29,7 +29,7 @@ Every Firebase-changing command this phase (`node scripts/deploy-beta.mjs ...`) 
 
 Inventoried via Admin SDK (reusing the existing `firebase login` OAuth session, the same mechanism `tools/betaAccess.cjs` already uses — no service-account key created):
 
-- Auth users: **1** (`jidyet@yahoo.co.uk`, the real product owner)
+- Auth users: **1** (the real product owner's account)
 - Workspaces: **1** (the owner's own household workspace)
 - `beta_allowlist`: **0** entries (consistent with the already-documented post-BETA-3.1-cleanup state)
 
@@ -200,7 +200,7 @@ Executed with an explicit safety gate: the script first re-verified the preserve
 
 ## 44. Post-cleanup baseline
 
-Re-inventoried immediately after cleanup: **1** Auth user (`jidyet@yahoo.co.uk`), **1** Workspace (the owner's own household), **0** `beta_allowlist` entries — an exact match to the pre-test baseline (Section 5), confirmed field-for-field, not merely "looks similar."
+Re-inventoried immediately after cleanup: **1** Auth user (the real product owner's account), **1** Workspace (the owner's own household), **0** `beta_allowlist` entries — an exact match to the pre-test baseline (Section 5), confirmed field-for-field, not merely "looks similar."
 
 ## 45. Known limitations
 

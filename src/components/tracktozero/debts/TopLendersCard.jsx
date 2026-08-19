@@ -38,9 +38,15 @@ export default function TopLendersCard({ debts, onGoToDebts }) {
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10, alignItems: "start" }}>
           {visible.map((group) => (
-            <div
+            <button
               key={group.lenderId}
+              type="button"
+              onClick={() => onGoToDebts?.()}
+              disabled={!onGoToDebts}
+              className={onGoToDebts ? "ttz-card-hover ttz-focus-ring" : undefined}
               style={{
+                all: "unset",
+                boxSizing: "border-box",
                 display: "flex",
                 flexDirection: "column",
                 gap: 10,
@@ -48,6 +54,7 @@ export default function TopLendersCard({ debts, onGoToDebts }) {
                 borderRadius: 12,
                 background: ttzPalette.surf2,
                 border: `1px solid ${ttzPalette.border}`,
+                cursor: onGoToDebts ? "pointer" : "default",
               }}
             >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
@@ -60,7 +67,7 @@ export default function TopLendersCard({ debts, onGoToDebts }) {
                   {group.count} account{group.count === 1 ? "" : "s"}{group.highestKnownApr != null ? ` · ${percent(group.highestKnownApr)} highest APR` : ""}
                 </div>
               </div>
-            </div>
+            </button>
           ))}
         </div>
 

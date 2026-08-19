@@ -47,6 +47,31 @@ export default function AppShell({ topBarProps, mobileBottomNavProps, quickActio
           outline-offset: 2px !important;
           border-radius: var(--ttz-radius-sm, 8px) !important;
         }
+        /* GATE-10B.1C: a shared hover "pop + glow" for interactive card
+           surfaces (Top Lenders rows, category tiles, Home summary cards) -
+           one class, injected once here (AppShell wraps every screen) since
+           inline React styles can't express :hover. The lift/scale is
+           skipped under prefers-reduced-motion; the glow (a color-based, not
+           motion-based, cue) still applies either way. Every declaration
+           here needs !important: some targets (TopLendersCard/CategoryTile's
+           accessible-button pattern) use inline all:unset, and an
+           inline style always beats an external stylesheet rule of any
+           specificity UNLESS that rule is !important - confirmed live (only
+           the one declaration marked !important was actually taking effect
+           on hover before this fix; box-shadow/transform were silently lost
+           to the inline reset). */
+        .ttz-card-hover {
+          transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease !important;
+        }
+        .ttz-card-hover:hover, .ttz-card-hover:focus-visible {
+          box-shadow: 0 0 0 3px var(--ttz-ac-soft, ${palette.acS}), 0 12px 28px rgba(10, 34, 54, 0.16) !important;
+          border-color: var(--ttz-ac, ${palette.ac}) !important;
+        }
+        @media (prefers-reduced-motion: no-preference) {
+          .ttz-card-hover:hover, .ttz-card-hover:focus-visible {
+            transform: translateY(-3px) scale(1.012) !important;
+          }
+        }
       `}</style>
       <TopBar {...topBarProps} />
       <div style={{ paddingBottom: isMobile ? 76 : 0 }}>{children}</div>

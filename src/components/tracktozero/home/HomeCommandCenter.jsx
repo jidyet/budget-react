@@ -37,6 +37,23 @@ const gridColumns = (min = 260) => ({
   alignItems: "start",
 });
 
+// GATE-10B.1C: the opposite choice from gridColumns above, deliberately -
+// used only for a row of cards that should read as one matched set
+// (Confirmed progress / Your debts / Debt by owner). Unlike Row 1's flex
+// wrapper-div case, Card here IS the direct grid item (no wrapper between
+// it and the grid container), so CSS Grid's "stretch" sets Card's OWN box
+// height to the row's height directly - its background/border correctly
+// fill that height (shorter content just leaves even bottom padding,
+// exactly the "equal-size cards" look this is for), not the "blank space
+// under a nested unstretched child" problem gridColumns' own comment
+// describes for a different structural case.
+const gridColumnsEqual = (min = 260) => ({
+  display: "grid",
+  gridTemplateColumns: `repeat(auto-fit, minmax(${min}px, 1fr))`,
+  gap: GAP_SM,
+  alignItems: "stretch",
+});
+
 // Row 1's "~60-65% / ~35-40%" split (GATE-10B.1C) uses flex, not grid: an
 // unequal flex-grow ratio (1.65 vs 1) on two items with generous min
 // flex-basis values gives NextMoveHero the larger share on wide screens
@@ -163,6 +180,7 @@ function ProgressRing({ progress, title, subtitle }) {
   return (
     <Card
       variant="default"
+      className="ttz-card-hover"
       style={{ padding: 24, borderLeft: `3px solid ${hasRealProgress ? ttzPalette.go : ttzPalette.border2}` }}
     >
       <div style={{ display: "grid", gap: 18, justifyItems: "center", textAlign: "center" }}>
@@ -220,7 +238,7 @@ function DebtSnapshotCard({ homeContext, onGoToDebts }) {
   if (!debtSnapshot) return null;
 
   return (
-    <Card variant="default" style={{ padding: 24, borderLeft: `3px solid ${ttzPalette.ac}` }}>
+    <Card variant="default" className="ttz-card-hover" style={{ padding: 24, borderLeft: `3px solid ${ttzPalette.ac}` }}>
       <div style={{ display: "grid", gap: 12 }}>
         <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.ac }}>Your debts</div>
         <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>{debtSnapshot.activeLabel}</div>
@@ -399,7 +417,7 @@ function HouseholdBreakdownCard({ homeContext, onGoToDebts }) {
   const allUnassignedOnly = items.length === 1 && items[0].type === "unassigned";
 
   return (
-    <Card variant="default" style={{ padding: 24, borderLeft: `3px solid ${ttzPalette.in}` }}>
+    <Card variant="default" className="ttz-card-hover" style={{ padding: 24, borderLeft: `3px solid ${ttzPalette.in}` }}>
       <div style={{ display: "grid", gap: 16 }}>
         <div>
           <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Debt by owner</div>
@@ -445,7 +463,7 @@ function ReviewSummaryCard({ homeContext, onGoToReview }) {
   if (!homeContext.openReviewCount && !homeContext.staleBatchCount) return null;
   if (homeContext.staleBatchCount > 0 && !homeContext.openReviewCount) {
     return (
-      <Card variant="default" style={{ padding: 20, borderLeft: `4px solid ${toneColors(ttzPalette).warning.fg}` }}>
+      <Card variant="default" className="ttz-card-hover" style={{ padding: 20, borderLeft: `4px solid ${toneColors(ttzPalette).warning.fg}` }}>
         <div style={{ display: "grid", gap: 10 }}>
           <div style={{ ...TYPE_SCALE.overline, color: toneColors(ttzPalette).warning.fg }}>Import review</div>
           <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>
@@ -462,7 +480,7 @@ function ReviewSummaryCard({ homeContext, onGoToReview }) {
   const tone = homeContext.blockingReviewCount > 0 ? "warning" : "info";
   const colors = toneColors(ttzPalette)[tone];
   return (
-    <Card variant="default" style={{ padding: 20, borderLeft: `4px solid ${colors.fg}`, background: tone === "warning" ? colors.bg : ttzPalette.surf }}>
+    <Card variant="default" className="ttz-card-hover" style={{ padding: 20, borderLeft: `4px solid ${colors.fg}`, background: tone === "warning" ? colors.bg : ttzPalette.surf }}>
       <div style={{ display: "grid", gap: 10 }}>
         <div style={{ ...TYPE_SCALE.overline, color: colors.fg }}>Import review</div>
         <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>
@@ -533,8 +551,13 @@ function NoActivePlanState({ homeContext, onCompareStrategies, onAddDebt, onGoTo
           inline hand-rolled "Import review" card is also replaced with the
           shared ReviewSummaryCard (the same consolidation the main
           active-plan state already got), so there is exactly one Import
-          Review presentation across all of Home's states, not two. */}
-      <div style={gridColumns(280)}>
+          Review presentation across all of Home's states, not two - and it
+          renders as its own full-width banner (not squeezed into the
+          matched-size row below) since it's an actionable item, not a peer
+          informational card. */}
+      <ReviewSummaryCard homeContext={homeContext} onGoToReview={onGoToReview} />
+
+      <div style={gridColumnsEqual(280)}>
         <ProgressRing
           progress={homeContext.progress || { confirmed: false, openingBalance: 0, latestBalance: 0, eliminated: 0, percent: 0 }}
           title="Confirmed progress"
@@ -542,8 +565,6 @@ function NoActivePlanState({ homeContext, onCompareStrategies, onAddDebt, onGoTo
         />
 
         <DebtSnapshotCard homeContext={homeContext} onGoToDebts={onGoToDebts || onAddDebt} />
-
-        <ReviewSummaryCard homeContext={homeContext} onGoToReview={onGoToReview} />
 
         {homeContext.isHousehold ? <HouseholdBreakdownCard homeContext={homeContext} onGoToDebts={onGoToDebts || onAddDebt} /> : null}
       </div>
@@ -723,17 +744,24 @@ export default function HomeCommandCenter({
         </div>
       </div>
 
-      {/* Row 2: the 4 supporting summary cards - confirmed progress, debt
-          snapshot, import review (unified, reused everywhere), and
-          household breakdown (household workspaces only). */}
-      <div style={gridColumns(260)}>
+      {/* Import review (unified, reused everywhere) surfaces as its own
+          full-width banner when there's something to review, above the
+          matched-size summary row below - an actionable item shouldn't be
+          squeezed to match 3 informational cards' height, and returns null
+          entirely when nothing needs review. */}
+      <ReviewSummaryCard homeContext={homeContext} onGoToReview={onGoToReview} />
+
+      {/* Row 2: confirmed progress, debt snapshot, and household breakdown
+          (household workspaces only) - a matched-size set (gridColumnsEqual,
+          not gridColumns) since these are peer summary cards, not a list of
+          varying-length content. */}
+      <div style={gridColumnsEqual(260)}>
         <ProgressRing
           progress={homeContext.progress}
           title="Confirmed progress"
           subtitle={homeContext.progress?.confirmed ? "Confirmed debt eliminated vs confirmed debt remaining" : "Your starting point is set. Progress updates after a new confirmed balance snapshot."}
         />
         <DebtSnapshotCard homeContext={homeContext} onGoToDebts={goToDebts} />
-        <ReviewSummaryCard homeContext={homeContext} onGoToReview={onGoToReview} />
         {homeContext.isHousehold ? <HouseholdBreakdownCard homeContext={homeContext} onGoToDebts={goToDebts} /> : null}
       </div>
 

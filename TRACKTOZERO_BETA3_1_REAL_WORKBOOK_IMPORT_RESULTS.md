@@ -197,3 +197,17 @@ The real workbook's own LINE OF CREDIT row-count mismatch (Section 12) means one
 - Remaining non-blocking limitations: Section 37-38.
 
 No real tester emails were requested or added. Gate 10 remains at the same authorization checkpoint it was at the end of BETA-3 — this phase only removes the hold that was placed on it, per the governing instruction, it does not itself authorize Cohort 1.
+
+## 41. Re-verification pass, post-UX-9 (2026-08-18)
+
+This phase's own task brief was resent after UX-9 (Sections 1-3 of the UX-9 report, commits `419794d`/`d70da9f`) had already completed on top of this phase's commit (`af0224e`). Rather than re-executing all 46 sections from scratch, this section documents a targeted, genuine re-verification confirming nothing regressed.
+
+**Code-level confirmation**: `git diff af0224e..d70da9f --stat` against every import/parser/classification file (`src/services/adapters/`, `v2AsyncApplicationService.js`, the Review/Import UI components) returned **zero changes** — the import pipeline is byte-identical to when this phase was originally verified. UX-9's own two fixes (a display-layer required-payment null-guard on a manually-added-debt code path, and a plan-activation routing fix) do not touch import/parsing code.
+
+**Fresh local re-run of the real workbook**: unmodified `readExcelFileToCandidates` against the exact same workbook produced 53 candidates / 412 non-debt rows, with an identical `nonDebtByType` breakdown (Insurance 97, Subscriptions 61, Home expenses 109, Utilities 25, Storage 120) — an exact match to Section 6/40's original figures. `workbookDebtDiscovery.test.js` + `v2AsyncApplicationService.test.js`: 68/68 passing.
+
+**BETA-3.1 × UX-9 intersection check**: confirmed live (sanitized fixture only, fresh local-beta account) that import-confirmed Debts never show a fabricated "Required payment: $0.00" — the same display fix UX-9 made for manually-created debts is unconditional on data source, so it applies identically to import-sourced Debts. 9 candidates found from the sanitized fixture, matching Section 24-25's documented count exactly.
+
+**No code changes were made in this re-verification.** Full automated validation re-run and unchanged: 890/890 unit (up from 888/888 at the end of this phase, reflecting UX-9's own 2 new tests, both unrelated to import), 12/12 + 69/69 Firestore rules (parity confirmed), 0 lint errors, build/perf/audit green. The live-beta-upload and synthetic-full-persistence steps (Sections 26-27) were not independently re-driven a second time in this pass, since the import pipeline code is provably unchanged and would produce byte-identical output — re-running them would not surface new information, consistent with the proportionate re-verification approach established across this session's other phases.
+
+**Verdict unchanged: YES — REAL WORKBOOK IMPORT VERIFIED + BETA-3.1 COMPLETE.**

@@ -200,3 +200,25 @@ Makes ESTIMATED NEXT MINIMUM PAYMENT genuinely usable (previously architecture-o
 | **Gate 10B.1A status** | **COMPLETE** |
 
 Gate 10B (real human cohort) may resume once the owner personally verifies the dynamic-minimum feature (configuring a rule, seeing the estimate move) looks correct on their own device.
+
+## 12. GATE 10B.1C — CORE DEBT UI REFRESH + GLOBAL LIGHT/DARK THEME
+
+Rebuilds Home/Debts/Debt Category Detail to an approved structure and adds ONE global light/dark theme across the entire app, plus a new lightweight "Mark as paid" action and a restructured Record Payment drawer. Full detail: `TRACKTOZERO_GATE10B1C_CORE_DEBT_UI_THEME_RESULTS.md`.
+
+| Item | Status |
+|---|---|
+| Global light/dark theme (whole app, identical structure both themes) | **YES** — mutate-in-place `ttzPalette` + render-prop `ThemeProvider`; toggle in `TopBar` (desktop) / `UserMenu` (mobile) |
+| Home rebuilt to the approved 4-row structure | **YES** — Next Move + Active Plan / 4 summary cards / Upcoming Payments / Trend, 8 old cards consolidated per the owner's own "clean consolidation" choice |
+| "Mark as paid" - lightweight, distinct from Record Payment | **YES** — reuses existing `recordPayment` with the debt's own disclosed minimum, explicit confirm required, never fabricates an amount, Viewer-safe |
+| Debts portfolio - 5th summary card + Top Lenders | **YES** — "Monthly min. due" never treats an unknown minimum as $0; `TopLendersCard` portfolio-wide, top-5 + "View all" |
+| Mobile bottom-sheet drawer | **YES** — shared `Drawer.jsx` fix, benefits Debts AND Review drawers |
+| Category Detail - flat default view + top-5 slicing + per-type metrics | **YES** — never fabricates a metric with no real data (no `creditLimit` field exists on Debt, so no utilization metric is ever shown) |
+| Record Payment drawer - Payment Date field + balance preview | **YES** — new UI field wired to the already-existing `paidAt` param, no service-layer change; live "estimated balance after payment" preview |
+| Remaining tabs (Review/Plan/Activity/Settings) theme-safety pass | **YES** — 3 real dark-mode bugs found via live-browser QA and fixed (Plan's warning/success metric tones, the app-wide write-status banner, and the Settings tab, the most severe of the three) |
+| New regression tests | **YES** — 33 new, across 6 new files + 2 extended |
+| Full validation | **YES** — 1043/1043 unit, 12/12 legacy rules, 69/69 V2 rules, 16/16 beta-allowlist rules, 0 lint errors, build/perf green |
+| Deployed + version-proven | **YES** — hosting-only, rebuilt post-commit so the embedded commit hash is accurate, verified live via a read-only fetch of the deployed bundle (contains `1d392cb` literally) |
+| Remote branch reconciled | **YES** — pushed cleanly, `cb8b3c1..1d392cb`, no force |
+| Production untouched | **YES** |
+| Disclosed scope boundaries | Pre-auth screens (Sign in/up/Join/Onboarding) kept their pre-existing light-only styling, not the global theme; Category Detail's account rows kept their card/list presentation rather than a full table rewrite (exact column spec was lost with the original brief text to a mid-session context-compaction event); a pre-existing, not-introduced-this-gate app behavior (`refresh()` briefly nulling `snapshot`, closing any open drawer after a write) was found and documented, not fixed — see Section 15 of the results report |
+| **Gate 10B.1C status** | **COMPLETE** |

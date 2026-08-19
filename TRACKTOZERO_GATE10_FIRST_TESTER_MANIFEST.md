@@ -87,3 +87,37 @@ Gate 10 was held again pending a mandatory real-world PDF statement corpus truth
 | **Gate-10 PDF-corpus status** | **PASS** |
 
 Eight real, generalized bugs were found and fixed this phase (a `parseStatement` early-exit that discarded all enrichment on a narrow initial check; digit-spaced-character PDF rendering breaking currency/date extraction; a parent-company footer mention winning lender detection over the statement's own brand; a document-type check-order bug that let generic "credit card" boilerplate outrank genuine line-of-credit evidence, plus an adjacent "Revolving Line of Credit" credit-limit-label false positive caught during verification; a whole-document APR sweep counting rewards/fee percentages as APR evidence; unsupported 2-digit-year dates across the entire date-extraction pipeline; and a combined "Opening/Closing Date" range picking the wrong date) — see the dedicated report for full detail. Two additional lower-severity owner-name boilerplate false positives were also fixed. Zero real tester emails were requested, added, or discussed at any point during this sub-phase either.
+
+## 8. GATE 10A — SYNTHETIC LIVE COHORT
+
+A production-like live rehearsal against the real deployed `tracktozero-beta.web.app` using a controlled 7-identity synthetic cohort (`@example.test`, never real testers). Full detail: `TRACKTOZERO_GATE10A_SYNTHETIC_COHORT_RESULTS.md`.
+
+| Item | Status |
+|---|---|
+| Synthetic cohort created | **YES** — 7 identities, Firebase Auth Admin SDK, no service-account key created |
+| Unapproved-user denial verified | **YES** — UI-level (clear invite-only state, no workspace bootstrap) and rules-level (`test:firestore:beta`, 16/16, including the correct-email-but-unapproved case) |
+| Personal flow verified | **YES** — signup → beta access → bootstrap → empty Home → 8-item debt matrix → Snowball activation → reload |
+| Household flow verified | **YES** — creation, household-aware language, owner membership |
+| Secure invitation verified | **YES** — issued through the real `createMemberInvite` service call; raw token confirmed hashed before storage (never directly recoverable, by design) |
+| Wrong-email denial verified | **YES** — token alone insufficient; explicit, correct mismatch message; zero financial access gained |
+| Contributor verified | **YES** — against the actual `ROLE_PERMISSIONS.contributor` contract; can record payment/balance, cannot manage debts/plans (disabled, not just visually different) |
+| Viewer verified | **YES** — read-only confirmed by absent payment/balance controls, disabled add/import controls, and a forced real click-through submission attempt that produced no debt |
+| Joint verified | **YES** — counts once in totals, one account tile, correct "Joint / Household" owner label |
+| Manual Debt verified | **YES** — 8-item matrix; missing required payment never `$0`; unknown APR never `0%` |
+| XLSX sanitized import verified | **YES** — permanent BETA-3.1 fixture; 9 candidates, 8 non-debt excluded, formula-derived balance uncertainty surfaced, one candidate confirmed to a real Debt + opening BalanceSnapshot |
+| PDF sanitized import verified | **YES** — pre-existing synthetic fixture; correctly classified "Line of credit," confirming BETA-3.2's classifier fix live |
+| Duplicate statement behavior verified | **NOT independently re-driven this phase** — unmodified since BETA-3.2's own dedicated, already-green verification; no import-pipeline code touched by Gate 10A |
+| Monthly statement same-Debt behavior verified | **NOT independently re-driven this phase** — same reasoning |
+| Required-payment execution verified | **YES** — safe vocabulary only (`Due today`/`Due this week`/`Upcoming`/`Due date passed — confirm`), never `Past due`/`Missed`/`Delinquent`; required payments stayed distinct from the extra payoff target |
+| Snowball/Avalanche verified | **YES** — correct ordering/warnings/no fake savings language; first-ever activation completed correctly, confirming the prior UX-9 activation fix live |
+| Reload/session verified | **YES** — Home and both true deep-linkable routes (Debts, Plan) survive a hard reload; documented, non-blocking UX-9 route limitation not re-litigated |
+| Feedback verified | **NOT APPLICABLE** — no feedback mechanism is currently wired into the V2 app (confirmed via source inspection); a real gap for a future phase, not a Gate 10A blocker |
+| Mobile verified | **YES** — 390×844, 7/7 checks, zero overflow, zero console errors |
+| Desktop verified | **YES** — 1440×900 was the viewport for the large majority of this phase's testing, zero issues |
+| Console/network clean | **YES** — zero console errors throughout; zero requests to `budgetapp-c9306` at any point |
+| Production untouched | **YES** — every deploy command verified against `tracktozero-beta` only; see the dedicated report's Section 3 for a serious deploy-tooling near-miss found and permanently fixed before cohort testing began |
+| Synthetic cleanup complete | **YES** — full inventory before deletion; recursive workspace deletion; allowlist and Auth user removal; post-cleanup state verified an exact match to the pre-test baseline |
+| Human cohort invited | **NO** |
+| **Gate 10A status** | **PASS** |
+
+One real defect was found and fixed this phase: a deployment-tooling gap (not a TrackToZero product defect) where `scripts/deploy-beta.mjs` could deploy a `dist/` build accidentally configured with production's Firebase credentials to the public beta URL. A permanent, automatic verification gate was added to the script itself, tested in both directions (correct build passes, incorrect build is refused), before any cohort testing began. Zero real tester emails were requested, added, or discussed at any point during this sub-phase.

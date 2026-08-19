@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -100,6 +100,59 @@ const betaConfig = {
   },
 };
 writeFileSync(tempConfigPath, JSON.stringify(betaConfig, null, 2), "utf8");
+
+// ── Gate 3 (hosting only): verify dist/ was actually BUILT with the beta
+// env file (`npm run build:beta`, which loads .env.beta), not the default
+// `npm run build` (which loads .env - production's Firebase config). Gates
+// 1-2 above verify the DEPLOY TARGET is correct; this verifies the BUNDLE
+// CONTENT being uploaded to that target is correct too - a plain `npm run
+// build` run before this script, with no error of its own, produces a
+// dist/ folder that looks completely normal but silently bakes in
+// production's Firebase apiKey/projectId. Deploying that to tracktozero-
+// beta's public Hosting URL would make the LIVE beta site's client SDK
+// connect to production Firestore/Auth for every visitor - discovered as
+// a real near-miss during GATE-10A live rehearsal. Checks the built JS for
+// the beta env's own expected API key (proof it WAS used) and confirms
+// the production env's API key is NOT present as an active Firebase
+// config value (the production PROJECT ID string alone is expected and
+// safe - it's also used as a hardcoded guard-comparison constant in
+// repositoryRuntime.js, unrelated to which config is actually active).
+if (target === "hosting" || target === "all") {
+  const distDir = resolve(workspaceRoot, baseConfig.hosting?.public || "dist");
+  if (!existsSync(distDir)) {
+    console.error(`FATAL: ${distDir} not found. Run "npm run build:beta" before deploying hosting.`);
+    process.exit(1);
+  }
+  const readEnvKey = (envPath, key) => {
+    if (!existsSync(envPath)) return null;
+    const match = readFileSync(envPath, "utf8").match(new RegExp(`^${key}=(.*)$`, "m"));
+    return match ? match[1].trim() : null;
+  };
+  const betaApiKey = readEnvKey(resolve(workspaceRoot, ".env.beta"), "VITE_FIREBASE_API_KEY");
+  const productionApiKey = readEnvKey(resolve(workspaceRoot, ".env"), "VITE_FIREBASE_API_KEY");
+  if (!betaApiKey) {
+    console.error("FATAL: could not read VITE_FIREBASE_API_KEY from .env.beta - cannot verify dist/ was built correctly.");
+    process.exit(1);
+  }
+  const assetsDir = resolve(distDir, "assets");
+  const jsFiles = existsSync(assetsDir) ? readdirSync(assetsDir).filter((f) => f.endsWith(".js")) : [];
+  let foundBetaKey = false;
+  let foundProductionKey = false;
+  for (const file of jsFiles) {
+    const content = readFileSync(resolve(assetsDir, file), "utf8");
+    if (content.includes(betaApiKey)) foundBetaKey = true;
+    if (productionApiKey && content.includes(productionApiKey)) foundProductionKey = true;
+  }
+  if (!foundBetaKey) {
+    console.error('FATAL: dist/ does not contain the expected beta Firebase API key. It was not built with "npm run build:beta" (.env.beta). Refusing to deploy hosting - rebuild with the correct command first.');
+    process.exit(1);
+  }
+  if (foundProductionKey) {
+    console.error("FATAL: dist/ contains PRODUCTION's Firebase API key. This build would connect live beta visitors to production Firebase. Refusing to deploy.");
+    process.exit(1);
+  }
+  console.log("Verified: dist/ was built with the beta Firebase config (npm run build:beta), not production's.");
+}
 
 const onlyFlags = {
   rules: "firestore:rules",

@@ -34,17 +34,60 @@ import { categoryConfigForGroup } from "../debts/debtCategoryConfig.js";
 import TrendChart from "./charts/TrendChart.jsx";
 import AllocationDonut from "./charts/AllocationDonut.jsx";
 import MultiScenarioCompareCard from "./charts/MultiScenarioCompareCard.jsx";
+import IconBadge from "./ui/IconBadge.jsx";
+import InsightBanner from "./ui/InsightBanner.jsx";
+import SectionCard from "./ui/SectionCard.jsx";
+import PayoffOrderTable from "./ui/PayoffOrderTable.jsx";
+import MomentumDots from "./ui/MomentumDots.jsx";
+import HistoryTimeline from "./ui/HistoryTimeline.jsx";
+import {
+  Calendar, Clock, DollarSign, TrendingUp, Wallet, Compass, LineChart, ListOrdered, Target, Zap,
+  HeartPulse, GitCompare, PieChart, CheckCircle2, AlertTriangle, AlertCircle, Info, Snowflake, Mountain,
+  ArrowLeft, Trophy, Sparkles, ArrowRight, Lightbulb, ShieldCheck, Upload, FlaskConical, Flag, Archive,
+} from "lucide-react";
 
 const DEFAULT_PAYOFF_ORDER_PREVIEW_COUNT = 5;
+
+// GATE-10B.1E: STATUS_TONE (theme.js) already maps a plan-health status code
+// to a Badge tone (success/warning/danger/info) - this is the matching icon
+// per tone, reused wherever a status-driven IconBadge/InsightBanner needs
+// one (My Plan's bottom banner, Snowball/Avalanche's active-strategy
+// banner). Kept here rather than in theme.js since it's presentation
+// (lucide-react components), not a design token.
+const STATUS_ICON = { success: CheckCircle2, warning: AlertTriangle, danger: AlertCircle, info: Info, neutral: Info };
+const STATUS_TO_BANNER_TONE = { success: "go", warning: "wa", danger: "da", info: "info", neutral: "neutral" };
+
+// GATE-10B.1E: every reference design shows a page-specific title/subtitle
+// ("Snowball vs Avalanche", "What if?", "Saved plans & scenarios"...), not
+// the one shared "Your path to $0" heading the shell previously rendered
+// for all 7 destinations. Swapping the SHELL's own h1/subtitle text per
+// destination (rather than duplicating a title inside every page) keeps
+// GATE-10B.1's "one real <h1> per Plan tab" accessibility guarantee intact -
+// still exactly one h1, its text just now matches what's actually shown.
+const DESTINATION_TITLES = {
+  "my-plan": { title: "My Plan", subtitle: "Your active payoff strategy, next steps, and path to debt freedom in one place." },
+  snowball: { title: "Snowball", subtitle: "Knock out your smallest debts first to build momentum and quick wins that keep you going." },
+  avalanche: { title: "Avalanche payoff plan", subtitle: "Focus on highest-APR debts first to save the most on interest." },
+  compare: { title: "Snowball vs Avalanche", subtitle: "Compare payoff strategies side by side to choose your best path to debt freedom." },
+  "what-if": { title: "What if?", subtitle: "Test how extra payments, one-time payments, or retargeting debt changes your payoff timeline before making it real." },
+  "finish-by": { title: "Finish By", subtitle: "Set a target debt-free month and see how much extra payment it takes to hit it." },
+  scenarios: { title: "Saved plans & scenarios", subtitle: "Revisit, compare, and apply any saved what-if, strategy, or finish-by target." },
+};
 
 // GATE-10B.1D: turns a payoffSimulate*-shaped aggregate `projection` array
 // into TrendChart's expected point shape - one tiny adapter reused by every
 // chart-bearing view below, so each view doesn't hand-roll its own mapping.
-const toBalancePoints = (projection = []) => projection.map((row) => ({ month: row.month, balance: row.remaining_debt }));
+// GATE-10B.1E: also carries each month's own interest (row.total_interest,
+// already computed by the engine and already summed elsewhere for
+// estimatedInterest) - purely additive, existing callers that only read
+// `.balance` are unaffected. This is what makes TrendChart's opt-in
+// Balance/Interest/Cumulative-interest mode toggle (My Plan, Snowball) able
+// to plot real numbers instead of a flat zero line.
+const toBalancePoints = (projection = []) => projection.map((row) => ({ month: row.month, balance: row.remaining_debt, interest: row.total_interest }));
 
 const GAP = "var(--ttz-space-4, 16px)";
 
-function PlanMetric({ label, value, tone = "default" }) {
+function PlanMetric({ label, value, tone = "default", icon }) {
   // GATE-10B.1C: warning/success used to be hardcoded light-mode-only hex
   // values (e.g. "#fff7ed") that bypassed ttzPalette entirely, so they never
   // followed a theme change (a pale-orange/pale-green box would stay pale
@@ -61,7 +104,10 @@ function PlanMetric({ label, value, tone = "default" }) {
 
   return (
     <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${colors.border}`, background: colors.bg, minWidth: 0 }}>
-      <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>{label}</div>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>{label}</div>
+        {icon ? <IconBadge icon={icon} tone={tone === "accent" ? "ac" : tone === "warning" ? "wa" : tone === "success" ? "go" : "neutral"} size="sm" /> : null}
+      </div>
       <div style={{ ...TYPE_SCALE.metricSm, color: colors.color, marginTop: 6, minWidth: 0 }}>{value}</div>
     </div>
   );
@@ -71,7 +117,13 @@ function formatMonthLabel(value) {
   if (!value) return "n/a";
   const date = new Date(`${value}-01T00:00:00Z`);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric" }).format(date);
+  // GATE-10B.1E fix: formatting a UTC-midnight Date without pinning the
+  // formatter's own timeZone to UTC used the runtime's LOCAL timezone
+  // instead - in any timezone behind UTC (most of the US), "2026-10"
+  // rendered as "Sep 2026," a real one-month-off bug found live on Finish
+  // By's "Target date" tile showing a different month than the date the
+  // user had actually typed into the input field.
+  return new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric", timeZone: "UTC" }).format(date);
 }
 
 // Presentation-only date-label arithmetic - both inputs are already-computed
@@ -177,14 +229,17 @@ function ExcludedDebtsSection({ debts = [], isHousehold = false, onGoToDebts }) 
 // UX-8.2: shows every critical warning, not just warnings[0] - the prior
 // index-0-only truncation could hide or misattribute the real exclusion
 // warning whenever more than one warning existed for a preview.
-function StrategyHeader({ title, subtitle, isActive, warnings = [] }) {
+function StrategyHeader({ title, subtitle, isActive, warnings = [], icon }) {
   const criticalMessages = warnings.filter((warning) => warning.severity === "critical").map((warning) => warning.message);
   return (
     <div style={{ display: "grid", gap: 6 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <div>
-          <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>{title}</div>
-          <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx, marginTop: 4 }}>{subtitle}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {icon ? <IconBadge icon={icon} tone={isActive ? "go" : "ac"} size="md" /> : null}
+          <div>
+            <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>{title}</div>
+            <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx, marginTop: 4 }}>{subtitle}</div>
+          </div>
         </div>
         {isActive ? <Badge tone="success">Active strategy</Badge> : <Badge tone="neutral">Preview</Badge>}
       </div>
@@ -199,7 +254,7 @@ function StrategyHeader({ title, subtitle, isActive, warnings = [] }) {
   );
 }
 
-function MyPlanView({ snapshot, service, refresh, runAction, writeState, onGoToDebts }) {
+function MyPlanView({ snapshot, service, refresh, runAction, writeState, onGoToDebts, reviewSnapshot }) {
   const activeVersion = snapshot?.activeContext?.version;
   const targetDebt = snapshot.targetDebt || snapshot.payoffQueue?.[0];
   const goTo = navigateToPlanDestination;
@@ -260,6 +315,7 @@ function MyPlanView({ snapshot, service, refresh, runAction, writeState, onGoToD
       strategyLabel={strategyLabel}
       debtsAwaitingReforecast={debtsAwaitingReforecast}
       scrollToReforecast={scrollToReforecast}
+      reviewSnapshot={reviewSnapshot}
     />
   );
 }
@@ -270,7 +326,7 @@ function MyPlanView({ snapshot, service, refresh, runAction, writeState, onGoToD
 // requirement) while this body can freely use hooks for the new chart/
 // strategy-snapshot data fetches, only ever mounted once an active plan
 // genuinely exists.
-function MyPlanActiveBody({ snapshot, service, refresh, runAction, writeState, onGoToDebts, activeVersion, targetDebt, strategyLabel, debtsAwaitingReforecast, scrollToReforecast }) {
+function MyPlanActiveBody({ snapshot, service, refresh, runAction, writeState, onGoToDebts, activeVersion, targetDebt, strategyLabel, debtsAwaitingReforecast, scrollToReforecast, reviewSnapshot }) {
   const workspaceId = snapshot.workspace.id;
   const isHousehold = snapshot.workspace.type === "household";
   const [activePreview, setActivePreview] = useState(null);
@@ -297,23 +353,37 @@ function MyPlanActiveBody({ snapshot, service, refresh, runAction, writeState, o
   const minimumsInterestDelta = activeStrategyResult && minimumsPreview
     ? safePercentDelta(minimumsPreview.estimatedInterest, activeStrategyResult.estimatedInterest)
     : null;
+  const interestSavedVsMinimums = minimumsPreview && activePreview
+    ? Math.abs(Number(minimumsPreview.estimatedInterest || 0) - Number(activePreview.estimatedInterest || 0))
+    : null;
 
   const visiblePayoffQueue = showAllPayoffOrder ? payoffQueue : payoffQueue.slice(0, DEFAULT_PAYOFF_ORDER_PREVIEW_COUNT);
   const hiddenPayoffCount = payoffQueue.length - visiblePayoffQueue.length;
 
   const chartSeries = [
     activePreview ? {
-      id: "active", label: "Your active plan", colorToken: "ac",
+      id: "active", label: `Your plan (${strategyLabel})`, colorToken: "ac",
       points: toBalancePoints(activePreview.projection), payoffMonth: activePreview.projectedZeroDate || undefined,
     } : null,
     minimumsPreview ? {
-      id: "minimums", label: "Paying minimums only", colorToken: "muted", dashed: true,
+      id: "minimums", label: "Minimum payments", colorToken: "muted", dashed: true,
       points: toBalancePoints(minimumsPreview.projection), payoffMonth: minimumsPreview.projectedZeroDate || undefined,
     } : null,
   ].filter(Boolean);
 
   const statusCode = snapshot.status?.code;
   const statusTone = STATUS_TONE[statusCode] || "info";
+  const bannerTone = STATUS_TO_BANNER_TONE[statusTone] || "info";
+  const BannerIcon = STATUS_ICON[statusTone] || Info;
+
+  // GATE-10B.1E: Plan Health's 4-stat row - "import items needing review"
+  // reuses the SAME reviewSnapshot count already computed once for the top
+  // nav's "Review" badge (TrackToZeroV2App.jsx's navBadges.review), threaded
+  // down as a prop rather than re-queried here, so the two numbers can never
+  // drift.
+  const activeDebtsCount = (snapshot.debts || []).filter((debt) => debt.status === "active").length;
+  const paidOffCount = (snapshot.debts || []).filter((debt) => debt.status === "paid_off").length;
+  const importReviewCount = (reviewSnapshot?.actionableCount ?? reviewSnapshot?.openCount ?? 0) || (reviewSnapshot?.staleBatchCount ?? 0);
 
   return (
     <div style={{ display: "grid", gap: GAP }}>
@@ -328,21 +398,17 @@ function MyPlanActiveBody({ snapshot, service, refresh, runAction, writeState, o
         </WarningCallout>
       ) : null}
       <Card variant="default" style={{ padding: 20 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <div>
-            <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>My Plan</div>
-            <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx, marginTop: 4 }}>{strategyLabel} active</div>
-          </div>
-          <Badge tone="success">Active</Badge>
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <Badge tone="success">{strategyLabel} active</Badge>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: GAP, marginTop: GAP }}>
-          <PlanMetric label="Projected debt-free" value={snapshot.projectedZeroDate || "n/a"} tone="accent" />
-          <PlanMetric label="Months to $0" value={activePreview ? String(activePreview.monthsToZero) : "…"} />
-          <PlanMetric label="Monthly target" value={money(activeVersion.extraMonthlyPayment || 0)} />
-          <PlanMetric label="Projected interest" value={activePreview ? money(activePreview.estimatedInterest) : "…"} />
-          <PlanMetric label="Total left to go" value={money(totalLeftToGo)} />
-          <PlanMetric label="Strategy" value={strategyLabel} />
+          <PlanMetric label="Projected debt-free" value={snapshot.projectedZeroDate || "n/a"} tone="accent" icon={Calendar} />
+          <PlanMetric label="Months to $0" value={activePreview ? String(activePreview.monthsToZero) : "…"} icon={Clock} />
+          <PlanMetric label="Monthly target" value={money(activeVersion.extraMonthlyPayment || 0)} tone="accent" icon={DollarSign} />
+          <PlanMetric label="Projected interest" value={activePreview ? money(activePreview.estimatedInterest) : "…"} icon={TrendingUp} />
+          <PlanMetric label="Total left to go" value={money(totalLeftToGo)} icon={Wallet} />
+          <PlanMetric label="Strategy" value={strategyLabel} icon={Compass} />
         </div>
         <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 10 }}>
           Based on {payoffQueue.length} included debt{payoffQueue.length === 1 ? "" : "s"}.
@@ -350,87 +416,134 @@ function MyPlanActiveBody({ snapshot, service, refresh, runAction, writeState, o
         </div>
       </Card>
 
-      <Card variant="default">
-        <TrendChart
-          title="Balance to $0"
-          subtitle="Projected, based on your current balances, APRs, and payment assumptions."
-          series={chartSeries}
-          emptyState={<div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>Loading your projection…</div>}
-        />
-      </Card>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.6fr) minmax(260px, 0.9fr)", gap: GAP }}>
+        <SectionCard number={1} title="Balance to $0 over time">
+          <TrendChart
+            series={chartSeries}
+            showModes
+            emptyState={<div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>Loading your projection…</div>}
+          />
+        </SectionCard>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.6fr) minmax(260px, 0.8fr)", gap: GAP }}>
-        <Card variant="default">
-          <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Your path to $0</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, overflowX: "auto", paddingTop: 14 }}>
-            {payoffQueue.length ? payoffQueue.map((debt, index) => (
-              <div key={debt.id} style={{ minWidth: 120, textAlign: "center" }}>
-                <div style={{ width: 16, height: 16, borderRadius: 999, background: index === 0 ? ttzPalette.ac : ttzPalette.border, margin: "0 auto 8px", border: `2px solid ${ttzPalette.surf}` }} />
-                <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx, fontWeight: 700 }}>{debt.name}</div>
-                <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted }}>
-                  {index === 0 ? "Current target" : "Up next"}
-                </div>
+        <SectionCard number={4} title="Next move">
+          {nextMove ? (
+            <div style={{ display: "grid", gap: 10 }}>
+              <IconBadge icon={Zap} tone="ac" size="lg" />
+              <div>
+                <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 700 }}>Focus extra payment on: {nextMove.targetDebtName}</div>
+                <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 6 }}>{nextMove.body}</div>
+                {nextMove.payoffMonth ? (
+                  <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted, marginTop: 8 }}>Projected payoff for this debt: {nextMove.payoffMonth}</div>
+                ) : null}
               </div>
-            )) : <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>No payoff order yet.</div>}
-          </div>
-        </Card>
-
-        <Card variant="default">
-          <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Current target</div>
-          <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx, marginTop: 8 }}>{targetDebt?.name || "No target"}</div>
-          <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 4 }}>{money(targetDebt?.currentBalance || 0)} remaining</div>
-          <div style={{ marginTop: GAP, display: "grid", gap: 6 }}>
-            <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted }}>Interest: {targetDebt?.aprStatus === "unknown" ? "Unknown APR" : percent(targetDebt?.apr || 0)}</div>
-            <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted }}>Minimum due: {targetDebt?.minimumRequiredPayment == null ? "Not set" : money(targetDebt.minimumRequiredPayment)}</div>
-            <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted }}>Owner: {presentedOwnerLabel(targetDebt)}</div>
-          </div>
-          {onGoToDebts ? <Button variant="secondary" size="sm" onClick={onGoToDebts} style={{ marginTop: GAP }}>View debt</Button> : null}
-        </Card>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Button variant="primary" size="sm" onClick={scrollToReforecast}>Apply extra payment</Button>
+                {onGoToDebts ? <Button variant="secondary" size="sm" onClick={onGoToDebts}>Record payment</Button> : null}
+              </div>
+            </div>
+          ) : (
+            <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, margin: 0 }}>No target debt yet.</p>
+          )}
+        </SectionCard>
       </div>
 
-      {nextMove ? (
-        <Card variant="default" style={{ borderLeft: `3px solid ${ttzPalette.ac}` }}>
-          <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.ac }}>Next move</div>
-          <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx, marginTop: 6 }}>Focus extra payment on: {nextMove.targetDebtName}</div>
-          <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 6 }}>{nextMove.body}</div>
-          {nextMove.payoffMonth ? (
-            <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted, marginTop: 8 }}>Projected payoff for this debt: {nextMove.payoffMonth}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.6fr) minmax(260px, 0.9fr)", gap: GAP }}>
+        <SectionCard number={2} title="Your payoff order">
+          <PayoffOrderTable debts={visiblePayoffQueue} isHousehold={isHousehold} highlightFirst perDebt={activePreview?.perDebt || {}} />
+          {hiddenPayoffCount > 0 ? (
+            <Button variant="ghost" onClick={() => setShowAllPayoffOrder(true)} style={{ marginTop: GAP }}>View full payoff schedule ({payoffQueue.length}) →</Button>
+          ) : showAllPayoffOrder && payoffQueue.length > DEFAULT_PAYOFF_ORDER_PREVIEW_COUNT ? (
+            <Button variant="ghost" onClick={() => setShowAllPayoffOrder(false)} style={{ marginTop: GAP }}>Show fewer</Button>
           ) : null}
-          {onGoToDebts ? <Button variant="secondary" onClick={onGoToDebts} style={{ marginTop: GAP }}>Record payment</Button> : null}
-        </Card>
-      ) : null}
+        </SectionCard>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: GAP }}>
-        <Card variant="default">
-          <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Plan health</div>
-          <div style={{ marginTop: 8 }}>
-            <Badge tone={statusTone}>{snapshot.status?.label || "Needs confirmation"}</Badge>
+        <SectionCard number={3} title="Current first target">
+          <div style={{ display: "grid", gap: 10 }}>
+            <LenderIdentity creditorName={targetDebt?.name || ""} size="lg" layout="column" />
+            <div style={{ display: "grid", gap: 6 }}>
+              <LabelValueRow label="Current balance" value={money(targetDebt?.currentBalance || 0)} />
+              <LabelValueRow label="APR" value={targetDebt?.aprStatus === "unknown" ? "Unknown APR" : percent(targetDebt?.apr || 0)} />
+              <LabelValueRow label="Minimum due" value={targetDebt?.minimumRequiredPayment == null ? "Not set" : money(targetDebt.minimumRequiredPayment)} />
+              <LabelValueRow label="Owner" value={presentedOwnerLabel(targetDebt)} />
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {onGoToDebts ? <Button variant="primary" size="sm" onClick={onGoToDebts}>Record payment</Button> : null}
+              {onGoToDebts ? <Button variant="secondary" size="sm" onClick={onGoToDebts}>View debt</Button> : null}
+            </div>
           </div>
-          <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 8 }}>
-            {snapshot.status?.message || "TrackToZero doesn't have enough confirmed evidence yet to judge this plan's progress."}
+        </SectionCard>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: GAP }}>
+        <SectionCard number={5} title="Plan health">
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <IconBadge icon={STATUS_ICON[statusTone] || CheckCircle2} tone={bannerTone} size="sm" />
+              <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 700 }}>{snapshot.status?.label || "Needs confirmation"}</div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <IconBadge icon={ShieldCheck} tone="neutral" size="sm" />
+                <div>
+                  <div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.tx }}>{activeDebtsCount}</div>
+                  <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>active debts</div>
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <IconBadge icon={Flag} tone="neutral" size="sm" />
+                <div>
+                  <div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.tx }}>{paidOffCount}</div>
+                  <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>paid off</div>
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, gridColumn: "1 / -1" }}>
+                <IconBadge icon={AlertTriangle} tone={importReviewCount > 0 ? "wa" : "neutral"} size="sm" />
+                <div>
+                  <div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.tx }}>{importReviewCount}</div>
+                  <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>import items needing review</div>
+                </div>
+              </div>
+            </div>
           </div>
-        </Card>
+        </SectionCard>
 
         {otherStrategyResult && activeStrategyResult ? (
-          <Card variant="default">
-            <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>{strategyLabel} active vs {otherStrategyLabel}</div>
-            <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
-              <ProgressStatRowInline label="Debt-free date" a={activeStrategyResult.projectedZeroDate} b={otherStrategyResult.projectedZeroDate} />
-              <ProgressStatRowInline label="Total interest" a={money(activeStrategyResult.estimatedInterest)} b={money(otherStrategyResult.estimatedInterest)} />
-              <ProgressStatRowInline label="Months to $0" a={String(activeStrategyResult.monthsToZero)} b={String(otherStrategyResult.monthsToZero)} />
-              {minimumsInterestDelta?.value != null ? (
-                <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 4 }}>
-                  {strategyLabel} saves {minimumsInterestDelta.value.toFixed(1)}% in interest vs. paying minimums only.
-                </div>
-              ) : null}
+          <SectionCard number={6} title="Strategy comparison snapshot">
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: "left", padding: "6px 8px", ...TYPE_SCALE.caption, color: ttzPalette.tx2 }} />
+                    <th style={{ textAlign: "left", padding: "6px 8px", ...TYPE_SCALE.caption, color: ttzPalette.ac, fontWeight: 800 }}>{strategyLabel} (active)</th>
+                    <th style={{ textAlign: "left", padding: "6px 8px", ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>{otherStrategyLabel}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ["Debt-free date", activeStrategyResult.projectedZeroDate, otherStrategyResult.projectedZeroDate],
+                    ["Total interest", money(activeStrategyResult.estimatedInterest), money(otherStrategyResult.estimatedInterest)],
+                    ["Months to $0", String(activeStrategyResult.monthsToZero), String(otherStrategyResult.monthsToZero)],
+                  ].map(([rowLabel, a, b]) => (
+                    <tr key={rowLabel}>
+                      <td style={{ padding: "6px 8px", ...TYPE_SCALE.caption, color: ttzPalette.tx2, borderTop: `1px solid ${ttzPalette.border}` }}>{rowLabel}</td>
+                      <td style={{ padding: "6px 8px", ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 700, borderTop: `1px solid ${ttzPalette.border}` }}>{a}</td>
+                      <td style={{ padding: "6px 8px", ...TYPE_SCALE.body, color: ttzPalette.tx2, borderTop: `1px solid ${ttzPalette.border}` }}>{b}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
+            {minimumsInterestDelta?.value != null ? (
+              <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 8 }}>
+                {strategyLabel} saves {minimumsInterestDelta.value.toFixed(1)}% in interest vs. paying minimums only.
+              </div>
+            ) : null}
             <Button variant="secondary" size="sm" onClick={() => navigateToPlanDestination("compare")} style={{ marginTop: GAP }}>Compare strategies</Button>
-          </Card>
+          </SectionCard>
         ) : null}
 
-        <Card variant="default">
+        <SectionCard number={7} title="Payment allocation">
           <AllocationDonut
-            title="Monthly payment allocation"
             segments={allocation.segments}
             centerLabel={money(allocation.total)}
             centerSupporting="per month"
@@ -440,20 +553,8 @@ function MyPlanActiveBody({ snapshot, service, refresh, runAction, writeState, o
               {allocation.unknownMinimumCount} debt{allocation.unknownMinimumCount === 1 ? "" : "s"} with an unknown minimum {allocation.unknownMinimumCount === 1 ? "isn't" : "aren't"} included in this total.
             </div>
           ) : null}
-        </Card>
+        </SectionCard>
       </div>
-
-      <Card variant="default">
-        <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Payoff order</div>
-        <div style={{ marginTop: GAP }}>
-          <PayoffOrderList debts={visiblePayoffQueue} isHousehold={isHousehold} highlightFirst />
-        </div>
-        {hiddenPayoffCount > 0 ? (
-          <Button variant="ghost" onClick={() => setShowAllPayoffOrder(true)} style={{ marginTop: GAP }}>View full payoff schedule ({payoffQueue.length})</Button>
-        ) : showAllPayoffOrder && payoffQueue.length > DEFAULT_PAYOFF_ORDER_PREVIEW_COUNT ? (
-          <Button variant="ghost" onClick={() => setShowAllPayoffOrder(false)} style={{ marginTop: GAP }}>Show fewer</Button>
-        ) : null}
-      </Card>
 
       {snapshot.excludedDebts?.length ? (
         <Card variant="default">
@@ -465,6 +566,17 @@ function MyPlanActiveBody({ snapshot, service, refresh, runAction, writeState, o
         <WarningCallout title="Plan status">{snapshot.warnings.map((warning) => warning.message || warning.code).join(" ")}</WarningCallout>
       ) : null}
 
+      <InsightBanner
+        icon={BannerIcon}
+        tone={bannerTone}
+        headline={snapshot.status?.label || "Plan status"}
+        detail={snapshot.status?.message || `Keep paying ${money(activeVersion.extraMonthlyPayment || 0)}/month to stay on schedule.`}
+        chips={[
+          interestSavedVsMinimums != null ? { label: "Interest saved vs. minimums", value: money(interestSavedVsMinimums) } : null,
+          { label: "Active strategy", value: strategyLabel, tone: "ac" },
+        ].filter(Boolean)}
+      />
+
       <ManagePlanCard snapshot={snapshot} service={service} refresh={refresh} runAction={runAction} writeState={writeState} activeVersion={activeVersion} />
     </div>
   );
@@ -475,6 +587,18 @@ function ProgressStatRowInline({ label, a, b }) {
     <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
       <span style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>{label}</span>
       <span style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx, fontWeight: 700 }}>{a || "n/a"} <span style={{ color: ttzPalette.muted, fontWeight: 500 }}>vs</span> {b || "n/a"}</span>
+    </div>
+  );
+}
+
+// GATE-10B.1E: a single label:value row (no "vs" comparison) - the detail
+// rows inside My Plan's "Current first target" card and similar single-debt
+// summaries elsewhere.
+function LabelValueRow({ label, value }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+      <span style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>{label}</span>
+      <span style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx, fontWeight: 700 }}>{value || "n/a"}</span>
     </div>
   );
 }
@@ -593,7 +717,7 @@ function ManagePlanCard({ snapshot, service, refresh, runAction, writeState, act
 // before/after figure - never an implicit apply-on-click. The confirm step
 // lives here, once, so Snowball/Avalanche (and anything else that reaches
 // this component) can't accidentally skip it.
-function StrategyExperience({ title, subtitle, result, isActive, isHousehold, hasActivePlan = true, onApply, onInspect, useLabel, applyActionLabel, runAction, writeState, currentZeroDate, onGoToDebts }) {
+function StrategyExperience({ title, subtitle, result, isActive, isHousehold, hasActivePlan = true, onApply, onInspect, useLabel, applyActionLabel, runAction, writeState, currentZeroDate, onGoToDebts, showMomentum = false, icon }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const canUse = !!onApply && !isActive;
   const excludedDebts = result?.excludedDebts || [];
@@ -606,22 +730,22 @@ function StrategyExperience({ title, subtitle, result, isActive, isHousehold, ha
 
   return (
     <Card variant={isActive ? "highlight" : "default"}>
-      <StrategyHeader title={title} subtitle={subtitle} isActive={isActive} warnings={result?.warnings || []} />
+      <StrategyHeader title={title} subtitle={subtitle} isActive={isActive} warnings={result?.warnings || []} icon={icon} />
 
       <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 6 }}>
         Based on {includedCount} included debt{includedCount === 1 ? "" : "s"}.{excludedDebts.length ? ` ${excludedDebts.length} debt${excludedDebts.length === 1 ? " is" : "s are"} excluded until reviewed.` : ""}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: GAP, marginTop: GAP }}>
-        <PlanMetric label="Projected $0" value={result?.projectedZeroDate || "n/a"} tone="accent" />
-        <PlanMetric label="Months to $0" value={String(result?.monthsToZero ?? "n/a")} />
-        <PlanMetric label="First target" value={result?.payoffOrder?.[0]?.name || "n/a"} />
-        <PlanMetric label="Projected interest" value={money(result?.estimatedInterest || 0)} />
+        <PlanMetric label="Projected $0" value={result?.projectedZeroDate || "n/a"} tone="accent" icon={Calendar} />
+        <PlanMetric label="Months to $0" value={String(result?.monthsToZero ?? "n/a")} icon={Clock} />
+        <PlanMetric label="First target" value={result?.payoffOrder?.[0]?.name || "n/a"} icon={Target} />
+        <PlanMetric label="Projected interest" value={money(result?.estimatedInterest || 0)} icon={TrendingUp} />
       </div>
 
       <div style={{ marginTop: GAP }}>
         <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted, marginBottom: 6 }}>Payoff order</div>
-        <PayoffOrderList debts={result?.payoffOrder || []} isHousehold={isHousehold} highlightFirst />
+        <PayoffOrderTable debts={result?.payoffOrder || []} isHousehold={isHousehold} highlightFirst perDebt={result?.perDebt || {}} showMomentum={showMomentum} />
       </div>
 
       {excludedDebts.length ? (
@@ -689,11 +813,25 @@ function StrategyPageBody({ strategy, title, subtitle, useLabel, applyActionLabe
   const workspaceId = snapshot.workspace.id;
   const hasActivePlan = !!snapshot.activeContext?.version;
   const isActive = (snapshot.activeContext?.version?.strategy || "") === strategy;
-  const currentExtra = isActive ? Number(snapshot.activeContext.version.extraMonthlyPayment || 0) : 0;
+  // GATE-10B.1E fix: the extra monthly payment is a household-level
+  // commitment, not something specific to whichever strategy currently
+  // orders it - previously this zeroed out on any NON-active strategy's
+  // page, which made "Compare to paying minimums" (and the inline
+  // Add-extra-monthly-payment baseline) compare $0-extra against $0-extra
+  // on Avalanche's page whenever Snowball was the active strategy, always
+  // producing a degenerate "You'll save $0.00" result regardless of the
+  // real committed payment. Reproduced live: Avalanche's own preview page
+  // showed "Debt-free date Jun 2029 / Total interest $3,846.73" identically
+  // in BOTH the "Avalanche" and "Paying minimums only" columns.
+  const currentExtra = Number(snapshot.activeContext?.version?.extraMonthlyPayment || 0);
 
   useEffect(() => {
     let active = true;
-    service.compareStrategies(workspaceId).then((data) => { if (active) setResult(data); });
+    // GATE-10B.1E: detailed:true - purely an options flag already built in
+    // GATE-10B.1D, not new engine work - what makes the payoff-order table's
+    // real "Payoff timing" column (via StrategyExperience -> PayoffOrderTable)
+    // possible on the standalone Snowball/Avalanche pages too, not just Compare.
+    service.compareStrategies(workspaceId, { detailed: true }).then((data) => { if (active) setResult(data); });
     service.previewTrend(workspaceId, { strategy, extraMonthlyPayment: currentExtra }).then((r) => { if (active) setStrategyPreview(r); });
     service.previewTrend(workspaceId, { strategy, extraMonthlyPayment: 0, detailed: false }).then((r) => { if (active) setMinimumsPreview(r); });
     computeSpeedUpSuggestion({ strategy, currentExtra }, (opts) => service.previewTrend(workspaceId, opts)).then((s) => { if (active) setSpeedUp(s); });
@@ -729,9 +867,33 @@ function StrategyPageBody({ strategy, title, subtitle, useLabel, applyActionLabe
     : [];
   const compositionTotal = compositionSegments.reduce((sum, segment) => sum + segment.value, 0);
 
+  // GATE-10B.1E: Avalanche's "Compare to paying minimums" card - reuses the
+  // SAME minimumsPreview/strategyPreview already fetched for the chart
+  // above, never a separate computation, so the card and the chart can
+  // never silently disagree.
+  const minimumsComparisonDelta = strategy === "avalanche" && minimumsPreview && strategyPreview
+    ? {
+        interestSaved: Math.max(0, Number(minimumsPreview.estimatedInterest || 0) - Number(strategyPreview.estimatedInterest || 0)),
+        monthsSooner: Math.max(0, Number(minimumsPreview.monthsToZero || 0) - Number(strategyPreview.monthsToZero || 0)),
+      }
+    : null;
+
   return (
     <div style={{ display: "grid", gap: GAP }}>
       <InfoCallout>{STRATEGY_EXPLAINERS[strategy]}</InfoCallout>
+
+      {isActive ? (
+        <InsightBanner
+          icon={CheckCircle2}
+          tone="go"
+          headline={`${title} strategy is active`}
+          detail="Keep going - momentum is on your side."
+          chips={[
+            result[strategy]?.projectedZeroDate ? { label: "Debt-free date", value: result[strategy].projectedZeroDate } : null,
+            result[strategy]?.monthsToZero != null ? { label: "Months to $0", value: String(result[strategy].monthsToZero) } : null,
+          ].filter(Boolean)}
+        />
+      ) : null}
 
       <StrategyExperience
         title={title}
@@ -746,6 +908,8 @@ function StrategyPageBody({ strategy, title, subtitle, useLabel, applyActionLabe
         writeState={writeState}
         currentZeroDate={snapshot.projectedZeroDate}
         onGoToDebts={onGoToDebts}
+        icon={strategy === "snowball" ? Snowflake : Mountain}
+        showMomentum={strategy === "snowball"}
         onApply={async () => {
           await activateOrReforecastStrategy(service, workspaceId, strategy, hasActivePlan);
           await refresh();
@@ -757,6 +921,7 @@ function StrategyPageBody({ strategy, title, subtitle, useLabel, applyActionLabe
           title="Balance to $0"
           subtitle="Paying minimums vs this strategy, plus an extra-payment scenario once you preview one below."
           series={chartSeries}
+          showModes={strategy === "snowball"}
           emptyState={<div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>Loading your projection…</div>}
         />
       </Card>
@@ -773,9 +938,42 @@ function StrategyPageBody({ strategy, title, subtitle, useLabel, applyActionLabe
         </Card>
       ) : null}
 
+      {minimumsComparisonDelta ? (
+        <>
+          <Card variant="default">
+            <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Compare to paying minimums</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: GAP, marginTop: GAP }}>
+              <div>
+                <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.ac }}>{title}{currentExtra ? ` (+${money(currentExtra)}/mo)` : ""}</div>
+                <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+                  <LabelValueRow label="Debt-free date" value={strategyPreview?.projectedZeroDate} />
+                  <LabelValueRow label="Total interest" value={strategyPreview ? money(strategyPreview.estimatedInterest) : "n/a"} />
+                </div>
+              </div>
+              <div>
+                <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.tx2 }}>Paying minimums only</div>
+                <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+                  <LabelValueRow label="Debt-free date" value={minimumsPreview?.projectedZeroDate} />
+                  <LabelValueRow label="Total interest" value={minimumsPreview ? money(minimumsPreview.estimatedInterest) : "n/a"} />
+                </div>
+              </div>
+            </div>
+          </Card>
+          <InsightBanner
+            icon={Sparkles}
+            tone="go"
+            headline="Great choice!"
+            detail={`You'll save ${money(minimumsComparisonDelta.interestSaved)}${minimumsComparisonDelta.monthsSooner > 0 ? ` and be debt-free ${minimumsComparisonDelta.monthsSooner} month${minimumsComparisonDelta.monthsSooner === 1 ? "" : "s"} sooner` : ""}.`}
+          />
+        </>
+      ) : null}
+
       {speedUp ? (
         <Card variant="default" style={{ borderLeft: `3px solid ${ttzPalette.go}` }}>
-          <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.go }}>Want to speed this up?</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <IconBadge icon={Lightbulb} tone="go" size="sm" />
+            <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.go }}>Want to speed this up?</div>
+          </div>
           <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, marginTop: 6 }}>
             Add {money(speedUp.additionalMonthly)}/month → finish {speedUp.monthsSaved} month{speedUp.monthsSaved === 1 ? "" : "s"} earlier → save {money(speedUp.interestSaved)} in interest.
           </div>
@@ -860,6 +1058,7 @@ function CompareStrategiesView({ snapshot, service, refresh, runAction, writeSta
   const [result, setResult] = useState(null);
   const [scenarioCompare, setScenarioCompare] = useState(null);
   const [confirmStrategy, setConfirmStrategy] = useState(null);
+  const [savedComparison, setSavedComparison] = useState(false);
   const workspaceId = snapshot.workspace.id;
   const isHousehold = snapshot.workspace.type === "household";
   const hasActivePlan = !!snapshot.activeContext?.version;
@@ -909,25 +1108,70 @@ function CompareStrategiesView({ snapshot, service, refresh, runAction, writeSta
     await refresh();
   });
 
+  const saveComparison = () => runAction("save comparison", async () => {
+    const strategyForScenario = winnerStrategy || result.activeStrategy || "avalanche";
+    await service.saveScenario(workspaceId, {
+      name: `Snowball vs Avalanche - ${new Date().toLocaleDateString()}`,
+      type: "strategy_comparison",
+      inputs: { strategy: strategyForScenario },
+    });
+    setSavedComparison(true);
+  });
+
+  // GATE-10B.1E: "Less interest" is only shown when there's a real winner to
+  // discount FROM - a tie has no meaningful percentage to report (never a
+  // fabricated 0%/NaN%).
+  const higherInterest = Math.max(Number(result.snowball.estimatedInterest || 0), Number(result.avalanche.estimatedInterest || 0));
+  const lowerInterest = Math.min(Number(result.snowball.estimatedInterest || 0), Number(result.avalanche.estimatedInterest || 0));
+  const interestPercentDelta = winnerStrategy ? safePercentDelta(higherInterest, lowerInterest) : null;
+  const recommendationTone = recommendation.code === "tie" ? "info" : recommendation.code === "tradeoff" ? "wa" : "go";
+
   return (
     <div style={{ display: "grid", gap: GAP }}>
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <button
+          type="button"
+          onClick={() => navigateToPlanDestination("my-plan")}
+          className="ttz-focus-ring"
+          style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, ...TYPE_SCALE.body, color: ttzPalette.ac, fontWeight: 700 }}
+        >
+          <ArrowLeft size={16} aria-hidden="true" /> Back to My Plan
+        </button>
+      </div>
+
+      <InsightBanner
+        icon={recommendation.code === "tie" ? Info : recommendation.code === "tradeoff" ? GitCompare : Trophy}
+        tone={recommendationTone}
+        headline={recommendation.headline}
+        detail={recommendation.detail}
+        chips={[
+          interestPercentDelta?.value != null ? { label: "Less interest", value: `${interestPercentDelta.value.toFixed(1)}%` } : null,
+          recommendation.monthsDelta ? { label: "Months faster", value: String(recommendation.monthsDelta) } : null,
+          recommendation.interestDelta ? { label: "Interest saved", value: money(recommendation.interestDelta) } : null,
+          { label: "Payoff month", value: recommendation.monthsDelta ? "Different" : "Same" },
+        ].filter(Boolean)}
+      />
+
       <Card variant="default">
         <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Snowball vs Avalanche</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: GAP, marginTop: GAP }}>
-          <PlanMetric label="Snowball $0" value={result.snowball.projectedZeroDate || "n/a"} tone="accent" />
-          <PlanMetric label="Avalanche $0" value={result.avalanche.projectedZeroDate || "n/a"} tone="accent" />
-          <PlanMetric label="Snowball months" value={String(result.snowball.monthsToZero ?? "n/a")} />
-          <PlanMetric label="Avalanche months" value={String(result.avalanche.monthsToZero ?? "n/a")} />
-          <PlanMetric label="Snowball interest" value={money(result.snowball.estimatedInterest || 0)} />
-          <PlanMetric label="Avalanche interest" value={money(result.avalanche.estimatedInterest || 0)} />
-        </div>
-        {recommendation.monthsDelta != null || recommendation.interestDelta ? (
-          <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 10 }}>
-            {recommendation.monthsDelta ? `${recommendation.monthsDelta} month${recommendation.monthsDelta === 1 ? "" : "s"} difference` : null}
-            {recommendation.monthsDelta && recommendation.interestDelta ? " · " : null}
-            {recommendation.interestDelta ? `${money(recommendation.interestDelta)} interest difference` : null}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: GAP, marginTop: GAP }}>
+          <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${ttzPalette.border}`, background: ttzPalette.surf2 }}>
+            <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Projected debt-free date</div>
+            <ProgressStatRowInline label="" a={result.snowball.projectedZeroDate || "n/a"} b={result.avalanche.projectedZeroDate || "n/a"} />
           </div>
-        ) : null}
+          <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${ttzPalette.border}`, background: ttzPalette.surf2 }}>
+            <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Months to $0</div>
+            <ProgressStatRowInline label="" a={String(result.snowball.monthsToZero ?? "n/a")} b={String(result.avalanche.monthsToZero ?? "n/a")} />
+          </div>
+          <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${ttzPalette.border}`, background: ttzPalette.surf2 }}>
+            <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Projected interest</div>
+            <ProgressStatRowInline label="" a={money(result.snowball.estimatedInterest || 0)} b={money(result.avalanche.estimatedInterest || 0)} />
+          </div>
+          <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${ttzPalette.border}`, background: ttzPalette.surf2 }}>
+            <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>First target</div>
+            <ProgressStatRowInline label="" a={result.snowball.payoffOrder?.[0]?.name || "n/a"} b={result.avalanche.payoffOrder?.[0]?.name || "n/a"} />
+          </div>
+        </div>
       </Card>
 
       <Card variant="default">
@@ -935,8 +1179,8 @@ function CompareStrategiesView({ snapshot, service, refresh, runAction, writeSta
       </Card>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: GAP }}>
-        <StrategyExperience title="Snowball" subtitle="Smallest balance first" result={result.snowball} isActive={result.activeStrategy === "snowball"} isHousehold={isHousehold} useLabel="Inspect Snowball" onInspect={() => navigateToPlanDestination("snowball")} onGoToDebts={onGoToDebts} />
-        <StrategyExperience title="Avalanche" subtitle="Highest APR first" result={result.avalanche} isActive={result.activeStrategy === "avalanche"} isHousehold={isHousehold} useLabel="Inspect Avalanche" onInspect={() => navigateToPlanDestination("avalanche")} onGoToDebts={onGoToDebts} />
+        <StrategyExperience title="Snowball" subtitle="Smallest balance first" result={result.snowball} isActive={result.activeStrategy === "snowball"} isHousehold={isHousehold} useLabel="Inspect Snowball" onInspect={() => navigateToPlanDestination("snowball")} onGoToDebts={onGoToDebts} icon={Snowflake} />
+        <StrategyExperience title="Avalanche" subtitle="Highest APR first" result={result.avalanche} isActive={result.activeStrategy === "avalanche"} isHousehold={isHousehold} useLabel="Inspect Avalanche" onInspect={() => navigateToPlanDestination("avalanche")} onGoToDebts={onGoToDebts} icon={Mountain} />
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: GAP }}>
@@ -983,15 +1227,27 @@ function CompareStrategiesView({ snapshot, service, refresh, runAction, writeSta
       ) : null}
 
       <Card variant={winnerLabel ? "highlight" : "default"}>
-        <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Decision summary</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <IconBadge icon={Trophy} tone={winnerLabel ? "go" : "neutral"} size="md" />
+          <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Decision summary</div>
+        </div>
         <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx, marginTop: 6 }}>{recommendation.headline}</div>
         <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 6 }}>{recommendation.detail}</div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: GAP }}>
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: GAP, alignItems: "center" }}>
           {winnerStrategy && result.activeStrategy !== winnerStrategy ? (
             <Button variant="primary" onClick={() => setConfirmStrategy(winnerStrategy)} disabled={writeState?.inProgress}>
               Choose {winnerLabel}
             </Button>
           ) : null}
+          <button
+            type="button"
+            onClick={saveComparison}
+            disabled={writeState?.inProgress || savedComparison}
+            className="ttz-focus-ring"
+            style={{ all: "unset", cursor: savedComparison ? "default" : "pointer", ...TYPE_SCALE.body, color: savedComparison ? ttzPalette.tx2 : ttzPalette.ac, fontWeight: 700 }}
+          >
+            {savedComparison ? "Comparison saved" : "Save this comparison"}
+          </button>
         </div>
       </Card>
 
@@ -1033,7 +1289,7 @@ const IMPACT_CHANGE_LABEL = {
 // gap this file used to document as impossible ("the engine only tracks
 // aggregate balance/interest per month, never a per-account zero-crossing"),
 // now real via payoffSimulateDetailed's perDebt output.
-function PerDebtImpactTable({ rows }) {
+function PerDebtImpactTable({ rows, showImpactLevel = false }) {
   if (!rows.length) return null;
   const thStyle = { textAlign: "left", padding: "8px 10px", ...TYPE_SCALE.overline, color: ttzPalette.muted, borderBottom: `1px solid ${ttzPalette.border}` };
   const tdStyle = { padding: "8px 10px", ...TYPE_SCALE.body, color: ttzPalette.tx, borderBottom: `1px solid ${ttzPalette.border}` };
@@ -1046,6 +1302,7 @@ function PerDebtImpactTable({ rows }) {
             <th style={thStyle}>Current payoff</th>
             <th style={thStyle}>Scenario payoff</th>
             <th style={thStyle}>Change</th>
+            {showImpactLevel ? <th style={thStyle}>Impact level</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -1055,6 +1312,11 @@ function PerDebtImpactTable({ rows }) {
               <td style={tdStyle}>{row.baselinePayoffMonth || "Not reached"}</td>
               <td style={tdStyle}>{row.scenarioPayoffMonth || "Not reached"}</td>
               <td style={tdStyle}><Badge tone={IMPACT_CHANGE_TONE[row.change] || "neutral"}>{(IMPACT_CHANGE_LABEL[row.change] || (() => "No change"))(row)}</Badge></td>
+              {showImpactLevel ? (
+                <td style={tdStyle}>
+                  <Badge tone={IMPACT_LEVEL_TONE[impactLevelForMonthsDelta(row.monthsDelta)]}>{impactLevelForMonthsDelta(row.monthsDelta)}</Badge>
+                </td>
+              ) : null}
             </tr>
           ))}
         </tbody>
@@ -1063,20 +1325,13 @@ function PerDebtImpactTable({ rows }) {
   );
 }
 
-function StrategyDeltaRow({ label, result }) {
-  return (
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-      <span style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>{label}</span>
-      <span style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx, fontWeight: 700 }}>{result?.projectedZeroDate || "n/a"} <span style={{ color: ttzPalette.muted, fontWeight: 500 }}>·</span> {money(result?.estimatedInterest || 0)}</span>
-    </div>
-  );
-}
 
 function WhatIfView({ snapshot, service, runAction, writeState }) {
   const [mode, setMode] = useState("recurring");
   const [extra, setExtra] = useState("100");
   const [amount, setAmount] = useState("500");
   const [targetDebtId, setTargetDebtId] = useState("");
+  const [strategyContext, setStrategyContext] = useState(() => snapshot.activeContext?.version?.strategy || "avalanche");
   const [preview, setPreview] = useState(null);
   const [previewNotice, setPreviewNotice] = useState("");
   const [otherStrategies, setOtherStrategies] = useState(null);
@@ -1104,7 +1359,6 @@ function WhatIfView({ snapshot, service, runAction, writeState }) {
     setPreview(null);
     setOtherStrategies(null);
     const currentExtra = Number(snapshot.activeContext?.version?.extraMonthlyPayment || 0);
-    const activeStrategy = snapshot.activeContext?.version?.strategy || "avalanche";
     const toSide = (result) => (result ? {
       label: result.projectedZeroDate,
       interest: Number(result.estimatedInterest || 0),
@@ -1117,7 +1371,7 @@ function WhatIfView({ snapshot, service, runAction, writeState }) {
       const addition = Number(extra) || 0;
       const nextExtra = currentExtra + addition;
       if (targetDebtId) {
-        const result = await service.previewCustomTarget(workspaceId, { targetDebtId, extraMonthlyPayment: nextExtra, detailed: true });
+        const result = await service.previewCustomTarget(workspaceId, { targetDebtId, extraMonthlyPayment: nextExtra, strategy: strategyContext, detailed: true });
         if (!result) { setPreviewNotice("That debt could not be found."); return; }
         setPreview({ baseline: toSide(result.baseline), scenario: toSide(result.custom) });
         return;
@@ -1127,8 +1381,8 @@ function WhatIfView({ snapshot, service, runAction, writeState }) {
         return;
       }
       const [baselineResult, scenarioResult] = await Promise.all([
-        service.previewTrend(workspaceId, { strategy: activeStrategy, extraMonthlyPayment: currentExtra, detailed: true }),
-        service.previewReforecast(workspaceId, { extraMonthlyPayment: nextExtra }, { detailed: true }),
+        service.previewTrend(workspaceId, { strategy: strategyContext, extraMonthlyPayment: currentExtra, detailed: true }),
+        service.previewReforecast(workspaceId, { extraMonthlyPayment: nextExtra, strategy: strategyContext }, { detailed: true }),
       ]);
       setPreview({
         baseline: toSide(baselineResult),
@@ -1156,7 +1410,7 @@ function WhatIfView({ snapshot, service, runAction, writeState }) {
 
     if (mode === "one-time") {
       const lump = Number(amount) || 0;
-      const result = await service.previewOneTimePayment(workspaceId, { amount: lump, targetDebtId, detailed: true });
+      const result = await service.previewOneTimePayment(workspaceId, { amount: lump, targetDebtId, strategy: strategyContext, detailed: true });
       if (!result) { setPreviewNotice("Enter an amount and choose a debt to preview."); return; }
       setPreview({ baseline: toSide(result.baseline), scenario: toSide(result.withLumpSum) });
       const oneTimePayments = [{ debtId: result.targetDebtId, amount: lump, month: 0 }];
@@ -1171,7 +1425,7 @@ function WhatIfView({ snapshot, service, runAction, writeState }) {
     }
 
     if (!targetDebtId) { setPreviewNotice("Choose a debt to target first."); return; }
-    const result = await service.previewCustomTarget(workspaceId, { targetDebtId, detailed: true });
+    const result = await service.previewCustomTarget(workspaceId, { targetDebtId, strategy: strategyContext, detailed: true });
     if (!result) { setPreviewNotice("That debt could not be found."); return; }
     setPreview({ baseline: toSide(result.baseline), scenario: toSide(result.custom) });
   }, { write: false });
@@ -1207,6 +1461,20 @@ function WhatIfView({ snapshot, service, runAction, writeState }) {
   const interestDelta = preview ? safePercentDelta(preview.baseline?.interest, preview.scenario?.interest) : null;
   const interestDeltaMoney = preview ? Math.abs(Number(preview.scenario?.interest || 0) - Number(preview.baseline?.interest || 0)) : 0;
   const impactRows = preview ? derivePerDebtImpactRows(preview.baseline?.perDebt, preview.scenario?.perDebt, snapshot.payoffQueue || []) : [];
+  const monthsSaved = preview && preview.baseline?.months != null && preview.scenario?.months != null
+    ? Number(preview.baseline.months) - Number(preview.scenario.months)
+    : null;
+  const additionalMonthlyPayment = mode === "recurring" ? Number(extra) || 0 : mode === "one-time" ? null : 0;
+  // GATE-10B.1E: the most-affected debt is genuinely computed (impactRows
+  // is already sorted biggest-change-first by derivePerDebtImpactRows) -
+  // never a hardcoded "first debt in the list."
+  const mostAffectedDebt = impactRows[0] || null;
+  const bestOtherStrategy = otherStrategies ? pickBestByZeroDate([
+    { label: "Current Snowball", preview: otherStrategies.snowballBase },
+    { label: "Snowball + this scenario", preview: otherStrategies.snowballScenario },
+    { label: "Current Avalanche", preview: otherStrategies.avalancheBase },
+    { label: "Avalanche + this scenario", preview: otherStrategies.avalancheScenario },
+  ]) : null;
 
   return (
     <div style={{ display: "grid", gap: GAP }}>
@@ -1284,6 +1552,15 @@ function WhatIfView({ snapshot, service, runAction, writeState }) {
             </div>
           ) : null}
 
+          <div style={{ marginTop: GAP }}>
+            <Field label="Strategy context" help="Which strategy's payoff order this scenario is previewed against.">
+              <Select value={strategyContext} onChange={(event) => { setStrategyContext(event.target.value); setPreview(null); setPreviewNotice(""); setOtherStrategies(null); }}>
+                <option value="avalanche">Avalanche - highest APR first</option>
+                <option value="snowball">Snowball - smallest balance first</option>
+              </Select>
+            </Field>
+          </div>
+
           <div style={{ marginTop: GAP, display: "flex", gap: 10, flexWrap: "wrap" }}>
             <Button variant="primary" onClick={runPreview} disabled={writeState.inProgress} loading={writeState.action === "preview what-if"}>Preview impact</Button>
             <Button variant="secondary" onClick={saveScenario} disabled={writeState.inProgress} loading={writeState.action === "save scenario"}>Save scenario</Button>
@@ -1298,11 +1575,20 @@ function WhatIfView({ snapshot, service, runAction, writeState }) {
           {preview ? (
             <div style={{ display: "grid", gap: GAP, marginTop: GAP }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: GAP }}>
-                <PlanMetric label="Current plan" value={preview.baseline?.label || "n/a"} />
-                <PlanMetric label="Scenario" value={preview.scenario?.label || "n/a"} />
-                <PlanMetric label="Current interest" value={money(preview.baseline?.interest || 0)} />
-                <PlanMetric label="Scenario interest" value={money(preview.scenario?.interest || 0)} tone="success" />
+                <PlanMetric label="Current plan" value={preview.baseline?.label || "n/a"} icon={Calendar} />
+                <PlanMetric label="Scenario" value={preview.scenario?.label || "n/a"} tone="accent" icon={Calendar} />
+                <PlanMetric label="Current interest" value={money(preview.baseline?.interest || 0)} icon={TrendingUp} />
+                <PlanMetric label="Scenario interest" value={money(preview.scenario?.interest || 0)} tone="success" icon={TrendingUp} />
+                <PlanMetric label="Months saved" value={monthsSaved != null ? String(monthsSaved) : "n/a"} icon={Clock} />
+                {additionalMonthlyPayment != null ? (
+                  <PlanMetric label="Additional monthly payment" value={money(additionalMonthlyPayment)} icon={DollarSign} />
+                ) : (
+                  <PlanMetric label="Most affected debt" value={mostAffectedDebt?.debtName || "n/a"} icon={Target} />
+                )}
               </div>
+              {additionalMonthlyPayment != null && mostAffectedDebt ? (
+                <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Most affected debt: {mostAffectedDebt.debtName}</div>
+              ) : null}
               <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, margin: 0 }}>{monthLabelDeltaText(preview.baseline?.label, preview.scenario?.label) || "Same payoff time as your current plan"}</p>
               <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, margin: 0 }}>{describePercentDelta(interestDelta, interestDeltaMoney)}</p>
               <InfoCallout>This is a hypothetical preview only. It will not create a PaymentEvent.</InfoCallout>
@@ -1330,16 +1616,34 @@ function WhatIfView({ snapshot, service, runAction, writeState }) {
       ) : null}
 
       {otherStrategies ? (
-        <Card variant="default">
-          <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Vs other strategies</div>
-          <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 4, marginBottom: GAP }}>The same change, applied to Snowball and Avalanche instead.</p>
-          <div style={{ display: "grid", gap: 6 }}>
-            <StrategyDeltaRow label="Current Snowball" result={otherStrategies.snowballBase} />
-            <StrategyDeltaRow label="Snowball + this scenario" result={otherStrategies.snowballScenario} />
-            <StrategyDeltaRow label="Current Avalanche" result={otherStrategies.avalancheBase} />
-            <StrategyDeltaRow label="Avalanche + this scenario" result={otherStrategies.avalancheScenario} />
-          </div>
-        </Card>
+        <>
+          <Card variant="default">
+            <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Scenario vs other strategies</div>
+            <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 4, marginBottom: GAP }}>The same change, applied to Snowball and Avalanche instead.</p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: GAP }}>
+              {[
+                { key: "snowballBase", label: "Current Snowball", tone: "neutral" },
+                { key: "snowballScenario", label: "Snowball + this scenario", tone: strategyContext === "snowball" ? "go" : "neutral" },
+                { key: "avalancheBase", label: "Current Avalanche", tone: "neutral" },
+                { key: "avalancheScenario", label: "Avalanche + this scenario", tone: strategyContext === "avalanche" ? "go" : "neutral" },
+              ].map(({ key, label, tone }) => (
+                <div key={key} style={{ padding: 14, borderRadius: 14, border: `1px solid ${tone === "go" ? ttzPalette.go : ttzPalette.border}`, background: tone === "go" ? ttzPalette.goD : ttzPalette.surf2 }}>
+                  <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.tx2 }}>{label}</div>
+                  <div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.tx, marginTop: 6 }}>{otherStrategies[key]?.projectedZeroDate || "n/a"}</div>
+                  <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 4 }}>{money(otherStrategies[key]?.estimatedInterest || 0)} interest</div>
+                </div>
+              ))}
+            </div>
+          </Card>
+          {bestOtherStrategy ? (
+            <InsightBanner
+              icon={Trophy}
+              tone="go"
+              headline={`${bestOtherStrategy.label} reaches $0 earliest`}
+              detail={`Projected ${bestOtherStrategy.preview.projectedZeroDate}, among the options previewed above.`}
+            />
+          ) : null}
+        </>
       ) : null}
     </div>
   );
@@ -1352,6 +1656,24 @@ function WhatIfView({ snapshot, service, runAction, writeState }) {
 // this."
 const FEASIBILITY_TONE = { comfortable: "success", achievable: "info", tight: "warning", infeasible: "danger" };
 const FEASIBILITY_LABEL = { comfortable: "Comfortable increase", achievable: "Achievable", tight: "A significant stretch", infeasible: "Not realistic right now" };
+
+// GATE-10B.1E: Finish By's "Impact level" badge - a disclosed, documented
+// heuristic bucketing derivePerDebtImpactRows' own already-computed
+// monthsDelta, not a fabricated severity score. Matches this page's
+// existing "plan-internal heuristic, not certified advice" disclosure.
+function impactLevelForMonthsDelta(monthsDelta) {
+  if (monthsDelta >= 12) return "High";
+  if (monthsDelta >= 3) return "Medium";
+  return "Low";
+}
+const IMPACT_LEVEL_TONE = { High: "da", Medium: "wa", Low: "neutral" };
+
+const SUSTAINABILITY_CHECKLIST = [
+  "Automate the extra payment so it never depends on remembering",
+  "Review progress monthly against this target",
+  "Avoid taking on new debt while working toward this date",
+  "Keep a separate emergency fund so a surprise expense doesn't derail the plan",
+];
 
 function FinishByView({ snapshot, service, refresh, runAction, writeState }) {
   const [targetMonth, setTargetMonth] = useState("");
@@ -1402,9 +1724,22 @@ function FinishByView({ snapshot, service, refresh, runAction, writeState }) {
   const interestDeltaMoney = result?.baseline ? Math.abs(Number(result.scenario?.estimatedInterest || 0) - Number(result.baseline?.estimatedInterest || 0)) : 0;
   const impactRows = result?.baseline ? derivePerDebtImpactRows(result.baseline.perDebt, result.scenario.perDebt, snapshot.payoffQueue || []).slice(0, 5) : [];
   const allocation = result?.feasible ? deriveAllocationSegments(snapshot.payoffQueue || [], result.requiredMonthlyExtra || 0) : null;
+  // GATE-10B.1D's previewGoalDate defaults to "avalanche" internally when no
+  // plan is active yet (its own baseVersion?.strategy || "avalanche") - this
+  // mirrors that exact fallback so the "Pro tip" copy is never a guess.
+  const goalStrategyLabel = (snapshot.activeContext?.version?.strategy || "avalanche") === "snowball" ? "Snowball" : "Avalanche";
 
   return (
     <div style={{ display: "grid", gap: GAP }}>
+      {result && result.valid !== false ? (
+        <InsightBanner
+          icon={Flag}
+          tone={result.feasible ? "go" : "wa"}
+          headline="Target debt-free month → Current projected $0 → Feasibility"
+          detail={`${formatMonthLabel(result.targetMonth)}  →  ${result.projectedZeroDate || result.nearestFeasibleZeroDate || "n/a"}  →  ${feasibility ? FEASIBILITY_LABEL[feasibility] : "Checking"}`}
+        />
+      ) : null}
+
       <Card variant="default">
         <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>When do you want to reach $0?</div>
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.1fr)", gap: GAP, marginTop: GAP }}>
@@ -1424,6 +1759,16 @@ function FinishByView({ snapshot, service, refresh, runAction, writeState }) {
         </div>
       </Card>
 
+      <Card variant="default" style={{ borderLeft: `3px solid ${ttzPalette.info}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <IconBadge icon={Lightbulb} tone="info" size="sm" />
+          <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.info }}>Pro tip</div>
+        </div>
+        <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 6, marginBottom: 0 }}>
+          Extra payments are applied using {goalStrategyLabel} by default, directing money to the highest-impact debt first.
+        </p>
+      </Card>
+
       {result && result.valid === false ? (
         <WarningCallout>{result.reason || "Choose a target date in the future."}</WarningCallout>
       ) : null}
@@ -1437,17 +1782,24 @@ function FinishByView({ snapshot, service, refresh, runAction, writeState }) {
                 {feasibility ? <Badge tone={FEASIBILITY_TONE[feasibility]}>{FEASIBILITY_LABEL[feasibility]}</Badge> : null}
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: GAP }}>
-                <PlanMetric label="Target date" value={formatMonthLabel(result.targetMonth)} />
-                <PlanMetric label="Current projected $0" value={result.projectedZeroDate || "n/a"} />
-                <PlanMetric label="Current payment" value={money(result.currentMonthlyExtra || 0)} />
-                <PlanMetric label="Required payment" value={money(result.requiredMonthlyExtra || 0)} />
-                <PlanMetric label="Additional needed" value={money(Math.max(0, result.additionalNeeded || 0))} tone={result.additionalNeeded > 0 ? "warning" : "success"} />
+                <PlanMetric label="Current projected $0" value={result.projectedZeroDate || "n/a"} icon={Calendar} />
+                <PlanMetric label="Target date" value={formatMonthLabel(result.targetMonth)} tone="accent" icon={Flag} />
+                <PlanMetric label="Additional needed" value={money(Math.max(0, result.additionalNeeded || 0))} tone={result.additionalNeeded > 0 ? "warning" : "success"} icon={TrendingUp} />
+                <PlanMetric label="Interest savings" value={money(interestDeltaMoney)} tone="success" icon={DollarSign} />
+                <PlanMetric label="Required total monthly" value={money(result.requiredMonthlyExtra || 0)} icon={Wallet} />
               </div>
-              <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, margin: 0 }}>
-                {result.additionalNeeded > 0
-                  ? `To reach $0 by ${formatMonthLabel(result.targetMonth)}, increase your monthly payment by ${money(result.additionalNeeded)} to ${money(result.requiredMonthlyExtra)}/mo.`
-                  : `You're already on pace to reach $0 by ${formatMonthLabel(result.targetMonth)} at your current payment.`}
-              </p>
+              <p style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, margin: 0 }}>{describePercentDelta(interestDelta, interestDeltaMoney)}</p>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: 12, borderRadius: 12, background: ttzPalette.acS || ttzPalette.surf2 }}>
+                <IconBadge icon={Sparkles} tone="ac" size="sm" />
+                <div>
+                  <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.ac }}>Recommended action</div>
+                  <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, margin: "4px 0 0" }}>
+                    {result.additionalNeeded > 0
+                      ? `To reach $0 by ${formatMonthLabel(result.targetMonth)}, increase your monthly payment by ${money(result.additionalNeeded)} to ${money(result.requiredMonthlyExtra)}/mo.`
+                      : `You're already on pace to reach $0 by ${formatMonthLabel(result.targetMonth)} at your current payment.`}
+                  </p>
+                </div>
+              </div>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
                 {result.additionalNeeded > 0 ? (
                   <Button variant="primary" onClick={() => setConfirmOpen(true)} disabled={writeState.inProgress}>Apply this payment increase</Button>
@@ -1479,13 +1831,35 @@ function FinishByView({ snapshot, service, refresh, runAction, writeState }) {
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: GAP }}>
             <Card variant="default">
-              <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Current pace vs this target</div>
-              <div style={{ display: "grid", gap: 6, marginTop: GAP }}>
-                <ProgressStatRowInline label="Payoff date" a={result.baseline.projectedZeroDate} b={result.scenario.projectedZeroDate} />
-                <ProgressStatRowInline label="Monthly payment" a={money(result.currentMonthlyExtra)} b={money(result.requiredMonthlyExtra)} />
-                <ProgressStatRowInline label="Total interest" a={money(result.baseline.estimatedInterest)} b={money(result.scenario.estimatedInterest)} />
+              <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Plan comparison</div>
+              <div style={{ overflowX: "auto", marginTop: GAP }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: "left", padding: "6px 8px", ...TYPE_SCALE.caption, color: ttzPalette.tx2 }} />
+                      <th style={{ textAlign: "left", padding: "6px 8px", ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Current plan</th>
+                      <th style={{ textAlign: "left", padding: "6px 8px", ...TYPE_SCALE.caption, color: ttzPalette.ac, fontWeight: 800 }}>Finish-by scenario</th>
+                      <th style={{ textAlign: "left", padding: "6px 8px", ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Change</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      ["Months to $0", String(result.baseline.monthsToZero ?? "n/a"), String(result.scenario.monthsToZero ?? "n/a"), result.baseline.monthsToZero != null && result.scenario.monthsToZero != null ? `${result.baseline.monthsToZero - result.scenario.monthsToZero}` : "n/a"],
+                      ["Payoff date", result.baseline.projectedZeroDate || "n/a", result.scenario.projectedZeroDate || "n/a", monthLabelDeltaText(result.baseline.projectedZeroDate, result.scenario.projectedZeroDate) || "Same"],
+                      ["Total interest", money(result.baseline.estimatedInterest), money(result.scenario.estimatedInterest), `-${money(interestDeltaMoney)}`],
+                      ["Total paid", money(Number(result.baseline.startingTotalBalance || 0) + Number(result.baseline.estimatedInterest || 0)), money(Number(result.scenario.startingTotalBalance || 0) + Number(result.scenario.estimatedInterest || 0)), ""],
+                      ["Monthly payment", money(result.currentMonthlyExtra || 0), money(result.requiredMonthlyExtra || 0), `+${money(Math.max(0, result.additionalNeeded || 0))}`],
+                    ].map(([rowLabel, current, scenario, change]) => (
+                      <tr key={rowLabel}>
+                        <td style={{ padding: "6px 8px", ...TYPE_SCALE.caption, color: ttzPalette.tx2, borderTop: `1px solid ${ttzPalette.border}` }}>{rowLabel}</td>
+                        <td style={{ padding: "6px 8px", ...TYPE_SCALE.body, color: ttzPalette.tx, borderTop: `1px solid ${ttzPalette.border}` }}>{current}</td>
+                        <td style={{ padding: "6px 8px", ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 700, borderTop: `1px solid ${ttzPalette.border}` }}>{scenario}</td>
+                        <td style={{ padding: "6px 8px", ...TYPE_SCALE.body, color: ttzPalette.go, borderTop: `1px solid ${ttzPalette.border}` }}>{change}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: GAP, marginBottom: 0 }}>{describePercentDelta(interestDelta, interestDeltaMoney)}</p>
             </Card>
             {allocation?.segments.length ? (
               <Card variant="default">
@@ -1504,9 +1878,21 @@ function FinishByView({ snapshot, service, refresh, runAction, writeState }) {
             <Card variant="default">
               <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Most-impacted debts</div>
               <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 4, marginBottom: GAP }}>Top {impactRows.length} debt{impactRows.length === 1 ? "" : "s"} most affected by this target, biggest change first.</p>
-              <PerDebtImpactTable rows={impactRows} />
+              <PerDebtImpactTable rows={impactRows} showImpactLevel />
             </Card>
           ) : null}
+
+          <Card variant="default">
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <IconBadge icon={ShieldCheck} tone="go" size="sm" />
+              <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.go }}>Make it sustainable</div>
+            </div>
+            <ul style={{ margin: "10px 0 0", paddingLeft: 20, display: "grid", gap: 6 }}>
+              {SUSTAINABILITY_CHECKLIST.map((item) => (
+                <li key={item} style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>{item}</li>
+              ))}
+            </ul>
+          </Card>
         </>
       ) : null}
 
@@ -1528,16 +1914,23 @@ function FinishByView({ snapshot, service, refresh, runAction, writeState }) {
   );
 }
 
+const WHATIF_SCENARIO_TYPES = ["recurring_extra", "one_time", "custom_target"];
+
 function SavedScenariosView({ snapshot, service, refresh, runAction, writeState }) {
   const [scenarios, setScenarios] = useState(null);
   const [planHistory, setPlanHistory] = useState(null);
   const [previewsById, setPreviewsById] = useState({});
   const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [showTopCompare, setShowTopCompare] = useState(false);
   const workspaceId = snapshot.workspace.id;
+
+  const reloadScenarios = () => {
+    service.listWorkspaceScenarios(workspaceId, { includeArchived: true }).then((result) => setScenarios(result || []));
+  };
 
   useEffect(() => {
     let active = true;
-    service.listWorkspaceScenarios(workspaceId).then((result) => { if (active) setScenarios(result || []); });
+    service.listWorkspaceScenarios(workspaceId, { includeArchived: true }).then((result) => { if (active) setScenarios(result || []); });
     service.listPlanHistory(workspaceId).then((result) => { if (active) setPlanHistory(result || []); });
     return () => {
       active = false;
@@ -1547,6 +1940,7 @@ function SavedScenariosView({ snapshot, service, refresh, runAction, writeState 
   if (scenarios === null) return <LoadingState label="Loading saved scenarios" />;
 
   const hasActivePlan = !!snapshot.activeContext?.version;
+  const activeVersion = snapshot.activeContext?.version;
 
   const handlePreviewed = (scenarioId, result) => {
     setPreviewsById((current) => ({ ...current, [scenarioId]: result }));
@@ -1558,9 +1952,24 @@ function SavedScenariosView({ snapshot, service, refresh, runAction, writeState 
       return next;
     });
   };
+  const onCardChanged = (scenarioId) => () => {
+    reloadScenarios();
+    setPreviewsById((current) => {
+      if (!(scenarioId in current)) return current;
+      const next = { ...current };
+      delete next[scenarioId];
+      return next;
+    });
+    setSelectedIds((current) => {
+      if (!current.has(scenarioId)) return current;
+      const next = new Set(current);
+      next.delete(scenarioId);
+      return next;
+    });
+  };
 
-  // GATE-10B.1D: "best option right now" and "Compare selected" are both
-  // computed ONLY over scenarios already previewed THIS session
+  // GATE-10B.1D: "best option right now"/"Compare selected"/"Compare Top 3"
+  // are all computed ONLY over scenarios already previewed THIS session
   // (previewsById, populated as each ScenarioCard's own "View" button is
   // clicked) - never a background preview burst across every saved
   // scenario on page load. A disclosed scope limit, not an oversight.
@@ -1568,81 +1977,192 @@ function SavedScenariosView({ snapshot, service, refresh, runAction, writeState 
     const scenario = scenarios.find((item) => item.id === scenarioId) || result.scenario;
     return { scenario, preview: scenarioPreviewForChart(scenario, result.preview) };
   });
+  const validPreviewedEntries = previewedEntries.filter((entry) => entry.preview?.projectedZeroDate);
   const bestOption = pickBestByZeroDate(previewedEntries);
+  const rankedEntries = [...validPreviewedEntries].sort((a, b) => {
+    const timeA = new Date(`1 ${a.preview.projectedZeroDate}`).getTime();
+    const timeB = new Date(`1 ${b.preview.projectedZeroDate}`).getTime();
+    return timeA !== timeB ? timeA - timeB : Number(a.preview.estimatedInterest || 0) - Number(b.preview.estimatedInterest || 0);
+  });
+  const top3Entries = rankedEntries.slice(0, 3);
   const compareEntries = [...selectedIds]
     .map((scenarioId) => previewedEntries.find((entry) => entry.scenario?.id === scenarioId))
     .filter((entry) => entry?.preview);
 
-  const groupCounts = scenarios.reduce((acc, scenario) => {
+  const activeScenarios = scenarios.filter((scenario) => scenario.status !== "archived");
+  const archivedScenarios = scenarios.filter((scenario) => scenario.status === "archived");
+  const strategySnapshots = activeScenarios.filter((scenario) => scenario.type === "strategy_comparison");
+  const whatIfScenarios = activeScenarios.filter((scenario) => WHATIF_SCENARIO_TYPES.includes(scenario.type));
+  const finishByScenarios = activeScenarios.filter((scenario) => scenario.type === "goal_date");
+  const groupCounts = activeScenarios.reduce((acc, scenario) => {
     acc[scenario.type] = (acc[scenario.type] || 0) + 1;
     return acc;
   }, {});
 
+  const renderScenarioCard = (scenario, { isArchived = false } = {}) => (
+    <ScenarioCard
+      key={scenario.id}
+      scenario={scenario}
+      service={service}
+      workspaceId={workspaceId}
+      currentZeroDate={snapshot.projectedZeroDate}
+      hasActivePlan={hasActivePlan}
+      runAction={runAction}
+      writeState={writeState}
+      refresh={refresh}
+      onChanged={onCardChanged(scenario.id)}
+      onPreviewed={handlePreviewed}
+      selected={selectedIds.has(scenario.id)}
+      onToggleSelect={toggleSelect}
+      isArchived={isArchived}
+    />
+  );
+
+  const columns = [
+    { key: "active", title: "Active Plan", icon: Zap },
+    { key: "strategy", title: "Saved Strategy Snapshots", icon: GitCompare },
+    { key: "whatif", title: "Saved What-If Scenarios", icon: Sparkles },
+    { key: "finishby", title: "Saved Finish-By Targets", icon: Flag },
+    { key: "archived", title: "Archived", icon: Archive },
+  ];
+
   return (
     <div style={{ display: "grid", gap: GAP }}>
-      {scenarios.length ? (
+      {activeScenarios.length ? (
         <Card variant="default">
-          <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>{scenarios.length} saved scenario{scenarios.length === 1 ? "" : "s"}</div>
+          <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>{activeScenarios.length} saved scenario{activeScenarios.length === 1 ? "" : "s"}</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
             {Object.entries(groupCounts).map(([type, count]) => (
               <Badge key={type} tone="neutral">{SCENARIO_TYPE_LABELS[type] || type} · {count}</Badge>
             ))}
+            {archivedScenarios.length ? <Badge tone="neutral">Archived · {archivedScenarios.length}</Badge> : null}
           </div>
         </Card>
       ) : null}
 
-      {bestOption ? (
-        <Card variant="highlight">
-          <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Best option right now</div>
-          <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx, marginTop: 4 }}>{bestOption.scenario?.name || "Scenario"}</div>
-          <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 6, marginBottom: 0 }}>
-            Projected $0 <strong>{bestOption.preview.projectedZeroDate}</strong> - the earliest among the {previewedEntries.length} scenario{previewedEntries.length === 1 ? "" : "s"} you&apos;ve previewed this session (not every saved scenario has been checked yet).
-          </p>
-        </Card>
-      ) : null}
-
-      {!scenarios.length ? (
-        <Card variant="default">
-          <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>No saved scenarios yet</div>
-          <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 8 }}>
-            Save a what-if, goal-date, or strategy idea to compare it later. Saved scenarios stay preview-only until you explicitly apply one.
-          </p>
-        </Card>
-      ) : (
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.9fr) minmax(260px, 1fr)", gap: GAP, alignItems: "start" }}>
         <div style={{ display: "grid", gap: GAP }}>
-          {scenarios.map((scenario) => (
-            <ScenarioCard
-              key={scenario.id}
-              scenario={scenario}
-              service={service}
-              workspaceId={workspaceId}
-              currentZeroDate={snapshot.projectedZeroDate}
-              hasActivePlan={hasActivePlan}
-              runAction={runAction}
-              writeState={writeState}
-              refresh={refresh}
-              onChanged={() => {
-                setScenarios((current) => current?.filter((item) => item.id !== scenario.id) ?? current);
-                setPreviewsById((current) => {
-                  if (!(scenario.id in current)) return current;
-                  const next = { ...current };
-                  delete next[scenario.id];
-                  return next;
-                });
-                setSelectedIds((current) => {
-                  if (!current.has(scenario.id)) return current;
-                  const next = new Set(current);
-                  next.delete(scenario.id);
-                  return next;
-                });
-              }}
-              onPreviewed={handlePreviewed}
-              selected={selectedIds.has(scenario.id)}
-              onToggleSelect={toggleSelect}
-            />
-          ))}
+          {!activeScenarios.length && !archivedScenarios.length ? (
+            <Card variant="default">
+              <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>No saved scenarios yet</div>
+              <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 8, marginBottom: 0 }}>
+                Save a what-if, goal-date, or strategy idea to compare it later. Saved scenarios stay preview-only until you explicitly apply one.
+              </p>
+            </Card>
+          ) : null}
+
+          {/* GATE-10B.1E: the board always renders, even with zero saved
+              scenarios - "Active Plan" reflects real plan state, not
+              scenario state, so it stays useful/visible regardless of
+              whether anything's been saved yet. Each column already has its
+              own honest "None saved yet." fallback. */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: GAP, alignItems: "start" }}>
+            {columns.map((column) => (
+              <div key={column.key} style={{ display: "grid", gap: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <IconBadge icon={column.icon} tone="ac" size="sm" />
+                  <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>{column.title}</div>
+                </div>
+                {column.key === "active" ? (
+                  activeVersion ? (
+                    <Card variant="highlight">
+                      <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>{activeVersion.strategy === "snowball" ? "Snowball" : "Avalanche"} active</div>
+                      <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+                        <LabelValueRow label="Projected $0" value={snapshot.projectedZeroDate || "n/a"} />
+                        <LabelValueRow label="Extra/mo" value={money(Number(activeVersion.extraMonthlyPayment || 0))} />
+                      </div>
+                      <Button variant="secondary" size="sm" onClick={() => navigateToPlanDestination("my-plan")} style={{ marginTop: GAP }}>Open My Plan</Button>
+                    </Card>
+                  ) : (
+                    <p style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>No active plan yet.</p>
+                  )
+                ) : column.key === "strategy" ? (
+                  strategySnapshots.length ? strategySnapshots.map((scenario) => renderScenarioCard(scenario)) : <p style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>None saved yet.</p>
+                ) : column.key === "whatif" ? (
+                  whatIfScenarios.length ? whatIfScenarios.map((scenario) => renderScenarioCard(scenario)) : <p style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>None saved yet.</p>
+                ) : column.key === "finishby" ? (
+                  finishByScenarios.length ? finishByScenarios.map((scenario) => renderScenarioCard(scenario)) : <p style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>None saved yet.</p>
+                ) : (
+                  archivedScenarios.length ? archivedScenarios.map((scenario) => renderScenarioCard(scenario, { isArchived: true })) : <p style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Nothing archived.</p>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {planHistory?.length ? (
+            <Card variant="default">
+              <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Plan history timeline</div>
+              <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 4, marginBottom: GAP }}>Every activated or reforecast version of your plan, oldest to newest. This is your plan&apos;s own history, separate from the saved scenarios above.</p>
+              <PlanHistoryTimeline versions={planHistory} />
+            </Card>
+          ) : null}
         </div>
-      )}
+
+        <div style={{ display: "grid", gap: GAP, position: "sticky", top: 16 }}>
+          <Card variant="default">
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <IconBadge icon={Sparkles} tone="ac" size="sm" />
+              <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Saved insight</div>
+            </div>
+            {bestOption ? (
+              <div style={{ marginTop: GAP }}>
+                <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Best option right now</div>
+                <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx, marginTop: 4 }}>{bestOption.scenario?.name || "Scenario"}</div>
+                <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 6, marginBottom: 0 }}>
+                  Projected $0 <strong>{bestOption.preview.projectedZeroDate}</strong> - earliest among the {validPreviewedEntries.length} scenario{validPreviewedEntries.length === 1 ? "" : "s"} you&apos;ve previewed this session.
+                </p>
+              </div>
+            ) : (
+              <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: GAP }}>Preview a saved scenario (click &quot;View&quot;) to start building insight here.</p>
+            )}
+
+            {validPreviewedEntries.length ? (
+              <div style={{ marginTop: GAP }}>
+                <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted, marginBottom: 6 }}>How it compares</div>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: "left", padding: "4px 6px", ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Scenario</th>
+                        <th style={{ textAlign: "left", padding: "4px 6px", ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Payoff</th>
+                        <th style={{ textAlign: "left", padding: "4px 6px", ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Interest</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rankedEntries.map((entry) => (
+                        <tr key={entry.scenario.id}>
+                          <td style={{ padding: "4px 6px", ...TYPE_SCALE.caption, color: ttzPalette.tx, borderTop: `1px solid ${ttzPalette.border}` }}>{entry.scenario.name}</td>
+                          <td style={{ padding: "4px 6px", ...TYPE_SCALE.caption, color: ttzPalette.tx, borderTop: `1px solid ${ttzPalette.border}` }}>{entry.preview.projectedZeroDate}</td>
+                          <td style={{ padding: "4px 6px", ...TYPE_SCALE.caption, color: ttzPalette.tx, borderTop: `1px solid ${ttzPalette.border}` }}>{money(entry.preview.estimatedInterest || 0)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+
+            {validPreviewedEntries.length ? (
+              <div style={{ marginTop: GAP }}>
+                <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted, marginBottom: 6 }}>Payoff date trend</div>
+                <PayoffDateTrendMini entries={rankedEntries.map((entry) => ({ id: entry.scenario.id, label: entry.scenario.name, date: entry.preview.projectedZeroDate }))} />
+              </div>
+            ) : null}
+
+            {top3Entries.length >= 2 ? (
+              <Button variant="secondary" onClick={() => setShowTopCompare(true)} style={{ marginTop: GAP, width: "100%" }}>Compare Top {top3Entries.length}</Button>
+            ) : null}
+          </Card>
+        </div>
+      </div>
+
+      {showTopCompare && top3Entries.length >= 2 ? (
+        <MultiScenarioCompareCard
+          title={`Top ${top3Entries.length} Scenarios`}
+          subtitle="The best-ranked scenarios you've previewed this session, side by side."
+          entries={top3Entries.map((entry) => ({ label: entry.scenario.name, previewResult: entry.preview }))}
+        />
+      ) : null}
 
       {compareEntries.length >= 2 ? (
         <MultiScenarioCompareCard
@@ -1652,14 +2172,6 @@ function SavedScenariosView({ snapshot, service, refresh, runAction, writeState 
         />
       ) : selectedIds.size === 1 ? (
         <InfoCallout>Select at least one more previewed scenario to compare.</InfoCallout>
-      ) : null}
-
-      {planHistory?.length ? (
-        <Card variant="default">
-          <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Plan history</div>
-          <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 4, marginBottom: GAP }}>Every activated or reforecast version of your plan, newest first. This is your plan&apos;s own history, separate from the saved scenarios above.</p>
-          <PlanHistoryTimeline versions={planHistory} />
-        </Card>
       ) : null}
     </div>
   );
@@ -1717,32 +2229,75 @@ function scenarioPreviewForChart(scenario, preview) {
   return null;
 }
 
+// GATE-10B.1E: renders Plan History through the new shared HistoryTimeline
+// primitive instead of a plain vertical list - reshapes the SAME real
+// listPlanHistory data (newest-first) into oldest-first icon-node entries,
+// never fabricating an event that isn't a real, already-recorded PlanVersion.
 function PlanHistoryTimeline({ versions }) {
   const strategyLabel = (strategy) => (strategy === "avalanche" ? "Avalanche" : strategy === "snowball" ? "Snowball" : strategy || "Custom");
+  const chronological = [...versions].reverse();
+  const entries = chronological.map((version, index) => {
+    const previous = chronological[index - 1];
+    const delta = previous ? monthLabelDeltaText(previous.projectedZeroDate, version.projectedZeroDate) : "";
+    const isReforecast = version.createdBecause === "reforecast";
+    return {
+      id: version.id,
+      icon: isReforecast ? FlaskConical : Flag,
+      tone: isReforecast ? "info" : "go",
+      date: version.createdAt ? new Date(version.createdAt).toLocaleDateString() : "",
+      title: `Version ${version.versionNumber} · ${strategyLabel(version.strategy)}`,
+      description: `${money(Number(version.extraMonthlyPayment || 0))}/mo · Projected $0: ${version.projectedZeroDate || "n/a"}${delta ? ` (${delta})` : ""}`,
+    };
+  });
+  return <HistoryTimeline entries={entries} />;
+}
+
+// GATE-10B.1E: Saved's "Payoff date trend" - a genuinely real chart (this
+// was explicitly deferred as "not built" in GATE-10B.1D), plotting each
+// previewed-this-session scenario's own projectedZeroDate against when it
+// was previewed. This is NOT TrendChart (that's balance-over-month; this
+// axis is date-over-preview-order), so it's its own small, honest,
+// dependency-free SVG rather than forcing an incompatible shape into
+// TrendChart. Colors resolved from ttzPalette inside the render body.
+function PayoffDateTrendMini({ entries }) {
+  const palette = ttzPalette;
+  const parsed = entries
+    .map((entry) => ({ ...entry, time: new Date(`1 ${entry.date}`).getTime() }))
+    .filter((entry) => !Number.isNaN(entry.time));
+  if (parsed.length < 2) {
+    return <p style={{ ...TYPE_SCALE.body, color: palette.tx2, margin: 0 }}>Preview at least 2 scenarios this session to see a trend.</p>;
+  }
+  const width = 320;
+  const height = 130;
+  const pad = 22;
+  const times = parsed.map((p) => p.time);
+  const minT = Math.min(...times);
+  const maxT = Math.max(...times);
+  const scaleX = (index) => pad + (parsed.length > 1 ? (index / (parsed.length - 1)) * (width - pad * 2) : 0);
+  // Earlier payoff date (a "better" outcome) plots higher (smaller y) - an
+  // upward-trending line reads as "getting better," matching how every
+  // other chart in this app treats a lower balance/earlier date as good.
+  const scaleY = (time) => (maxT === minT ? height / 2 : pad + ((time - minT) / (maxT - minT)) * (height - pad * 2));
+  const path = parsed.map((p, index) => `${index === 0 ? "M" : "L"} ${scaleX(index)} ${scaleY(p.time)}`).join(" ");
+  const summary = parsed.map((p) => `${p.label}: ${p.date}`).join(", ");
+
   return (
-    <div style={{ display: "grid", gap: 10 }}>
-      {versions.map((version, index) => {
-        const previous = versions[index + 1];
-        const delta = previous ? monthLabelDeltaText(previous.projectedZeroDate, version.projectedZeroDate) : "";
-        return (
-          <div key={version.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 12px", borderRadius: 10, border: `1px solid ${ttzPalette.border}`, background: ttzPalette.surf2 }}>
-            <div>
-              <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 700 }}>
-                Version {version.versionNumber} · {strategyLabel(version.strategy)} · {money(Number(version.extraMonthlyPayment || 0))}/mo
-              </div>
-              <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 2 }}>
-                {version.createdBecause === "reforecast" ? "Reforecast" : "Activated"} · Projected $0: {version.projectedZeroDate || "n/a"}
-              </div>
-            </div>
-            {delta ? <Badge tone="neutral">{delta}</Badge> : null}
-          </div>
-        );
-      })}
+    <div role="img" aria-label={`Payoff date trend across ${parsed.length} previewed scenarios: ${summary}`}>
+      <svg width="100%" viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
+        <path d={path} fill="none" stroke={palette.ac} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+        {parsed.map((p, index) => (
+          <circle key={p.id || index} cx={scaleX(index)} cy={scaleY(p.time)} r={4} fill={palette.surf} stroke={palette.ac} strokeWidth="2" />
+        ))}
+      </svg>
+      <div style={{ display: "flex", justifyContent: "space-between", ...TYPE_SCALE.caption, color: palette.tx2, marginTop: 4 }}>
+        <span>{parsed[0].label}</span>
+        <span>{parsed.at(-1).label}</span>
+      </div>
     </div>
   );
 }
 
-function ScenarioCard({ scenario, service, workspaceId, currentZeroDate, hasActivePlan, runAction, writeState, refresh, onChanged, onPreviewed, selected = false, onToggleSelect }) {
+function ScenarioCard({ scenario, service, workspaceId, currentZeroDate, hasActivePlan, runAction, writeState, refresh, onChanged, onPreviewed, selected = false, onToggleSelect, isArchived = false }) {
   const [loaded, setLoaded] = useState(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const canApply = APPLICABLE_SCENARIO_TYPES.includes(scenario.type);
@@ -1776,7 +2331,7 @@ function ScenarioCard({ scenario, service, workspaceId, currentZeroDate, hasActi
           <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>{scenario.name}</div>
           <Badge tone="neutral" style={{ marginTop: 6 }}>{SCENARIO_TYPE_LABELS[scenario.type] || scenario.type}</Badge>
         </div>
-        {loaded?.isStale ? <Badge tone="warning">Plan changed since saved</Badge> : null}
+        {isArchived ? <Badge tone="neutral">Archived</Badge> : loaded?.isStale ? <Badge tone="warning">Plan changed since saved</Badge> : null}
       </div>
 
       {loaded ? (
@@ -1789,12 +2344,12 @@ function ScenarioCard({ scenario, service, workspaceId, currentZeroDate, hasActi
             <PlanMetric label="Vs. your current plan" value={deltaText || "n/a"} />
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            {canApply ? (
+            {canApply && !isArchived ? (
               <Button variant="primary" size="sm" disabled={writeState.inProgress} onClick={() => setConfirmOpen(true)}>Apply</Button>
-            ) : (
+            ) : !canApply ? (
               <p style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted, alignSelf: "center" }}>This kind of scenario is preview-only and can&apos;t be applied directly.</p>
-            )}
-            <Button variant="ghost" size="sm" disabled={writeState.inProgress} onClick={archive}>Archive</Button>
+            ) : null}
+            {!isArchived ? <Button variant="ghost" size="sm" disabled={writeState.inProgress} onClick={archive}>Archive</Button> : null}
             {chartPreview ? (
               <label style={{ display: "flex", alignItems: "center", gap: 6, ...TYPE_SCALE.caption, color: ttzPalette.tx2, cursor: "pointer" }}>
                 <input type="checkbox" checked={selected} onChange={() => onToggleSelect?.(scenario.id)} />
@@ -1806,7 +2361,7 @@ function ScenarioCard({ scenario, service, workspaceId, currentZeroDate, hasActi
       ) : (
         <div style={{ marginTop: GAP, display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Button variant="secondary" size="sm" disabled={writeState.inProgress} loading={writeState.action === "preview scenario"} onClick={load}>View</Button>
-          <Button variant="ghost" size="sm" disabled={writeState.inProgress} onClick={archive}>Archive</Button>
+          {!isArchived ? <Button variant="ghost" size="sm" disabled={writeState.inProgress} onClick={archive}>Archive</Button> : null}
         </div>
       )}
 
@@ -1824,7 +2379,7 @@ function ScenarioCard({ scenario, service, workspaceId, currentZeroDate, hasActi
   );
 }
 
-export default function PlanSection({ snapshot, service, refresh, runAction, writeState, onGoToDebts }) {
+export default function PlanSection({ snapshot, service, refresh, runAction, writeState, onGoToDebts, reviewSnapshot }) {
   const [destination, setDestination] = useState(() => resolvePlanDestination(typeof window !== "undefined" ? window.location.pathname : "/plan/my-plan"));
 
   useEffect(() => {
@@ -1846,7 +2401,7 @@ export default function PlanSection({ snapshot, service, refresh, runAction, wri
     setDestination(nextDestination);
   };
 
-  const viewProps = { snapshot, service, refresh, runAction, writeState, onGoToDebts };
+  const viewProps = { snapshot, service, refresh, runAction, writeState, onGoToDebts, reviewSnapshot };
   let currentView;
   switch (destination) {
     case "snowball": currentView = <SnowballView {...viewProps} />; break;
@@ -1860,10 +2415,11 @@ export default function PlanSection({ snapshot, service, refresh, runAction, wri
   }
 
   // UX-6.2: workspace-aware voice ("My payoff plan" / "Household payoff
-  // plan") as a small overline above the existing "Your path to $0" title -
-  // adds intentional Personal/Household distinction without discarding the
+  // plan") as a small overline above the page's own title - adds
+  // intentional Personal/Household distinction without discarding the
   // established page title.
   const { planHeading } = getWorkspacePresentation(snapshot.workspace);
+  const { title: destinationTitle, subtitle: destinationSubtitle } = DESTINATION_TITLES[destination] || DESTINATION_TITLES["my-plan"];
 
   return (
     <div style={{ display: "grid", gap: 10 }}>
@@ -1873,9 +2429,13 @@ export default function PlanSection({ snapshot, service, refresh, runAction, wri
             (every "title" here was a styled div) - this is the one real
             <h1> for the whole tab, rendered once regardless of which
             destination (My Plan/Compare/What If/etc.) is active, matching
-            Home/Debts/Activity's existing one-h1-per-page pattern. Same
-            visual style as before - a tag change, not a visual change. */}
-        <h1 style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx, marginTop: 4, margin: "4px 0 0" }}>Your path to $0</h1>
+            Home/Debts/Activity's existing one-h1-per-page pattern.
+            GATE-10B.1E: text is now destination-specific (matching every
+            reference design's own page title) instead of one fixed
+            "Your path to $0" shared across all 7 tabs - still exactly one
+            h1 per page, just accurate to what's actually shown below it. */}
+        <h1 style={{ ...TYPE_SCALE.pageTitle, color: ttzPalette.tx, marginTop: 4, margin: "4px 0 0" }}>{destinationTitle}</h1>
+        {destinationSubtitle ? <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 6, marginBottom: 0, maxWidth: 640 }}>{destinationSubtitle}</p> : null}
       </div>
 
       <div role="tablist" aria-label="Plan sections" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>

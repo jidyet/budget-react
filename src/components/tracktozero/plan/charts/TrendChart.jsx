@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { TYPE_SCALE, ttzPalette } from "../../theme.js";
 import { formatMoney as money } from "../../formatting.js";
+import { valueForMode, withCumulativeInterest } from "./trendChartMath.js";
 
 // GATE-10B.1D: same dependency-free hand-rolled-SVG style as Home's
 // TrajectoryChart (HomeCommandCenter.jsx) - no chart library exists in this
@@ -14,9 +15,13 @@ const parseMonthLabelToTime = (label) => {
   return Number.isNaN(date.getTime()) ? null : date.getTime();
 };
 
-const RANGE_MONTHS = { "1Y": 12, "3Y": 36, "5Y": 60, All: Infinity };
+// GATE-10B.1E: renamed from 1Y/3Y/5Y/All to 12M/24M/36M/All to match every
+// reference design's own labels - same slicing logic/months, cosmetic only.
+const RANGE_MONTHS = { "12M": 12, "24M": 24, "36M": 36, All: Infinity };
 
-const DEFAULT_RANGE_OPTIONS = ["All", "5Y", "3Y", "1Y"];
+const DEFAULT_RANGE_OPTIONS = ["All", "12M", "24M", "36M"];
+
+const CHART_MODES = ["Balance", "Interest", "Cumulative interest"];
 
 // series[i].points is windowed for DISPLAY ONLY (a leading slice - this is a
 // forward projection, not historical, so "1Y" means "the next 12 months
@@ -64,12 +69,20 @@ function AccessibleSummaryTable({ series }) {
  *   payoffMonth?: string,  // draws a distinct (non-color-only) marker
  * }>
  */
-export default function TrendChart({ series = [], rangeOptions = DEFAULT_RANGE_OPTIONS, title, subtitle, emptyState = null }) {
+// GATE-10B.1E: an opt-in Balance/Interest/Cumulative-interest tab row (My
+// Plan, Snowball references) - see trendChartMath.js for the underlying
+// per-mode value/cumulative-sum math (kept in its own file so this
+// component file can stay component-only for Fast Refresh, and so that math
+// can be unit-tested directly).
+export default function TrendChart({ series = [], rangeOptions = DEFAULT_RANGE_OPTIONS, title, subtitle, emptyState = null, showModes = false }) {
   const palette = ttzPalette;
   const [range, setRange] = useState(rangeOptions[0] || "All");
+  const [mode, setMode] = useState(CHART_MODES[0]);
+  const activeMode = showModes ? mode : "Balance";
 
   const usableSeries = series.filter((s) => Array.isArray(s.points) && s.points.length > 1);
-  const windowed = applyRangeWindow(usableSeries, range);
+  const windowedRaw = applyRangeWindow(usableSeries, range);
+  const windowed = activeMode === "Balance" ? windowedRaw : windowedRaw.map((s) => ({ ...s, points: withCumulativeInterest(s.points) }));
   const allPoints = windowed.flatMap((s) => s.points);
 
   if (!usableSeries.length || !allPoints.length) {
@@ -84,13 +97,13 @@ export default function TrendChart({ series = [], rangeOptions = DEFAULT_RANGE_O
   const times = allPoints.map((p) => parseMonthLabelToTime(p.month)).filter((t) => t != null);
   const minX = Math.min(...times);
   const maxX = Math.max(...times);
-  const maxY = Math.max(...allPoints.map((p) => Number(p.balance || 0)), 1);
+  const maxY = Math.max(...allPoints.map((p) => valueForMode(p, activeMode)), 1);
   const scaleX = (point) => {
     const t = parseMonthLabelToTime(point.month);
     if (t == null || maxX === minX) return pad;
     return pad + ((t - minX) / (maxX - minX)) * (width - pad * 2);
   };
-  const scaleY = (point) => height - pad - (Number(point.balance || 0) / maxY) * (height - pad * 2);
+  const scaleY = (point) => height - pad - (valueForMode(point, activeMode) / maxY) * (height - pad * 2);
   const drawPath = (points) => points.map((point, index) => `${index === 0 ? "M" : "L"} ${scaleX(point)} ${scaleY(point)}`).join(" ");
 
   const summary = windowed
@@ -132,6 +145,32 @@ export default function TrendChart({ series = [], rangeOptions = DEFAULT_RANGE_O
               ))}
             </div>
           ) : null}
+        </div>
+      ) : null}
+
+      {showModes ? (
+        <div role="group" aria-label="Chart value" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {CHART_MODES.map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => setMode(option)}
+              aria-pressed={mode === option}
+              className="ttz-focus-ring"
+              style={{
+                border: `1px solid ${mode === option ? palette.ac : palette.border2}`,
+                background: mode === option ? palette.acS : "transparent",
+                color: mode === option ? palette.ac : palette.tx2,
+                borderRadius: 999,
+                padding: "4px 12px",
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              {option}
+            </button>
+          ))}
         </div>
       ) : null}
 

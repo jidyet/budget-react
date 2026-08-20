@@ -129,6 +129,14 @@ describe("UX-4: previewOneTimePayment", () => {
     expect(await service.previewOneTimePayment("household-seed", { amount: 0, targetDebtId: "household-samsung" })).toBeNull();
     expect(await service.previewOneTimePayment("household-seed", { amount: 100, targetDebtId: "not-a-real-debt" })).toBeNull();
   });
+
+  it("GATE-10B.1E: defaults to the active plan's own strategy when no override is given, honors an explicit strategy override otherwise", async () => {
+    const { service } = makeService();
+    const defaultResult = await service.previewOneTimePayment("household-seed", { amount: 100, targetDebtId: "household-samsung", detailed: true });
+    expect(defaultResult.baseline.strategy).toBe("snowball");
+    const overridden = await service.previewOneTimePayment("household-seed", { amount: 100, targetDebtId: "household-samsung", strategy: "avalanche", detailed: true });
+    expect(overridden.baseline.strategy).toBe("avalanche");
+  });
 });
 
 describe("UX-4: previewCustomTarget", () => {
@@ -163,6 +171,14 @@ describe("UX-4: previewCustomTarget", () => {
     expect(result.custom.extraMonthlyPayment).toBe(300);
     expect(result.baseline.extraMonthlyPayment).toBe(300);
     expect(result.custom.payoffOrder[0].id).toBe("solo-debt");
+  });
+
+  it("GATE-10B.1E: defaults the baseline strategy to the active plan's own strategy, honors an explicit strategy override otherwise", async () => {
+    const { service } = makeService();
+    const defaultResult = await service.previewCustomTarget("household-seed", { targetDebtId: "household-priceline" });
+    expect(defaultResult.baseline.strategy).toBe("snowball");
+    const overridden = await service.previewCustomTarget("household-seed", { targetDebtId: "household-priceline", strategy: "avalanche" });
+    expect(overridden.baseline.strategy).toBe("avalanche");
   });
 });
 
@@ -343,6 +359,17 @@ describe("UX-4: Saved Scenarios", () => {
     expect(listed.map((s) => s.id)).not.toContain(scenario.id);
     const { scenario: reloaded } = await service.getScenarioPreview("household-seed", scenario.id);
     expect(reloaded.status).toBe("archived");
+  });
+
+  it("GATE-10B.1E: includeArchived:true surfaces archived scenarios too, defaults to false (unchanged behavior)", async () => {
+    const { service } = makeService();
+    const scenario = await service.saveScenario("household-seed", { name: "Temp2", type: "recurring_extra", inputs: { extraMonthlyPayment: 25 } });
+    await service.archiveScenario("household-seed", scenario.id);
+    const defaultListed = await service.listWorkspaceScenarios("household-seed");
+    expect(defaultListed.map((s) => s.id)).not.toContain(scenario.id);
+    const withArchived = await service.listWorkspaceScenarios("household-seed", { includeArchived: true });
+    expect(withArchived.map((s) => s.id)).toContain(scenario.id);
+    expect(withArchived.find((s) => s.id === scenario.id).status).toBe("archived");
   });
 
   it("flags a scenario as stale once the active PlanVersion has moved on (reforecast happened after the scenario was saved)", async () => {

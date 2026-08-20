@@ -2066,14 +2066,19 @@ export const createTrackToZeroV2AsyncAppService = ({
   // FromDebts derives the same display-layer balance reduction internally
   // from oneTimePayments now, so payoffOrder/startingTotalBalance still
   // reflect the lump sum exactly as before.
-  const previewOneTimePayment = async (workspaceId, { amount = 0, targetDebtId = "", detailed = false } = {}) => {
+  // GATE-10B.1E: `strategy` override is purely additive (defaults to the
+  // active plan's own strategy, exactly as before) - What If's new
+  // "Strategy context" dropdown lets a user preview this one-time payment
+  // against a strategy OTHER than whichever is currently active, without
+  // ever presenting the result as that strategy being applied.
+  const previewOneTimePayment = async (workspaceId, { amount = 0, targetDebtId = "", detailed = false, strategy: strategyOverride } = {}) => {
     const snapshot = await getWorkspaceSnapshot(workspaceId);
     const { month, year } = parseAsOf(asOf);
     const lump = Math.max(0, Number(amount) || 0);
     const target = targetDebtId ? snapshot.debts.find((debt) => debt.id === targetDebtId) : snapshot.targetDebt;
     if (!lump || !target) return null;
     const baseVersion = snapshot.activeContext?.version || null;
-    const strategy = baseVersion?.strategy || "avalanche";
+    const strategy = strategyOverride || baseVersion?.strategy || "avalanche";
     const extraMonthlyPayment = Number(baseVersion?.extraMonthlyPayment || 0);
     const oneTimePayments = [{ debtId: target.id, amount: lump, month: 0 }];
     const baseline = buildPlanPreviewFromDebts({ debts: snapshot.debts, planVersionLike: { strategy, extraMonthlyPayment }, startMonth: month, startYear: year, detailed });
@@ -2091,14 +2096,17 @@ export const createTrackToZeroV2AsyncAppService = ({
   // preview honestly reflects a NEW hypothetical payment amount, not just a
   // reordering at the existing one - still zero-write, still never
   // presented as Snowball/Avalanche.
-  const previewCustomTarget = async (workspaceId, { targetDebtId, extraMonthlyPayment: extraOverride, detailed = false } = {}) => {
+  const previewCustomTarget = async (workspaceId, { targetDebtId, extraMonthlyPayment: extraOverride, detailed = false, strategy: strategyOverride } = {}) => {
     const snapshot = await getWorkspaceSnapshot(workspaceId);
     const { month, year } = parseAsOf(asOf);
     const target = snapshot.debts.find((debt) => debt.id === targetDebtId);
     if (!target) return null;
     const baseVersion = snapshot.activeContext?.version || null;
     const extraMonthlyPayment = extraOverride != null ? Number(extraOverride) || 0 : Number(baseVersion?.extraMonthlyPayment || 0);
-    const baseline = buildPlanPreviewFromDebts({ debts: snapshot.debts, planVersionLike: { strategy: baseVersion?.strategy || "avalanche", extraMonthlyPayment }, startMonth: month, startYear: year, detailed });
+    // GATE-10B.1E: strategyOverride is purely additive (defaults to the
+    // active plan's own strategy, exactly as before) - What If's "Strategy
+    // context" dropdown.
+    const baseline = buildPlanPreviewFromDebts({ debts: snapshot.debts, planVersionLike: { strategy: strategyOverride || baseVersion?.strategy || "avalanche", extraMonthlyPayment }, startMonth: month, startYear: year, detailed });
     const custom = buildPlanPreviewFromDebts({ debts: snapshot.debts, planVersionLike: { strategy: "custom", extraMonthlyPayment }, startMonth: month, startYear: year, customTargetOrder: [target.id], detailed });
     return { targetDebtId: target.id, targetDebtName: target.name, baseline, custom };
   };
@@ -2236,10 +2244,13 @@ export const createTrackToZeroV2AsyncAppService = ({
   // (Part 5/39) - only applyScenario, via the exact same applyReforecast
   // primitive any other reforecast already uses, can promote it, and only
   // on the user's explicit confirmation.
-  const listWorkspaceScenarios = async (workspaceId) => {
+  // GATE-10B.1E: includeArchived is purely additive (defaults to false,
+  // exactly today's behavior) - Saved's new "Archived" column needs to
+  // actually show archived scenarios instead of them just disappearing.
+  const listWorkspaceScenarios = async (workspaceId, { includeArchived = false } = {}) => {
     await getWorkspaceContext(workspaceId);
     const scenarios = await repository.listScenarios?.(workspaceId) || [];
-    return scenarios.filter((scenario) => scenario.status !== "archived");
+    return includeArchived ? scenarios : scenarios.filter((scenario) => scenario.status !== "archived");
   };
 
   const saveScenario = async (workspaceId, { name, type, inputs = {} } = {}) => {

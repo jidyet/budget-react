@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import TrendChart from "./TrendChart.jsx";
+import { valueForMode, withCumulativeInterest } from "./trendChartMath.js";
 import { applyTheme, ttzPalette } from "../../theme.js";
 
 const render = (element) => renderToStaticMarkup(element);
@@ -75,5 +76,58 @@ describe("GATE-10B.1D: TrendChart", () => {
     render(h(TrendChart, { series, rangeOptions: ["1Y"] }));
     // The caller's own array/objects must never be mutated by rendering.
     expect(series[0].points).toEqual(originalPoints);
+  });
+
+  describe("GATE-10B.1E: range label rename + Balance/Interest/Cumulative mode toggle", () => {
+    it("defaults to the new 12M/24M/36M/All range labels", () => {
+      const html = render(h(TrendChart, {
+        series: [{ id: "a", label: "Active plan", colorToken: "ac", points: points([1000, 500, 0]) }],
+      }));
+      expect(html).toContain(">All<");
+      expect(html).toContain(">12M<");
+      expect(html).toContain(">24M<");
+      expect(html).toContain(">36M<");
+    });
+
+    it("does not render the mode toggle unless showModes is true", () => {
+      const html = render(h(TrendChart, {
+        series: [{ id: "a", label: "Active plan", colorToken: "ac", points: points([1000, 500, 0]) }],
+      }));
+      expect(html).not.toContain(">Interest<");
+      expect(html).not.toContain("Cumulative interest");
+    });
+
+    it("showModes renders the Balance/Interest/Cumulative interest tabs, defaulting to Balance", () => {
+      const html = render(h(TrendChart, {
+        showModes: true,
+        series: [{ id: "a", label: "Active plan", colorToken: "ac", points: points([1000, 500, 0]) }],
+      }));
+      expect(html).toContain(">Balance<");
+      expect(html).toContain(">Interest<");
+      expect(html).toContain("Cumulative interest");
+    });
+
+    it("withCumulativeInterest builds a running sum of each point's own interest field, never mutating the input", () => {
+      const input = [
+        { month: "Jan 2027", balance: 1000, interest: 20 },
+        { month: "Feb 2027", balance: 800, interest: 15 },
+        { month: "Mar 2027", balance: 600, interest: 10 },
+      ];
+      const result = withCumulativeInterest(input);
+      expect(result.map((p) => p.cumulativeInterest)).toEqual([20, 35, 45]);
+      expect(input[0]).not.toHaveProperty("cumulativeInterest");
+    });
+
+    it("withCumulativeInterest treats a missing interest field as 0, never NaN", () => {
+      const result = withCumulativeInterest([{ month: "Jan 2027", balance: 1000 }, { month: "Feb 2027", balance: 900, interest: 5 }]);
+      expect(result.map((p) => p.cumulativeInterest)).toEqual([0, 5]);
+    });
+
+    it("valueForMode reads balance/interest/cumulativeInterest depending on the requested mode", () => {
+      const point = { balance: 1000, interest: 20, cumulativeInterest: 45 };
+      expect(valueForMode(point, "Balance")).toBe(1000);
+      expect(valueForMode(point, "Interest")).toBe(20);
+      expect(valueForMode(point, "Cumulative interest")).toBe(45);
+    });
   });
 });

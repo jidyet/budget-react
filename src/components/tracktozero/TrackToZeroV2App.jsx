@@ -503,8 +503,8 @@ function FirstPlanBuilder({ snapshot, service, refresh, runAction, writeState, c
   );
 }
 
-function Plan({ snapshot, service, refresh, runAction, writeState, navigateTab }) {
-  return <PlanSection snapshot={snapshot} service={service} refresh={refresh} runAction={runAction} writeState={writeState} onGoToDebts={() => navigateTab?.("debts")} />;
+function Plan({ snapshot, service, refresh, runAction, writeState, navigateTab, reviewSnapshot }) {
+  return <PlanSection snapshot={snapshot} service={service} refresh={refresh} runAction={runAction} writeState={writeState} onGoToDebts={() => navigateTab?.("debts")} reviewSnapshot={reviewSnapshot} />;
 }
 
 function MigrationPanel() {
@@ -1596,7 +1596,7 @@ function TrackToZeroV2AppInner() {
           />
         )}
         {tab === "debts" && <DebtsCenter key={snapshot.workspace?.id} snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} refreshReview={() => refreshReview(workspaceId)} runAction={runAction} writeState={writeState} reviewSnapshot={reviewState.snapshot} onGoToReview={() => navigateTab("review")} initialAction={debtsInitialAction} onInitialActionHandled={() => setDebtsInitialAction(null)} />}
-        {tab === "plan" && <Plan snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} navigateTab={navigateTab} />}
+        {tab === "plan" && <Plan snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} navigateTab={navigateTab} reviewSnapshot={reviewState.snapshot} />}
         {tab === "settings" && <Settings snapshot={snapshot} repositoryMode={runtime.mode} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} latestInvite={latestInvite} setLatestInvite={setLatestInvite} />}
       </PageContainer>
     </AppShell>

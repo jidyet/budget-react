@@ -234,6 +234,48 @@ describe("UX-4: previewGoalDate (Finish By)", () => {
     expect(result.targetLabel).toBe("Samsung Financing");
     expect(result.valid).toBe(true);
   });
+
+  describe("GATE-10B.1D: detailed mode (baseline/scenario projections for Finish By's chart)", () => {
+    it("detailed:false (default) omits baseline/scenario entirely", async () => {
+      const { service } = makeService();
+      const result = await service.previewGoalDate("household-seed", { targetMonth: "2026-10" });
+      expect(result.baseline).toBeFalsy();
+      expect(result.scenario).toBeFalsy();
+    });
+
+    it("detailed:true on an already-on-pace target returns baseline and scenario as the same preview", async () => {
+      const { service } = makeService();
+      const result = await service.previewGoalDate("household-seed", { targetMonth: "2029-01", detailed: true });
+      expect(result.additionalNeeded).toBe(0);
+      expect(result.baseline.projectedZeroDate).toBe(result.scenario.projectedZeroDate);
+      expect(Object.keys(result.baseline.perDebt).length).toBeGreaterThan(0);
+    });
+
+    it("detailed:true on a required-increase target returns a scenario that finishes no later than the baseline, over the same scoped debts", async () => {
+      const { service } = makeService();
+      const result = await service.previewGoalDate("household-seed", { targetMonth: "2026-10", detailed: true });
+      expect(result.baseline.projectedZeroDate).toBeTruthy();
+      expect(result.scenario.projectedZeroDate).toBeTruthy();
+      expect(Object.keys(result.scenario.perDebt).length).toBeGreaterThan(0);
+      // The scenario is what makes the target date feasible - its own
+      // months-to-zero must be no greater than the baseline's.
+      expect(result.scenario.monthsToZero).toBeLessThanOrEqual(result.baseline.monthsToZero);
+    });
+
+    it("detailed:true is never fetched for the infeasible branch (no scenario to chart)", async () => {
+      const { repository, service } = makeService();
+      repository.saveDebt({
+        id: "household-jumbo", workspaceId: "household-seed", name: "Jumbo Balance", debtType: "personal_loan",
+        status: "active", currentBalance: 900_000_000, startingBalance: 900_000_000, aprStatus: "known", apr: 0.05,
+        minimumRequiredPayment: 500, dueDay: 1, ownerId: "seed-owner", ownerLabel: "Jidye",
+        includedInCorePayoffPlan: true, createdAt: V2_TEST_NOW, createdBy: "seed-owner",
+      });
+      const result = await service.previewGoalDate("household-seed", { targetMonth: "2026-09", targetDebtId: "household-jumbo", detailed: true });
+      expect(result.feasible).toBe(false);
+      expect(result.baseline).toBeFalsy();
+      expect(result.scenario).toBeFalsy();
+    });
+  });
 });
 
 describe("UX-4: listPlanHistory (lightweight Plan History, not the full UX-7 system)", () => {
@@ -441,6 +483,60 @@ describe("UX-4: Saved Scenarios", () => {
       await expect(service.getScenarioPreview("personal-seed", scenario.id)).rejects.toThrow(/not found/i);
       await expect(service.applyScenario("personal-seed", scenario.id)).rejects.toThrow(/not found/i);
     });
+  });
+});
+
+describe("GATE-10B.1D: previewTrend and detailed-mode passthrough", () => {
+  it("PLAN-PROJ-01: previewTrend funnels through the same buildPlanPreviewFromDebts chain compareStrategies uses - a chart from previewTrend can never disagree with compareStrategies' own metric tiles for the same inputs", async () => {
+    const { service } = makeService();
+    const compared = await service.compareStrategies("household-seed");
+    const trend = await service.previewTrend("household-seed", { strategy: "avalanche", extraMonthlyPayment: compared.avalanche.extraMonthlyPayment });
+    expect(trend.projectedZeroDate).toBe(compared.avalanche.projectedZeroDate);
+    expect(trend.estimatedInterest).toBeCloseTo(compared.avalanche.estimatedInterest, 6);
+  });
+
+  it("previewTrend defaults to extraMonthlyPayment: 0 - the 'paying minimums only' baseline every strategy page's chart needs", async () => {
+    const { service } = makeService();
+    const minimumsOnly = await service.previewTrend("household-seed", { strategy: "avalanche" });
+    expect(minimumsOnly.extraMonthlyPayment).toBe(0);
+  });
+
+  it("previewTrend defaults detailed:true and returns a non-empty perDebt", async () => {
+    const { service } = makeService();
+    const result = await service.previewTrend("household-seed", { strategy: "snowball", extraMonthlyPayment: 150 });
+    expect(Object.keys(result.perDebt).length).toBeGreaterThan(0);
+  });
+
+  it("compareStrategies({detailed:true}) returns perDebt for both strategies without changing any other field", async () => {
+    const { service } = makeService();
+    const plain = await service.compareStrategies("household-seed");
+    const detailed = await service.compareStrategies("household-seed", { detailed: true });
+    expect(detailed.snowball.projectedZeroDate).toBe(plain.snowball.projectedZeroDate);
+    expect(detailed.avalanche.projectedZeroDate).toBe(plain.avalanche.projectedZeroDate);
+    expect(Object.keys(detailed.snowball.perDebt).length).toBeGreaterThan(0);
+    expect(Object.keys(detailed.avalanche.perDebt).length).toBeGreaterThan(0);
+    expect(plain.snowball.perDebt).toEqual({});
+  });
+
+  it("PLAN-PROJ-07: previewOneTimePayment's withLumpSum.startingTotalBalance is still less than baseline's - the first-class engine param refactor preserves the display-layer reduction the old balance-subtraction approach produced", async () => {
+    const { service } = makeService();
+    const result = await service.previewOneTimePayment("household-seed", { amount: 400, targetDebtId: "household-samsung" });
+    expect(result.withLumpSum.startingTotalBalance).toBeLessThan(result.baseline.startingTotalBalance);
+    expect(result.baseline.startingTotalBalance - result.withLumpSum.startingTotalBalance).toBeCloseTo(400, 2);
+  });
+
+  it("previewOneTimePayment({detailed:true}) exposes perDebt on both baseline and withLumpSum", async () => {
+    const { service } = makeService();
+    const result = await service.previewOneTimePayment("household-seed", { amount: 200, targetDebtId: "household-samsung", detailed: true });
+    expect(Object.keys(result.baseline.perDebt).length).toBeGreaterThan(0);
+    expect(Object.keys(result.withLumpSum.perDebt).length).toBeGreaterThan(0);
+  });
+
+  it("previewCustomTarget({detailed:true}) exposes perDebt on both baseline and custom", async () => {
+    const { service } = makeService();
+    const result = await service.previewCustomTarget("household-seed", { targetDebtId: "household-priceline", detailed: true });
+    expect(Object.keys(result.baseline.perDebt).length).toBeGreaterThan(0);
+    expect(Object.keys(result.custom.perDebt).length).toBeGreaterThan(0);
   });
 });
 

@@ -87,6 +87,61 @@ describe("TrackToZero v2 projection trust layer", () => {
     expect(result.projection[0].remaining_debt).toBeCloseTo(100 - 10 + (1000 - 10 - 200), 2);
   });
 
+  describe("GATE-10B.1D: detailed mode", () => {
+    it("PLAN-PROJ-01: detailed:false (default) always returns an (empty) perDebt so callers never branch on the flag", () => {
+      const result = buildProjectionWithWarnings({ debts: [debt()], planVersion: version, startMonth: 8, startYear: 2026 });
+      expect(result.perDebt).toEqual({});
+    });
+
+    it("detailed:true returns non-empty perDebt with the same aggregate projection values as detailed:false", () => {
+      const plain = buildProjectionWithWarnings({ debts: [debt()], planVersion: version, startMonth: 8, startYear: 2026 });
+      const withDetail = buildProjectionWithWarnings({ debts: [debt()], planVersion: version, startMonth: 8, startYear: 2026, detailed: true });
+      expect(withDetail.projection).toEqual(plain.projection);
+      expect(Object.keys(withDetail.perDebt)).toContain("d1");
+    });
+
+    it("warnings are identical whether detailed is true or false for the same inputs", () => {
+      const inputDebt = debt({ aprStatus: "unknown", apr: null });
+      const plain = buildProjectionWithWarnings({ debts: [inputDebt], planVersion: version, startMonth: 8, startYear: 2026 });
+      const withDetail = buildProjectionWithWarnings({ debts: [inputDebt], planVersion: version, startMonth: 8, startYear: 2026, detailed: true });
+      expect(withDetail.warnings).toEqual(plain.warnings);
+    });
+
+    it("no active plan (planVersion: null) returns an empty projection and empty perDebt in detailed mode too", () => {
+      const result = buildProjectionWithWarnings({ debts: [debt()], planVersion: null, startMonth: 8, startYear: 2026, detailed: true });
+      expect(result.projection).toEqual([]);
+      expect(result.perDebt).toEqual({});
+    });
+
+    it("regression: a detailed:false call with oneTimePayments still applies the payment, not silently drops it", () => {
+      const withoutPayment = buildProjectionWithWarnings({ debts: [debt()], planVersion: version, startMonth: 8, startYear: 2026 });
+      const withPayment = buildProjectionWithWarnings({
+        debts: [debt()], planVersion: version, startMonth: 8, startYear: 2026,
+        oneTimePayments: [{ debtId: "d1", amount: 200, month: 0 }],
+      });
+      // detailed stays {} either way (caller never asked for it) - only the
+      // aggregate projection should reflect the one-time payment's effect.
+      expect(withPayment.perDebt).toEqual({});
+      expect(withPayment.projection[0].remaining_debt).toBeLessThan(withoutPayment.projection[0].remaining_debt);
+    });
+
+    it("regression: a detailed:false call with useMinimumPaymentRules still recomputes dynamic minimums, not silently ignores the flag", () => {
+      // The static minimum (10) is well below what the confirmed rule
+      // computes (5% of a $1000 balance = 50), so the rule taking effect
+      // must show up as a materially bigger first-month payment/lower
+      // remaining balance - not just a same-either-way projection.
+      const ruleDebt = debt({
+        currentBalance: 1000,
+        minimumRequiredPayment: 10,
+        minimumPaymentRule: { ruleType: "percentage_of_balance", percentageComponent: 0.05 },
+      });
+      const withoutRules = buildProjectionWithWarnings({ debts: [ruleDebt], planVersion: version, startMonth: 8, startYear: 2026 });
+      const withRules = buildProjectionWithWarnings({ debts: [ruleDebt], planVersion: version, startMonth: 8, startYear: 2026, useMinimumPaymentRules: true });
+      expect(withRules.perDebt).toEqual({});
+      expect(withRules.projection[0].remaining_debt).toBeLessThan(withoutRules.projection[0].remaining_debt);
+    });
+  });
+
   it("detects missing minimums and projection caps in wrapper warnings", () => {
     const result = buildProjectionWithWarnings({
       debts: [debt({ minimumRequiredPayment: 0, apr: 0.6 })],

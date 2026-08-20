@@ -21,7 +21,16 @@ const budgets = [
   // inefficient implementation - no new dependency was added, and the
   // actual post-hotfix build (~455 kB) still leaves real headroom below
   // this budget to catch a genuine future regression.
-  { name: "TrackToZero V2", match: /^TrackToZeroV2App-.*\.js$/, maxBytes: 470 * 1024 },
+  // GATE-10B.1D: raised 470 -> 530 kB for the Plan tab's payoff-decision-
+  // engine rebuild across all 7 destinations (My Plan/Snowball/Avalanche/
+  // Compare/What If/Finish By/Saved) - two new hand-rolled SVG chart
+  // primitives (TrendChart, AllocationDonut - no charting library added),
+  // a new pure insight-derivation module (planInsights.js), and
+  // substantially more markup per page (charts, per-debt impact tables,
+  // scenario comparison). Actual post-rebuild build is ~503 kB; this still
+  // leaves ~27 kB of headroom below budget to catch a genuine future
+  // regression, not to paper over one already present.
+  { name: "TrackToZero V2", match: /^TrackToZeroV2App-.*\.js$/, maxBytes: 530 * 1024 },
 ];
 
 function formatKb(bytes) {

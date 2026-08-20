@@ -15,6 +15,12 @@ export const debtToEngineAccount = (debt) => ({
   promo_apr: debt.aprStatus === "promotional" ? debt.apr : null,
   promo_until: "",
   apr_after_promo: debt.aprStatus === "promotional" ? debt.apr : debt.apr,
+  // GATE-10B.1D: purely additive pass-through for payoffSimulateDetailed's
+  // opt-in useMinimumPaymentRules - every existing caller of this function
+  // (simulatePlanVersion/buildExpectedCheckpoints, both non-detailed) is
+  // unaffected since payoffSimulate never reads these two keys.
+  minimumPaymentRule: debt.minimumPaymentRule || null,
+  aprStatus: debt.aprStatus || "unknown",
 });
 
 export const planVersionToEngineInput = ({ debts = [], planVersion }) => {

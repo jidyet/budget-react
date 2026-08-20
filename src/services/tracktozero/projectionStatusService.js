@@ -1,4 +1,4 @@
-import { MAX_SIMULATION_MONTHS, payoffSimulate } from "../calc/payoffEngine.js";
+import { MAX_SIMULATION_MONTHS, payoffSimulate, payoffSimulateDetailed } from "../calc/payoffEngine.js";
 import { debtToEngineAccount } from "../adapters/tracktozeroCalcAdapter.js";
 import { disambiguationSuffixForDebt, isConfirmedZero, isDebtNeedsReview } from "../../domain/tracktozero/ownership.js";
 
@@ -197,6 +197,15 @@ export const evaluateProjectionWarnings = ({
   return warnings;
 };
 
+// GATE-10B.1D: `detailed`/`oneTimePayments`/`useMinimumPaymentRules` are
+// opt-in, defaulting to today's exact call/behavior against payoffSimulate -
+// this function runs on every getWorkspaceSnapshot call (every page load
+// across the whole app, not just Plan's chart-bearing pages), so forcing
+// per-debt tracking on unconditionally would tax every non-Plan page for no
+// benefit. evaluateProjectionWarnings only ever reads the aggregate
+// `projection` rows (identical in both modes for the same core args), so
+// warnings text/severity can never drift between a detailed and a
+// non-detailed call for the same plan.
 export const buildProjectionWithWarnings = ({
   debts = [],
   planVersion = null,
@@ -206,11 +215,41 @@ export const buildProjectionWithWarnings = ({
   // UX-4: only meaningful when planVersion.strategy === "custom" (a
   // preview-only pseudo-strategy - see payoffEngine.js's orderPayoffTargets).
   customTargetOrder = [],
+  detailed = false,
+  oneTimePayments = [],
+  useMinimumPaymentRules = false,
 } = {}) => {
   const eligibleDebts = getEligiblePlanDebts(debts, planVersion);
   const accounts = eligibleDebts.map(debtToEngineAccount);
-  const projection = planVersion
-    ? payoffSimulate(
+  let projection = [];
+  let perDebt = {};
+  if (planVersion) {
+    // GATE-10B.1D fix: oneTimePayments/useMinimumPaymentRules only mean
+    // anything inside payoffSimulateDetailed - payoffSimulate (the
+    // detailed:false path) doesn't accept them at all. A `detailed:false`
+    // caller that ALSO passes oneTimePayments/useMinimumPaymentRules (e.g.
+    // a lightweight compare call that wants the one-time-payment effect but
+    // not the perDebt payload) must still route through the detailed
+    // engine, or those options are silently dropped - found live via What
+    // If's "vs other strategies" section showing zero effect from a
+    // one-time payment. perDebt itself still stays {} unless the caller
+    // actually asked for `detailed`.
+    if (detailed || oneTimePayments.length > 0 || useMinimumPaymentRules) {
+      const result = payoffSimulateDetailed(
+        accounts,
+        planVersion.strategy,
+        Number(planVersion.extraMonthlyPayment || 0),
+        {},
+        startMonth,
+        startYear,
+        maxMonths,
+        customTargetOrder,
+        { oneTimePayments, useMinimumPaymentRules },
+      );
+      projection = result.rows;
+      perDebt = detailed ? result.perDebt : {};
+    } else {
+      projection = payoffSimulate(
         accounts,
         planVersion.strategy,
         Number(planVersion.extraMonthlyPayment || 0),
@@ -219,12 +258,13 @@ export const buildProjectionWithWarnings = ({
         startYear,
         maxMonths,
         customTargetOrder
-      )
-    : [];
-  return {
-    projection,
-    warnings: evaluateProjectionWarnings({ debts, planVersion, projectionRows: projection, maxMonths }),
-  };
+      );
+    }
+  }
+  const warnings = evaluateProjectionWarnings({ debts, planVersion, projectionRows: projection, maxMonths });
+  // perDebt is always present (empty object when detailed:false) so callers
+  // can destructure it unconditionally rather than branching on `detailed`.
+  return { projection, perDebt, warnings };
 };
 
 const getExpectedCheckpointForPeriod = (checkpoints = [], period) => {

@@ -1851,7 +1851,7 @@ export const createTrackToZeroV2AsyncAppService = ({
     return calculateWhatIfComparison({ baselineRows: snapshot.projection, scenarioRows: scenarioProjection });
   };
 
-  const previewReforecast = async (workspaceId, overrides = {}) => {
+  const previewReforecast = async (workspaceId, overrides = {}, { detailed = false } = {}) => {
     const snapshot = await getWorkspaceSnapshot(workspaceId);
     if (!snapshot.activeContext?.version) return null;
     const { month, year } = parseAsOf(asOf);
@@ -1862,7 +1862,7 @@ export const createTrackToZeroV2AsyncAppService = ({
       versionNumber: Number(snapshot.activeContext.version.versionNumber || 1) + 1,
       createdBecause: "reforecast",
     };
-    const proposed = buildProjectionWithWarnings({ debts: snapshot.debts, planVersion: proposedVersion, startMonth: month, startYear: year });
+    const proposed = buildProjectionWithWarnings({ debts: snapshot.debts, planVersion: proposedVersion, startMonth: month, startYear: year, detailed });
     return {
       priorVersion: snapshot.activeContext.version,
       proposedVersion,
@@ -1870,6 +1870,7 @@ export const createTrackToZeroV2AsyncAppService = ({
       proposedZeroDate: proposed.projection.at(-1)?.month || "",
       warnings: proposed.warnings,
       projection: proposed.projection,
+      perDebt: proposed.perDebt,
     };
   };
 
@@ -1939,14 +1940,42 @@ export const createTrackToZeroV2AsyncAppService = ({
   // includedInCorePayoffPlan" - exactly the live inclusion rule these
   // ad-hoc previews want, without fabricating a frozen snapshot no draft/
   // active plan actually owns.
-  const buildPlanPreviewFromDebts = ({ debts, planVersionLike, startMonth, startYear, customTargetOrder = [], maxMonths }) => {
-    const { projection, warnings } = buildProjectionWithWarnings({ debts, planVersion: planVersionLike, startMonth, startYear, customTargetOrder, ...(maxMonths ? { maxMonths } : {}) });
+  const buildPlanPreviewFromDebts = ({
+    debts, planVersionLike, startMonth, startYear, customTargetOrder = [], maxMonths,
+    detailed = false, oneTimePayments = [], useMinimumPaymentRules = false,
+  }) => {
+    const { projection, perDebt, warnings } = buildProjectionWithWarnings({
+      debts, planVersion: planVersionLike, startMonth, startYear, customTargetOrder,
+      ...(maxMonths ? { maxMonths } : {}), detailed, oneTimePayments, useMinimumPaymentRules,
+    });
+    // GATE-10B.1D: a month-0 one-time payment reduces the STARTING balance
+    // the engine simulates from - the display-layer fields below (payoffOrder/
+    // startingTotalBalance, computed independently of the engine call above)
+    // must reflect that same reduction, or a lump-sum preview would show its
+    // chart/interest numbers already discounted while its balance tiles and
+    // payoff-order list still showed the pre-payment amount. Built once here
+    // rather than requiring every caller to pre-mutate its own debts array
+    // (previewOneTimePayment used to do exactly that before this refactor -
+    // see its own comment for the numeric-parity requirement this satisfies).
+    const month0Deductions = new Map();
+    for (const payment of oneTimePayments) {
+      const debtId = payment?.debtId;
+      const amount = Math.max(0, Number(payment?.amount) || 0);
+      const month = Number.isFinite(Number(payment?.month)) ? Number(payment.month) : 0;
+      if (!debtId || amount <= 0 || month !== 0) continue;
+      month0Deductions.set(debtId, (month0Deductions.get(debtId) || 0) + amount);
+    }
+    const displayDebts = month0Deductions.size
+      ? debts.map((debt) => month0Deductions.has(debt.id)
+          ? { ...debt, currentBalance: Math.max(0, Number(debt.currentBalance || 0) - month0Deductions.get(debt.id)) }
+          : debt)
+      : debts;
     const debtBalance = (debt) => Number(debt.currentBalance || 0);
-    const eligibleForDisplay = getEligiblePlanDebts(debts, planVersionLike).filter((debt) => debtBalance(debt) > 0);
+    const eligibleForDisplay = getEligiblePlanDebts(displayDebts, planVersionLike).filter((debt) => debtBalance(debt) > 0);
     // UX-8.2: the exact complement, from the same debts/planVersionLike
     // used for payoffOrder/warnings above - so a Plan preview's "excluded"
     // section can never independently drift from what's actually excluded.
-    const excludedDebts = getExcludedPlanDebts(debts, planVersionLike);
+    const excludedDebts = getExcludedPlanDebts(displayDebts, planVersionLike);
     const payoffOrder = planVersionLike.strategy === "custom"
       ? [...eligibleForDisplay].sort((a, b) => {
           const rankA = customTargetOrder.indexOf(a.id);
@@ -1968,7 +1997,37 @@ export const createTrackToZeroV2AsyncAppService = ({
       estimatedInterest: projection.reduce((sum, row) => sum + Number(row.total_interest || 0), 0),
       warnings,
       projection,
+      // GATE-10B.1D: always present (empty object when detailed:false) so
+      // callers can destructure it unconditionally rather than branching.
+      perDebt,
     };
+  };
+
+  // GATE-10B.1D: the one new public preview entry point the Plan rebuild's
+  // chart-bearing pages call directly - for baselines no existing preview*
+  // naturally produces (most commonly "paying minimums only": strategy is
+  // irrelevant at extraMonthlyPayment: 0, so this is never persisted or
+  // treated as a real strategy choice). Funnels through the exact same
+  // buildPlanPreviewFromDebts -> buildProjectionWithWarnings -> payoffEngine
+  // chain every other preview uses, so a chart built from this can never
+  // silently disagree with a metric tile built from compareStrategies/
+  // previewCustomTarget/etc. for the same inputs.
+  const previewTrend = async (workspaceId, {
+    strategy = "avalanche", extraMonthlyPayment = 0, customTargetOrder = [],
+    oneTimePayments = [], useMinimumPaymentRules = false, detailed = true,
+  } = {}) => {
+    const snapshot = await getWorkspaceSnapshot(workspaceId);
+    const { month, year } = parseAsOf(asOf);
+    return buildPlanPreviewFromDebts({
+      debts: snapshot.debts,
+      planVersionLike: { strategy, extraMonthlyPayment: Number(extraMonthlyPayment) || 0 },
+      startMonth: month,
+      startYear: year,
+      customTargetOrder,
+      detailed,
+      oneTimePayments,
+      useMinimumPaymentRules,
+    });
   };
 
   // Snowball vs Avalanche side-by-side (Part 15/16/18) - both previews run
@@ -1976,7 +2035,7 @@ export const createTrackToZeroV2AsyncAppService = ({
   // (or a $0-extra baseline when there's no active plan yet), so the
   // comparison is apples-to-apples and never independently recalculated by
   // the UI.
-  const compareStrategies = async (workspaceId) => {
+  const compareStrategies = async (workspaceId, { detailed = false } = {}) => {
     const snapshot = await getWorkspaceSnapshot(workspaceId);
     const { month, year } = parseAsOf(asOf);
     const baseVersion = snapshot.activeContext?.version || null;
@@ -1986,6 +2045,7 @@ export const createTrackToZeroV2AsyncAppService = ({
       planVersionLike: { strategy, extraMonthlyPayment },
       startMonth: month,
       startYear: year,
+      detailed,
     });
     return {
       activeStrategy: baseVersion?.strategy || null,
@@ -1997,7 +2057,16 @@ export const createTrackToZeroV2AsyncAppService = ({
   // What If - one-time lump sum (Part 25). A hypothetical payment is never
   // a PaymentEvent - it only ever reduces the SIMULATED starting balance of
   // the chosen debt for this one preview, never the live Debt record.
-  const previewOneTimePayment = async (workspaceId, { amount = 0, targetDebtId = "" } = {}) => {
+  //
+  // GATE-10B.1D: refactored to pass the lump sum as a first-class engine
+  // parameter (oneTimePayments: [{debtId, amount, month: 0}]) instead of
+  // pre-subtracting it from a mutated copy of the debt's currentBalance
+  // before calling the engine. Month-0 application is numerically identical
+  // to the old approach (locked by a regression test) - buildPlanPreview
+  // FromDebts derives the same display-layer balance reduction internally
+  // from oneTimePayments now, so payoffOrder/startingTotalBalance still
+  // reflect the lump sum exactly as before.
+  const previewOneTimePayment = async (workspaceId, { amount = 0, targetDebtId = "", detailed = false } = {}) => {
     const snapshot = await getWorkspaceSnapshot(workspaceId);
     const { month, year } = parseAsOf(asOf);
     const lump = Math.max(0, Number(amount) || 0);
@@ -2006,10 +2075,9 @@ export const createTrackToZeroV2AsyncAppService = ({
     const baseVersion = snapshot.activeContext?.version || null;
     const strategy = baseVersion?.strategy || "avalanche";
     const extraMonthlyPayment = Number(baseVersion?.extraMonthlyPayment || 0);
-    const adjustedDebts = snapshot.debts.map((debt) =>
-      debt.id === target.id ? { ...debt, currentBalance: Math.max(0, Number(debt.currentBalance || 0) - lump) } : debt);
-    const baseline = buildPlanPreviewFromDebts({ debts: snapshot.debts, planVersionLike: { strategy, extraMonthlyPayment }, startMonth: month, startYear: year });
-    const withLumpSum = buildPlanPreviewFromDebts({ debts: adjustedDebts, planVersionLike: { strategy, extraMonthlyPayment }, startMonth: month, startYear: year });
+    const oneTimePayments = [{ debtId: target.id, amount: lump, month: 0 }];
+    const baseline = buildPlanPreviewFromDebts({ debts: snapshot.debts, planVersionLike: { strategy, extraMonthlyPayment }, startMonth: month, startYear: year, detailed });
+    const withLumpSum = buildPlanPreviewFromDebts({ debts: snapshot.debts, planVersionLike: { strategy, extraMonthlyPayment }, startMonth: month, startYear: year, detailed, oneTimePayments });
     return { amount: lump, targetDebtId: target.id, targetDebtName: target.name, baseline, withLumpSum };
   };
 
@@ -2023,15 +2091,15 @@ export const createTrackToZeroV2AsyncAppService = ({
   // preview honestly reflects a NEW hypothetical payment amount, not just a
   // reordering at the existing one - still zero-write, still never
   // presented as Snowball/Avalanche.
-  const previewCustomTarget = async (workspaceId, { targetDebtId, extraMonthlyPayment: extraOverride } = {}) => {
+  const previewCustomTarget = async (workspaceId, { targetDebtId, extraMonthlyPayment: extraOverride, detailed = false } = {}) => {
     const snapshot = await getWorkspaceSnapshot(workspaceId);
     const { month, year } = parseAsOf(asOf);
     const target = snapshot.debts.find((debt) => debt.id === targetDebtId);
     if (!target) return null;
     const baseVersion = snapshot.activeContext?.version || null;
     const extraMonthlyPayment = extraOverride != null ? Number(extraOverride) || 0 : Number(baseVersion?.extraMonthlyPayment || 0);
-    const baseline = buildPlanPreviewFromDebts({ debts: snapshot.debts, planVersionLike: { strategy: baseVersion?.strategy || "avalanche", extraMonthlyPayment }, startMonth: month, startYear: year });
-    const custom = buildPlanPreviewFromDebts({ debts: snapshot.debts, planVersionLike: { strategy: "custom", extraMonthlyPayment }, startMonth: month, startYear: year, customTargetOrder: [target.id] });
+    const baseline = buildPlanPreviewFromDebts({ debts: snapshot.debts, planVersionLike: { strategy: baseVersion?.strategy || "avalanche", extraMonthlyPayment }, startMonth: month, startYear: year, detailed });
+    const custom = buildPlanPreviewFromDebts({ debts: snapshot.debts, planVersionLike: { strategy: "custom", extraMonthlyPayment }, startMonth: month, startYear: year, customTargetOrder: [target.id], detailed });
     return { targetDebtId: target.id, targetDebtName: target.name, baseline, custom };
   };
 
@@ -2048,7 +2116,7 @@ export const createTrackToZeroV2AsyncAppService = ({
   // preview uses - a new SEARCH on top of the trusted engine, not new
   // payoff math (Part 32/46). Never shames an infeasible target: reports
   // the nearest feasible date at the current payment level instead.
-  const previewGoalDate = async (workspaceId, { targetMonth, targetDebtId = "" } = {}) => {
+  const previewGoalDate = async (workspaceId, { targetMonth, targetDebtId = "", detailed = false } = {}) => {
     const snapshot = await getWorkspaceSnapshot(workspaceId);
     const { month, year } = parseAsOf(asOf);
     const baseVersion = snapshot.activeContext?.version || null;
@@ -2092,13 +2160,28 @@ export const createTrackToZeroV2AsyncAppService = ({
       startMonth: month,
       startYear: year,
     }).projectedZeroDate;
+    // GATE-10B.1D: uncapped (no searchCapMonths), full-detail preview at a
+    // given extra - used ONLY for the chart/per-debt-impact table Finish By
+    // adds, over the exact same scopedDebts/strategy the binary search
+    // itself uses, so the chart can never disagree with the metrics above
+    // it. Never reused inside the search (which needs the capped, cheap
+    // reachedZero check, not a full detailed simulation every iteration).
+    const fullPreviewAt = (extra) => buildPlanPreviewFromDebts({
+      debts: scopedDebts,
+      planVersionLike: { strategy, extraMonthlyPayment: extra },
+      startMonth: month,
+      startYear: year,
+      detailed: true,
+    });
 
     const baselineMonths = monthsToZeroAt(currentExtra);
     if (baselineMonths <= monthsAvailable) {
+      const baseline = detailed ? fullPreviewAt(currentExtra) : null;
       return {
         valid: true, feasible: true, targetMonth, targetLabel,
         currentMonthlyExtra: currentExtra, requiredMonthlyExtra: currentExtra, additionalNeeded: 0,
         projectedZeroDate: projectedZeroDateAt(currentExtra),
+        baseline, scenario: baseline,
       };
     }
 
@@ -2129,6 +2212,8 @@ export const createTrackToZeroV2AsyncAppService = ({
       currentMonthlyExtra: currentExtra, requiredMonthlyExtra: hi,
       additionalNeeded: Math.max(0, hi - currentExtra),
       projectedZeroDate: projectedZeroDateAt(hi),
+      baseline: detailed ? fullPreviewAt(currentExtra) : null,
+      scenario: detailed ? fullPreviewAt(hi) : null,
     };
   };
 
@@ -2200,12 +2285,18 @@ export const createTrackToZeroV2AsyncAppService = ({
     const snapshot = await getWorkspaceSnapshot(workspaceId);
     const currentVersionId = snapshot.activeContext?.version?.id || "";
     const isStale = !!scenario.basePlanVersionId && scenario.basePlanVersionId !== currentVersionId;
+    // GATE-10B.1D: detailed:true on every branch - purely additive
+    // (projection/projectedZeroDate/estimatedInterest are all already
+    // present regardless), it's what makes a saved scenario's preview
+    // usable by Saved's "Compare" card (MultiScenarioCompareCard) and "best
+    // option right now" (pickBestByZeroDate), both of which read from the
+    // exact same preview objects the scenario's own headline numbers use.
     let preview = null;
-    if (scenario.type === "recurring_extra") preview = await previewReforecast(workspaceId, { extraMonthlyPayment: Number(scenario.inputs.extraMonthlyPayment || 0) });
-    else if (scenario.type === "one_time") preview = await previewOneTimePayment(workspaceId, scenario.inputs);
-    else if (scenario.type === "custom_target") preview = await previewCustomTarget(workspaceId, scenario.inputs);
-    else if (scenario.type === "goal_date") preview = await previewGoalDate(workspaceId, scenario.inputs);
-    else if (scenario.type === "strategy_comparison") preview = await compareStrategies(workspaceId);
+    if (scenario.type === "recurring_extra") preview = await previewReforecast(workspaceId, { extraMonthlyPayment: Number(scenario.inputs.extraMonthlyPayment || 0) }, { detailed: true });
+    else if (scenario.type === "one_time") preview = await previewOneTimePayment(workspaceId, { ...scenario.inputs, detailed: true });
+    else if (scenario.type === "custom_target") preview = await previewCustomTarget(workspaceId, { ...scenario.inputs, detailed: true });
+    else if (scenario.type === "goal_date") preview = await previewGoalDate(workspaceId, { ...scenario.inputs, detailed: true });
+    else if (scenario.type === "strategy_comparison") preview = await compareStrategies(workspaceId, { detailed: true });
     return { scenario, isStale, preview };
   };
 
@@ -2325,6 +2416,7 @@ export const createTrackToZeroV2AsyncAppService = ({
     previewOneTimePayment,
     previewCustomTarget,
     previewGoalDate,
+    previewTrend,
     listPlanHistory,
     listWorkspaceScenarios,
     saveScenario,

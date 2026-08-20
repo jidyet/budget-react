@@ -222,3 +222,23 @@ Rebuilds Home/Debts/Debt Category Detail to an approved structure and adds ONE g
 | Production untouched | **YES** |
 | Disclosed scope boundaries | Pre-auth screens (Sign in/up/Join/Onboarding) kept their pre-existing light-only styling, not the global theme; Category Detail's account rows kept their card/list presentation rather than a full table rewrite (exact column spec was lost with the original brief text to a mid-session context-compaction event); a pre-existing, not-introduced-this-gate app behavior (`refresh()` briefly nulling `snapshot`, closing any open drawer after a write) was found and documented, not fixed — see Section 15 of the results report |
 | **Gate 10B.1C status** | **COMPLETE** |
+
+## 13. GATE 10B.1D — PLAN EXPERIENCE / PAYOFF INTELLIGENCE UI REFRESH
+
+Rebuilds the Plan tab's 7 destinations (My Plan, Snowball, Avalanche, Compare, What If, Finish By, Saved) from forms-and-lists into a payoff decision engine — real charts, computed suggestions, scenario comparison — backed by full-depth projection-engine extensions (per-debt trajectories, one-time payments as a first-class engine input, dynamic minimum-payment recomputation), per the owner's explicit "everything in one pass / full depth" scoping choice. Full detail: `TRACKTOZERO_GATE10B1D_PLAN_REBUILD_RESULTS.md`.
+
+| Item | Status |
+|---|---|
+| Engine: per-debt trajectories, one-time payments, dynamic minimums | **YES** — all additive/opt-in via new `payoffSimulateDetailed`; `payoffSimulate` kept byte-identical, every pre-existing engine test green and unedited |
+| Two real engine bugs found (live QA) and fixed | **YES** — a `detailed:false` call silently dropped `oneTimePayments`/`useMinimumPaymentRules`; a dynamic minimum below the static one never actually changed simulated payment behavior, only the recorded metric — both have new regression tests |
+| One real UI bug found (live QA) and fixed | **YES** — Compare's "Scenario Compare (+$100/month)" used a flat $100 instead of current-extra+$100, making the "+$100" scenario look worse than baseline |
+| Shared chart primitives | **YES** — `TrendChart`/`AllocationDonut`/`MultiScenarioCompareCard`, hand-rolled dependency-free SVG (no library added), theme-safety regression tests on both primitives |
+| Shared insight helpers (`planInsights.js`) | **YES** — pure, React-free, one canonical implementation per computation (zero-denominator-safe deltas, never-fabricated allocation/recommendation/best-option) |
+| All 7 Plan pages rebuilt | **YES** — My Plan, Snowball/Avalanche (shared `StrategyPageBody`), Compare, What If, Finish By, Saved (all described in the results report Section 8) |
+| New regression tests | **YES** — 79 new, across 7 new files + 5 extended |
+| Full validation | **YES** — 1121/1121 unit, 12/12 legacy rules, 69/69 V2 rules, 16/16 beta-allowlist rules, 0 lint errors, build/perf green (budget raised 470→530 kB, small and justified) |
+| Deployed + version-proven | **YES** — hosting-only, rebuilt post-commit so the embedded commit hash is accurate, verified live via a read-only fetch of the deployed bundle (contains `8fd7abf` literally) |
+| Remote branch reconciled | **YES** — pushed cleanly, `d0414bb..8fd7abf`, no force |
+| Production untouched | **YES** |
+| Disclosed scope boundaries | `AllocationDonut`'s center label can still touch the ring at its widest (pre-existing, partially mitigated cosmetic issue); service-layer memoization deliberately not added (engine is already sub-millisecond per call — no real problem to solve); What If's "vs other strategies" only shown for plan-wide scenarios, not debt-targeted ones; Finish By's feasibility label is a disclosed heuristic, not financial advice; Saved's "best option"/"Compare" scoped to scenarios already previewed this session; the seed workspace's Version 1 has no persisted `projectedZeroDate` (seed-data gap, not a code bug) — see Section 13 of the results report |
+| **Gate 10B.1D status** | **COMPLETE** |

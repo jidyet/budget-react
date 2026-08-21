@@ -1,19 +1,29 @@
 import React from "react";
 import { ttzPalette, TYPE_SCALE } from "../theme.js";
 
-// Reads workspace.type from the same authoritative snapshot.workspace every
-// other screen (Home, Debts, Plan, Settings) reads from - never a
-// hardcoded/guessed label (UX-0 Part 2: header/Home/Debts/Plan/Settings must
-// never disagree about workspace type). No workspace-name field exists yet
-// in the domain model, so this shows "Personal workspace" / "Household
-// workspace" rather than inventing a display name.
 export default function WorkspaceIdentity({ workspace }) {
   const palette = ttzPalette;
-  const label = workspace?.type === "household" ? "Household workspace" : "Personal workspace";
+  const fallbackLabel = workspace?.type === "household" ? "Household workspace" : "Personal workspace";
+  const label = workspace?.name || fallbackLabel;
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.2 }}>
-      <span style={{ ...TYPE_SCALE.caption, color: palette.tx2 }}>Workspace</span>
-      <span style={{ ...TYPE_SCALE.cardTitle, color: palette.tx }}>{label}</span>
+    <div
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "10px 16px",
+        borderRadius: 14,
+        border: `1px solid ${palette.border2 || palette.border}`,
+        background: palette.bg === "#08111d" ? "rgba(13,23,38,0.92)" : "rgba(255,255,255,0.9)",
+        boxShadow: "var(--ttz-shadow-sm)",
+      }}
+    >
+      <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.2 }}>
+        <span style={{ ...TYPE_SCALE.caption, color: palette.tx2 }}>Workspace</span>
+        <span style={{ ...TYPE_SCALE.cardTitle, color: palette.tx }}>{label}</span>
+      </div>
+      <span aria-hidden="true" style={{ color: palette.tx2, fontSize: 12 }}>v</span>
     </div>
   );
 }

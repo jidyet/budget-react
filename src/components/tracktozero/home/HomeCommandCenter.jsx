@@ -11,7 +11,7 @@ import UpcomingPaymentsCard from "./UpcomingPaymentsCard.jsx";
 // Below this many observed points, a full-size trend chart would just be a
 // near-empty frame with one or two dots - a compact callout is more honest
 // about "there isn't a trend yet" than dressing up sparse data as a chart.
-const MIN_TRAJECTORY_POINTS_FOR_CHART = 3;
+const MIN_TRAJECTORY_POINTS_FOR_CHART = 6;
 
 const GAP = "var(--ttz-space-5, 24px)";
 const GAP_SM = "var(--ttz-space-4, 16px)";
@@ -132,7 +132,6 @@ function MetricBlock({ label, value, supporting, emphasis = false }) {
     </div>
   );
 }
-
 function EmptyStateCard({ eyebrow, title, body, primaryCta, secondaryCta }) {
   return (
     <Card variant="elevated" style={{ padding: 32, textAlign: "center" }}>
@@ -146,7 +145,6 @@ function EmptyStateCard({ eyebrow, title, body, primaryCta, secondaryCta }) {
     </Card>
   );
 }
-
 // UX-8.1: the "Starting / Current / Goal" trio used to share one cramped
 // 3-column row with "Knocked out"/"Remaining" crammed below it - numbers
 // competed for space and the whole block read as one dense cluster. Each
@@ -238,11 +236,21 @@ function DebtSnapshotCard({ homeContext, onGoToDebts }) {
   if (!debtSnapshot) return null;
 
   return (
-    <Card variant="default" className="ttz-card-hover" style={{ padding: 24, borderLeft: `3px solid ${ttzPalette.ac}` }}>
+    <Card
+      variant="default"
+      className="ttz-card-hover"
+      style={{
+        padding: 24,
+        borderLeft: `3px solid ${ttzPalette.ac}`,
+        background: ttzPalette.bg === "#08111d"
+          ? "linear-gradient(180deg, rgba(19,34,53,0.94), rgba(12,22,36,0.94))"
+          : "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(245,250,255,0.98))",
+      }}
+    >
       <div style={{ display: "grid", gap: 12 }}>
         <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.ac }}>Your debts</div>
         <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>{debtSnapshot.activeLabel}</div>
-        <div style={{ ...moneySmStyle, fontSize: 20, color: ttzPalette.tx }}>{money(debtSnapshot.remainingDebt)} <span style={{ ...TYPE_SCALE.supporting, color: ttzPalette.tx2, fontWeight: 500 }}>remaining</span></div>
+        <div style={{ ...moneySmStyle, fontSize: 22, color: ttzPalette.tx }}>{money(debtSnapshot.remainingDebt)} <span style={{ ...TYPE_SCALE.supporting, color: ttzPalette.tx2, fontWeight: 500 }}>remaining</span></div>
         <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>
           {debtSnapshot.highestKnownApr != null
             ? `Highest known APR: ${formatPercent(debtSnapshot.highestKnownApr)}`
@@ -254,13 +262,75 @@ function DebtSnapshotCard({ homeContext, onGoToDebts }) {
   );
 }
 
+function CompactReviewCard({ homeContext, onGoToReview }) {
+  const blocking = homeContext.blockingReviewCount > 0;
+  const count = homeContext.openReviewCount || homeContext.staleBatchCount || 0;
+  const title = homeContext.staleBatchCount > 0
+    ? `${homeContext.staleBatchCount} import${homeContext.staleBatchCount === 1 ? "" : "s"} need a refresh`
+    : homeContext.openReviewCount > 0
+      ? `${homeContext.openReviewCount} import decision${homeContext.openReviewCount === 1 ? "" : "s"} still need review`
+      : "No import decisions are waiting right now.";
+  const supporting = homeContext.staleBatchCount > 0
+    ? "Older classifier output is excluded until you reopen those imports."
+    : homeContext.openReviewCount > 0
+      ? "Confirm, edit, or reject imported items to keep your plan accurate."
+      : "New imported items will show up here when something needs a review pass.";
+
+  return (
+    <Card
+      variant="default"
+      className="ttz-card-hover"
+      style={{
+        padding: 24,
+        borderLeft: `3px solid ${blocking ? ttzPalette.wa : ttzPalette.info}`,
+        background: ttzPalette.bg === "#08111d"
+          ? "linear-gradient(180deg, rgba(19,34,53,0.94), rgba(12,22,36,0.94))"
+          : "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(245,250,255,0.98))",
+      }}
+    >
+      <div style={{ display: "grid", gap: 12 }}>
+        <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.ac }}>Import review</div>
+        <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>{count}</div>
+        <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx }}>{title}</div>
+        <div style={{ ...TYPE_SCALE.supporting, color: ttzPalette.tx2 }}>{supporting}</div>
+        <Button variant="secondary" onClick={onGoToReview}>Open review</Button>
+      </div>
+    </Card>
+  );
+}
+
+function EmptyPlanIllustration() {
+  return (
+    <svg width="148" height="110" viewBox="0 0 148 110" fill="none" aria-hidden="true">
+      <path d="M20 81L42 26L71 42L103 20L127 76L96 90L63 72L34 90L20 81Z" stroke={ttzPalette.ac} strokeWidth="2.5" strokeLinejoin="round" opacity="0.85" />
+      <path d="M41 28L54 84" stroke={ttzPalette.ac} strokeWidth="1.8" opacity="0.45" />
+      <path d="M71 42L63 73" stroke={ttzPalette.ac} strokeWidth="1.8" opacity="0.45" />
+      <path d="M103 22L96 89" stroke={ttzPalette.ac} strokeWidth="1.8" opacity="0.45" />
+      <path d="M57 58C65 52 75 52 84 59" stroke={ttzPalette.ac} strokeWidth="2.2" strokeLinecap="round" strokeDasharray="5 5" opacity="0.8" />
+      <circle cx="52" cy="51" r="3" fill={ttzPalette.ac} />
+      <circle cx="88" cy="61" r="3" fill={ttzPalette.ac} />
+      <path d="M110 39L119 31" stroke={ttzPalette.ac} strokeWidth="2.2" strokeLinecap="round" />
+      <path d="M119 39L110 31" stroke={ttzPalette.ac} strokeWidth="2.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function ActivePlanCard({ homeContext, onViewMyPlan, onCompareStrategies, onTryWhatIf }) {
   const { activeVersion, currentTarget, planHealth, zeroDay, warnings } = homeContext;
   if (!activeVersion) return null;
   const primaryWarning = (warnings || [])[0];
 
   return (
-    <Card variant="default" style={{ padding: 24 }}>
+    <Card
+      variant="default"
+      style={{
+        padding: 24,
+        background: ttzPalette.bg === "#08111d"
+          ? "linear-gradient(180deg, rgba(15,27,42,0.96), rgba(11,21,34,0.96))"
+          : "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(246,250,255,0.98))",
+        border: `1px solid ${ttzPalette.border2}`,
+      }}
+    >
       <div style={{ display: "grid", gap: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
           <div style={{ display: "grid", gap: 6 }}>
@@ -276,7 +346,7 @@ function ActivePlanCard({ homeContext, onViewMyPlan, onCompareStrategies, onTryW
           <MetricBlock label="Extra payment" value={money(activeVersion.extraMonthlyPayment || 0)} />
         </div>
 
-        <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>{planHealth?.message || "Your active plan is ready."}</div>
+        <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>{planHealth?.message || "Your plan is set. Keep the momentum going."}</div>
 
         {primaryWarning ? (
           <div style={{ padding: 14, borderRadius: RADIUS, background: toneColors(ttzPalette).warning.bg, color: ttzPalette.tx }}>
@@ -297,14 +367,71 @@ function ActivePlanCard({ homeContext, onViewMyPlan, onCompareStrategies, onTryW
 
 function NotEnoughHistoryCard({ observed }) {
   return (
-    <Card variant="default" style={{ padding: 24 }}>
-      <div style={{ display: "grid", gap: 10 }}>
+    <Card variant="default" style={{ padding: 24, overflow: "hidden" }}>
+      <div style={{ display: "grid", gap: 20 }}>
         <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Your debt trend</div>
-        <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>Not enough history yet</div>
-        <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>
-          {observed.length
-            ? `Your starting confirmed balance is ${money(observed[0]?.balance || 0)}. A couple more confirmed balance updates will unlock your trend chart.`
-            : "Add a confirmed balance update to start building your debt trend."}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(220px, 1.15fr) minmax(260px, 1.5fr) minmax(88px, 0.45fr)",
+            gap: 20,
+            alignItems: "center",
+          }}
+        >
+          <div style={{ display: "grid", gap: 10 }}>
+            <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>Not enough history yet</div>
+            <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>
+              {observed.length
+                ? `We need more confirmed balance updates over time to unlock your debt trend chart. Your starting balance is ${money(observed[0]?.balance || 0)}.`
+                : "We need more confirmed balance updates over time to unlock your debt trend chart. Keep confirming balances to see your progress."}
+            </div>
+          </div>
+
+          <div style={{ minWidth: 0 }}>
+            <svg viewBox="0 0 560 150" width="100%" height="150" aria-hidden="true">
+              <path d="M20 20H540" stroke={ttzPalette.border} strokeDasharray="4 6" opacity="0.4" />
+              <path d="M20 60H540" stroke={ttzPalette.border} strokeDasharray="4 6" opacity="0.32" />
+              <path d="M20 100H540" stroke={ttzPalette.border} strokeDasharray="4 6" opacity="0.24" />
+              <path d="M20 130H540" stroke={ttzPalette.border} opacity="0.6" />
+              <path d="M28 34 C110 36, 132 40, 188 49 S300 66, 356 82 S454 95, 530 108" stroke={ttzPalette.info} strokeWidth="4" strokeLinecap="round" fill="none" opacity="0.42" />
+              <circle cx="28" cy="34" r="4.5" fill={ttzPalette.info} opacity="0.75" />
+              <circle cx="92" cy="36" r="4.5" fill={ttzPalette.info} opacity="0.75" />
+              <circle cx="156" cy="43" r="4.5" fill={ttzPalette.info} opacity="0.75" />
+              <circle cx="220" cy="52" r="4.5" fill={ttzPalette.info} opacity="0.75" />
+              <circle cx="284" cy="63" r="4.5" fill={ttzPalette.info} opacity="0.75" />
+              <circle cx="348" cy="77" r="4.5" fill={ttzPalette.info} opacity="0.75" />
+              <circle cx="412" cy="89" r="4.5" fill={ttzPalette.info} opacity="0.75" />
+              <circle cx="476" cy="99" r="4.5" fill={ttzPalette.info} opacity="0.75" />
+              <circle cx="530" cy="108" r="4.5" fill={ttzPalette.info} opacity="0.75" />
+              <text x="24" y="147" fill={ttzPalette.tx2} fontSize="11">Mar '24</text>
+              <text x="88" y="147" fill={ttzPalette.tx2} fontSize="11">May '24</text>
+              <text x="156" y="147" fill={ttzPalette.tx2} fontSize="11">Jul '24</text>
+              <text x="224" y="147" fill={ttzPalette.tx2} fontSize="11">Sep '24</text>
+              <text x="292" y="147" fill={ttzPalette.tx2} fontSize="11">Nov '24</text>
+              <text x="360" y="147" fill={ttzPalette.tx2} fontSize="11">Jan '25</text>
+              <text x="428" y="147" fill={ttzPalette.tx2} fontSize="11">Mar '25</text>
+              <text x="496" y="147" fill={ttzPalette.tx2} fontSize="11">May '25</text>
+            </svg>
+          </div>
+
+          <div style={{ display: "grid", justifyItems: "center" }}>
+            <div
+              style={{
+                width: 72,
+                height: 72,
+                borderRadius: 999,
+                border: `1px dashed ${ttzPalette.border2 || ttzPalette.border}`,
+                display: "grid",
+                placeItems: "center",
+                background: ttzPalette.surf2,
+              }}
+            >
+              <svg width="34" height="34" viewBox="0 0 34 34" fill="none" aria-hidden="true">
+                <circle cx="17" cy="17" r="14" stroke={ttzPalette.tx2} strokeWidth="1.8" opacity="0.3" />
+                <path d="M9 22L14 17L18 20L25 12" stroke={ttzPalette.info} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+          </div>
         </div>
       </div>
     </Card>
@@ -320,7 +447,7 @@ function TrajectoryChart({ homeContext }) {
   // history (e.g. right after activating a plan) - the gate only replaces
   // the chart with a compact callout when there's neither a meaningful
   // observed trend NOR a projection to show.
-  if (!allPoints.length || (!hasProjection && observed.length < MIN_TRAJECTORY_POINTS_FOR_CHART)) {
+  if (!allPoints.length || observed.length < MIN_TRAJECTORY_POINTS_FOR_CHART) {
     return <NotEnoughHistoryCard observed={observed} />;
   }
   const hasObservedTrend = observed.length > 1;
@@ -348,7 +475,7 @@ function TrajectoryChart({ homeContext }) {
       : `Your starting confirmed debt is ${money(observed[0]?.balance || 0)}. Add another confirmed balance update to see your debt trend.`);
 
   return (
-    <Card variant="default" style={{ padding: 24 }}>
+    <Card variant="default" style={{ padding: 24, overflow: "hidden" }}>
       <div style={{ display: "grid", gap: 18 }}>
         <div>
           <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>{hasProjection ? "Your path to $0" : "Your debt trend"}</div>
@@ -363,8 +490,21 @@ function TrajectoryChart({ homeContext }) {
 
         <div role="img" aria-label={summary}>
           <svg width="100%" viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
+            <defs>
+              <linearGradient id="ttzHomeTrendFill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={ttzPalette.acD} />
+                <stop offset="100%" stopColor="transparent" />
+              </linearGradient>
+            </defs>
             <line x1={pad} y1={height - pad} x2={width - pad} y2={height - pad} stroke={ttzPalette.border2} strokeWidth="1" />
             <line x1={pad} y1={pad} x2={pad} y2={height - pad} stroke={ttzPalette.border2} strokeWidth="1" />
+            {observed.length > 1 ? (
+              <path
+                d={`${drawPath(observed)} L ${scaleX(observed.at(-1))} ${height - pad} L ${scaleX(observed[0])} ${height - pad} Z`}
+                fill="url(#ttzHomeTrendFill)"
+                opacity="0.8"
+              />
+            ) : null}
 
             {observed.length > 1 ? (
               <path d={drawPath(observed)} fill="none" stroke={ttzPalette.ac} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
@@ -417,7 +557,17 @@ function HouseholdBreakdownCard({ homeContext, onGoToDebts }) {
   const allUnassignedOnly = items.length === 1 && items[0].type === "unassigned";
 
   return (
-    <Card variant="default" className="ttz-card-hover" style={{ padding: 24, borderLeft: `3px solid ${ttzPalette.in}` }}>
+    <Card
+      variant="default"
+      className="ttz-card-hover"
+      style={{
+        padding: 24,
+        borderLeft: `3px solid ${ttzPalette.in}`,
+        background: ttzPalette.bg === "#08111d"
+          ? "linear-gradient(180deg, rgba(19,34,53,0.94), rgba(12,22,36,0.94))"
+          : "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(245,250,255,0.98))",
+      }}
+    >
       <div style={{ display: "grid", gap: 16 }}>
         <div>
           <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Debt by owner</div>
@@ -459,11 +609,62 @@ function HouseholdBreakdownCard({ homeContext, onGoToDebts }) {
   );
 }
 
+function OwnerBreakdownCard({ homeContext, onGoToDebts }) {
+  if (homeContext.isHousehold) {
+    return <HouseholdBreakdownCard homeContext={homeContext} onGoToDebts={onGoToDebts} />;
+  }
+
+  return (
+    <Card
+      variant="default"
+      className="ttz-card-hover"
+      style={{
+        padding: 24,
+        borderLeft: `3px solid ${ttzPalette.in}`,
+        background: ttzPalette.bg === "#08111d"
+          ? "linear-gradient(180deg, rgba(19,34,53,0.94), rgba(12,22,36,0.94))"
+          : "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(245,250,255,0.98))",
+      }}
+    >
+      <div style={{ display: "grid", gap: 16 }}>
+        <div>
+          <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Debt by owner</div>
+          <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 6 }}>You&apos;re the only owner in this workspace right now, so your full debt stack lives under one profile.</div>
+        </div>
+        <div style={{ display: "grid", gap: 6 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+            <span style={{ ...TYPE_SCALE.body, color: ttzPalette.tx }}>You</span>
+            <span style={{ ...moneySmStyle, fontSize: 15, color: ttzPalette.tx }}>{money(homeContext.totalDebt)}</span>
+          </div>
+          <div style={{ height: 10, borderRadius: 999, background: ttzPalette.surf2, overflow: "hidden" }}>
+            <div style={{ height: "100%", width: "100%", background: ttzPalette.ac, borderRadius: 999 }} />
+          </div>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+          <span style={{ ...TYPE_SCALE.supporting, color: ttzPalette.tx2 }}>Total</span>
+          <span style={{ ...moneySmStyle, fontSize: 15, color: ttzPalette.tx }}>{money(homeContext.totalDebt)}</span>
+        </div>
+        <Button variant="secondary" onClick={onGoToDebts}>View debts</Button>
+      </div>
+    </Card>
+  );
+}
+
 function ReviewSummaryCard({ homeContext, onGoToReview }) {
   if (!homeContext.openReviewCount && !homeContext.staleBatchCount) return null;
   if (homeContext.staleBatchCount > 0 && !homeContext.openReviewCount) {
     return (
-      <Card variant="default" className="ttz-card-hover" style={{ padding: 20, borderLeft: `4px solid ${toneColors(ttzPalette).warning.fg}` }}>
+      <Card
+        variant="default"
+        className="ttz-card-hover"
+        style={{
+          padding: 20,
+          borderLeft: `4px solid ${toneColors(ttzPalette).warning.fg}`,
+          background: ttzPalette.bg === "#08111d"
+            ? "linear-gradient(180deg, rgba(40,30,14,0.92), rgba(24,19,10,0.92))"
+            : toneColors(ttzPalette).warning.bg,
+        }}
+      >
         <div style={{ display: "grid", gap: 10 }}>
           <div style={{ ...TYPE_SCALE.overline, color: toneColors(ttzPalette).warning.fg }}>Import review</div>
           <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>
@@ -480,7 +681,17 @@ function ReviewSummaryCard({ homeContext, onGoToReview }) {
   const tone = homeContext.blockingReviewCount > 0 ? "warning" : "info";
   const colors = toneColors(ttzPalette)[tone];
   return (
-    <Card variant="default" className="ttz-card-hover" style={{ padding: 20, borderLeft: `4px solid ${colors.fg}`, background: tone === "warning" ? colors.bg : ttzPalette.surf }}>
+    <Card
+      variant="default"
+      className="ttz-card-hover"
+      style={{
+        padding: 20,
+        borderLeft: `4px solid ${colors.fg}`,
+        background: tone === "warning"
+          ? (ttzPalette.bg === "#08111d" ? "linear-gradient(180deg, rgba(40,30,14,0.92), rgba(24,19,10,0.92))" : colors.bg)
+          : (ttzPalette.bg === "#08111d" ? "linear-gradient(180deg, rgba(13,28,43,0.96), rgba(10,20,33,0.96))" : ttzPalette.surf),
+      }}
+    >
       <div style={{ display: "grid", gap: 10 }}>
         <div style={{ ...TYPE_SCALE.overline, color: colors.fg }}>Import review</div>
         <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>
@@ -510,63 +721,63 @@ function ProjectionFootnote() {
 function NoActivePlanState({ homeContext, onCompareStrategies, onAddDebt, onGoToReview, onGoToDebts, onRecordPayment, paymentActions }) {
   return (
     <div style={{ display: "grid", gap: GAP }}>
-      <div style={gridColumns(320)}>
-        <Card variant="elevated" style={{ padding: 28 }}>
-          <div style={{ display: "grid", gap: 14 }}>
-            <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.ac }}>Your next move</div>
-            <div style={{ ...TYPE_SCALE.pageTitle, color: ttzPalette.tx, fontSize: 28 }}>
-              You have {money(homeContext.totalDebt)} in confirmed debt.
+      <div style={row1Style}>
+        <div style={{ flex: "1.65 1 480px", minWidth: 0 }}>
+          <Card variant="elevated" style={{ padding: 30 }}>
+            <div style={{ display: "grid", gap: 18 }}>
+              <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.ac }}>Your next move</div>
+              <div style={{ ...responsiveHeroValueStyle, color: ttzPalette.tx }}>
+                You have {money(homeContext.totalDebt)} in confirmed debt.
+              </div>
+              <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, maxWidth: 640 }}>
+                Choose a payoff strategy and we&apos;ll show you which debt to target first, your projected debt-free date, and the full payoff order.
+              </div>
+              <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gap: 8 }}>
+                <li style={{ display: "flex", gap: 10, alignItems: "center", color: ttzPalette.tx2 }}><span style={{ color: ttzPalette.ac, fontWeight: 900 }}>{"\\u2713"}</span><span>Compare Snowball vs Avalanche side by side</span></li>
+                <li style={{ display: "flex", gap: 10, alignItems: "center", color: ttzPalette.tx2 }}><span style={{ color: ttzPalette.ac, fontWeight: 900 }}>{"\\u2713"}</span><span>See projected payoff dates and total interest saved</span></li>
+                <li style={{ display: "flex", gap: 10, alignItems: "center", color: ttzPalette.tx2 }}><span style={{ color: ttzPalette.ac, fontWeight: 900 }}>{"\\u2713"}</span><span>Get a clear, step-by-step payoff order</span></li>
+              </ul>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <Button variant="primary" onClick={onCompareStrategies}>Compare Snowball vs Avalanche</Button>
+                <Button variant="secondary" onClick={onAddDebt}>Add debt</Button>
+              </div>
             </div>
-            <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>
-              Choose a payoff strategy to see which debt to target first, your projected $0 date, and the payoff order TrackToZero would use.
-            </div>
-            <ul style={{ margin: 0, paddingLeft: 18, color: ttzPalette.tx2, display: "grid", gap: 6 }}>
-              <li>Which debt to target first</li>
-              <li>Your projected debt-free date</li>
-              <li>Your payoff order across every included debt</li>
-            </ul>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <Button variant="primary" onClick={onCompareStrategies}>Compare Snowball vs Avalanche</Button>
-              <Button variant="secondary" onClick={onAddDebt}>Add debt</Button>
-            </div>
-          </div>
-        </Card>
+          </Card>
+        </div>
 
-        <Card variant="default" style={{ padding: 24 }}>
-          <div style={{ display: "grid", gap: 14 }}>
-            <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>What Home will unlock</div>
-            <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>No active payoff plan yet.</div>
-            <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>
-              Once you choose a plan, Home will show your monthly target, what you&apos;ve recorded, and your next step without guessing.
+        <div style={{ flex: "1 1 320px", minWidth: 0 }}>
+          <Card variant="default" style={{ padding: 24, minHeight: "100%" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 16, alignItems: "center", minHeight: "100%" }}>
+              <div style={{ display: "grid", gap: 14 }}>
+                <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Active plan</div>
+                <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>No active payoff plan yet.</div>
+                <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>
+                  Once you choose a plan, we&apos;ll show your monthly target and next step right here on Home.
+                </div>
+                <div>
+                  <Button variant="secondary" onClick={onCompareStrategies}>Choose a plan</Button>
+                </div>
+              </div>
+              <div style={{ justifySelf: "end", opacity: 0.95 }}>
+                <EmptyPlanIllustration />
+              </div>
             </div>
-          </div>
-        </Card>
+          </Card>
+        </div>
       </div>
 
-      {/* GATE-10B.1C fix: UpcomingPaymentsCard was previously INSIDE this
-          same summary-card grid (reproduced live: on a wide viewport with
-          both Import review and Household breakdown present, auto-fit
-          packed 5 cards - including the payments list - into one row). It's
-          now its own full-width row, same as every other Home state. The
-          inline hand-rolled "Import review" card is also replaced with the
-          shared ReviewSummaryCard (the same consolidation the main
-          active-plan state already got), so there is exactly one Import
-          Review presentation across all of Home's states, not two - and it
-          renders as its own full-width banner (not squeezed into the
-          matched-size row below) since it's an actionable item, not a peer
-          informational card. */}
-      <ReviewSummaryCard homeContext={homeContext} onGoToReview={onGoToReview} />
-
-      <div style={gridColumnsEqual(280)}>
+      <div style={gridColumnsEqual(260)}>
         <ProgressRing
           progress={homeContext.progress || { confirmed: false, openingBalance: 0, latestBalance: 0, eliminated: 0, percent: 0 }}
           title="Confirmed progress"
-          subtitle={homeContext.progress?.confirmed ? "Based on your confirmed balance history so far" : "Your starting point is set. Update your balance after your next statement and we'll show how much you've knocked out."}
+          subtitle={homeContext.progress?.confirmed ? "Confirmed debt eliminated vs confirmed debt remaining" : "Your starting point is set. Update your balance after your next statement and we&apos;ll show how much you&apos;ve knocked out."}
         />
 
         <DebtSnapshotCard homeContext={homeContext} onGoToDebts={onGoToDebts || onAddDebt} />
 
-        {homeContext.isHousehold ? <HouseholdBreakdownCard homeContext={homeContext} onGoToDebts={onGoToDebts || onAddDebt} /> : null}
+        <CompactReviewCard homeContext={homeContext} onGoToReview={onGoToReview} />
+
+        <OwnerBreakdownCard homeContext={homeContext} onGoToDebts={onGoToDebts || onAddDebt} />
       </div>
 
       <UpcomingPaymentsCard homeContext={homeContext} onGoToDebts={onGoToDebts || onAddDebt} onRecordPayment={onRecordPayment} {...paymentActions} />
@@ -575,7 +786,6 @@ function NoActivePlanState({ homeContext, onCompareStrategies, onAddDebt, onGoTo
     </div>
   );
 }
-
 function BlockingReviewState({ homeContext, onGoToReview, onGoToDebts, onRecordPayment, paymentActions }) {
   return (
     <div style={{ display: "grid", gap: GAP }}>
@@ -751,10 +961,8 @@ export default function HomeCommandCenter({
           entirely when nothing needs review. */}
       <ReviewSummaryCard homeContext={homeContext} onGoToReview={onGoToReview} />
 
-      {/* Row 2: confirmed progress, debt snapshot, and household breakdown
-          (household workspaces only) - a matched-size set (gridColumnsEqual,
-          not gridColumns) since these are peer summary cards, not a list of
-          varying-length content. */}
+      {/* Row 2: keep the target 4-card rhythm even in personal workspaces so
+          Home does not collapse into a sparse 2-card row. */}
       <div style={gridColumnsEqual(260)}>
         <ProgressRing
           progress={homeContext.progress}
@@ -762,7 +970,8 @@ export default function HomeCommandCenter({
           subtitle={homeContext.progress?.confirmed ? "Confirmed debt eliminated vs confirmed debt remaining" : "Your starting point is set. Progress updates after a new confirmed balance snapshot."}
         />
         <DebtSnapshotCard homeContext={homeContext} onGoToDebts={goToDebts} />
-        {homeContext.isHousehold ? <HouseholdBreakdownCard homeContext={homeContext} onGoToDebts={goToDebts} /> : null}
+        <CompactReviewCard homeContext={homeContext} onGoToReview={onGoToReview} />
+        <OwnerBreakdownCard homeContext={homeContext} onGoToDebts={goToDebts} />
       </div>
 
       {/* Row 3: upcoming payments, full width, own row. */}
@@ -775,3 +984,4 @@ export default function HomeCommandCenter({
     </main>
   );
 }
+

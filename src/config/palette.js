@@ -17,10 +17,12 @@ export function buildPalette(theme) {
     // Borders
     border:  D ? "#21364f" : "#d7e7f6",
     border2: D ? "#2f5f8b" : "#a9cae8",
-    // Text
-    tx:      D ? "#eef6ff" : "#10263d",
-    tx2:     D ? "#bfd4ea" : "#34556f",
-    muted:   D ? "#85a7c8" : "#5d7b95",
+    // Text — keep all non-semantic copy monochrome. The alpha-only
+    // secondary/muted variants retain hierarchy without introducing a
+    // competing blue-gray text system across pages, tabs, and controls.
+    tx:      D ? "#ffffff" : "#000000",
+    tx2:     D ? "rgba(255,255,255,.82)" : "rgba(0,0,0,.78)",
+    muted:   D ? "rgba(255,255,255,.64)" : "rgba(0,0,0,.62)",
     // Accent - blue-led app theme
     ac:      D ? "#3ab4f2" : BRAND_COLORS.blue,
     acD:     D ? "rgba(58,180,242,.24)" : "rgba(24,167,225,.20)",

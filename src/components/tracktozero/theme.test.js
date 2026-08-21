@@ -104,7 +104,7 @@ describe("applyTheme", () => {
     applyTheme("dark");
     expect(ttzPalette.bg).toBe("#000000");
     expect(ttzPalette.isDark).toBe(true);
-    expect(ttzPalette.tx).toBe("#eef6ff");
+    expect(ttzPalette.tx).toBe("#ffffff");
     // The light-tuned contrast overrides must never stomp dark's own go/wa/info/ac/da.
     expect(ttzPalette.go).toBe("#4ade80");
     expect(ttzPalette.info).toBe("#6bbdff");
@@ -115,6 +115,18 @@ describe("applyTheme", () => {
     const vars = ttzCssVars(ttzPalette);
     expect(vars["--ttz-shell-bg"]).toBe("#000000");
     expect(ttzPalette.surf).not.toBe(ttzPalette.bg);
+  });
+
+  it("uses a monochrome text scale in both themes while preserving semantic colors for status and charts", () => {
+    applyTheme("dark");
+    expect(ttzPalette.tx).toBe("#ffffff");
+    expect(ttzPalette.tx2).toMatch(/^rgba\(255,255,255,/);
+    expect(ttzPalette.muted).toMatch(/^rgba\(255,255,255,/);
+
+    applyTheme("light");
+    expect(ttzPalette.tx).toBe("#000000");
+    expect(ttzPalette.tx2).toMatch(/^rgba\(0,0,0,/);
+    expect(ttzPalette.muted).toMatch(/^rgba\(0,0,0,/);
   });
 
   it("THEME-03: switching back to light restores the exact original light+contrast-override values", () => {

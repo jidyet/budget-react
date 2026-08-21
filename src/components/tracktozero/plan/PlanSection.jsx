@@ -108,7 +108,9 @@ function pillTabButtonStyle(active) {
     minHeight: 32,
     border: `1px solid ${active ? ttzPalette.wa : "transparent"}`,
     background: active ? (ttzPalette.waD || ttzPalette.surf) : "transparent",
-    color: active ? ttzPalette.wa : ttzPalette.tx2,
+    // The orange treatment marks the active tab; tab labels remain
+    // monochrome so plan navigation matches the rest of the app.
+    color: active ? ttzPalette.tx : ttzPalette.tx2,
     padding: "0 12px",
     borderRadius: 999,
     cursor: "pointer",

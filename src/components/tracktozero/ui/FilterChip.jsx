@@ -12,7 +12,9 @@ export default function FilterChip({ active = false, children, style, ...rest })
         borderRadius: 999,
         border: `1px solid ${active ? palette.ac : palette.border2}`,
         background: active ? palette.acS : palette.surf,
-        color: active ? palette.ac : palette.tx2,
+        // Blue tint/border already communicates selection; do not turn the
+        // control's text into a second accent system.
+        color: active ? palette.tx : palette.tx2,
         minHeight: 32,
         padding: "0 12px",
         fontWeight: 700,

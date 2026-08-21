@@ -35,7 +35,9 @@ export default function Tabs({ items = [], activeKey, onChange, label = "Tabs" }
               borderRadius: 12,
               border: `1px solid ${active ? palette.wa : "transparent"}`,
               background: active ? (palette.waD || palette.surf) : "transparent",
-              color: active ? palette.wa : palette.tx2,
+              // Selection is communicated by the orange outline/tint. Keep
+              // the label itself neutral in both themes.
+              color: active ? palette.tx : palette.tx2,
               fontWeight: 800,
               cursor: "pointer",
               boxShadow: active ? "var(--ttz-shadow-sm)" : "none",

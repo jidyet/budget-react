@@ -55,7 +55,9 @@ export function MobileBottomNavContent({ activeTab, onSelectTab, badges = {}, on
           minHeight: 48,
           padding: "6px 4px",
           cursor: "pointer",
-          color: active ? palette.info : palette.tx2,
+          // The active state is visible through weight/aria state. Keep the
+          // mobile labels monochrome like desktop navigation.
+          color: active ? palette.tx : palette.tx2,
         }}
       >
         <span style={{ position: "relative", display: "inline-flex" }}>

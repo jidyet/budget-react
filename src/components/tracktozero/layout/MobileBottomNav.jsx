@@ -1,7 +1,7 @@
 import React from "react";
 import { Activity, Home, Plus, Target, Wallet } from "lucide-react";
 import { ttzPalette, TYPE_SCALE } from "../theme.js";
-import { useIsMobile } from "../useViewport.js";
+import { useHasMobileBottomNav } from "../useViewport.js";
 
 // UX-8: dedicated mobile navigation. Deliberately 4 destinations (not
 // PrimaryNav's full 6) + one center action, matching the task's explicit
@@ -139,7 +139,7 @@ export function MobileBottomNavContent({ activeTab, onSelectTab, badges = {}, on
 }
 
 export default function MobileBottomNav(props) {
-  const isMobile = useIsMobile();
-  if (!isMobile) return null;
+  const hasMobileBottomNav = useHasMobileBottomNav();
+  if (!hasMobileBottomNav) return null;
   return <MobileBottomNavContent {...props} />;
 }

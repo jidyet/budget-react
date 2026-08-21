@@ -6,7 +6,7 @@ import EnvironmentBadge from "./EnvironmentBadge.jsx";
 import UserMenu from "./UserMenu.jsx";
 import ThemeToggle from "./ThemeToggle.jsx";
 import { ttzPalette, ttzGutter } from "../theme.js";
-import { useIsMobile, useIsTablet } from "../useViewport.js";
+import { useHasMobileBottomNav, useIsMobile, useIsShortLandscape, useIsTablet } from "../useViewport.js";
 
 // The new app shell header (UX-1 Part 22-23) - replaces the old WorkspaceBar,
 // which put "TrackToZero 2.0 - Local beta workspace (emulator)", a raw
@@ -22,7 +22,13 @@ export default function TopBar({ workspace, repositoryMode, snapshotMode, active
   // breakpoint (not just mobile) keeps the brand wordmark from being
   // squeezed into wrapping across multiple lines (REVIEW-1B QA finding).
   const isMobile = useIsMobile();
-  const isCompact = useIsTablet();
+  const hasMobileBottomNav = useHasMobileBottomNav();
+  // Keep every responsive hook unconditional. Using `useIsTablet() ||
+  // useIsShortLandscape()` short-circuits one hook at some viewport sizes,
+  // which breaks React's hook order as a phone rotates.
+  const isTablet = useIsTablet();
+  const isShortLandscape = useIsShortLandscape();
+  const isCompact = isTablet || isShortLandscape;
   const gutter = ttzGutter({ isMobile, isTablet: isCompact });
 
   return (
@@ -64,7 +70,7 @@ export default function TopBar({ workspace, repositoryMode, snapshotMode, active
             takes over primary navigation - rendering PrimaryNav here too
             would put two landmarks both announced as "Primary" on the page
             at once, and duplicate every focusable nav control. */}
-        {!isMobile ? (
+        {!hasMobileBottomNav ? (
           <div style={{ flex: 1, display: "flex", justifyContent: isCompact ? "flex-start" : "center", overflowX: isCompact ? "auto" : "visible" }}>
             <PrimaryNav activeTab={activeTab} onSelect={onSelectTab} badges={navBadges} />
           </div>

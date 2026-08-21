@@ -28,7 +28,7 @@ const FIELD_LABEL = { apr: "APR", minimumRequiredPayment: "Minimum", dueDay: "Du
 function DiffRow({ label, existing, next }) {
   const palette = ttzPalette;
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, padding: "12px 0", borderTop: `1px solid ${palette.border}`, alignItems: "start" }}>
+    <div className="ttz-review-diff-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, padding: "12px 0", borderTop: `1px solid ${palette.border}`, alignItems: "start" }}>
       <div>
         <div style={{ ...TYPE_SCALE.caption, color: palette.muted, fontWeight: 600, letterSpacing: "0.3px", marginBottom: 6 }}>TrackToZero</div>
         <div style={{ ...TYPE_SCALE.body, color: palette.tx, fontWeight: 500 }}>{existing}</div>
@@ -111,7 +111,7 @@ function MatchSection({ item, isHousehold, onUpdateExisting, onNewDebt, busy }) 
           </div>
           <DiffRow label="Balance" existing={formatMoney(selectedMatch.diff.balance?.existingValue)} next={formatMoney(selectedMatch.diff.balance?.newValue)} />
           {selectedMatch.diff.apr?.newValue != null && selectedMatch.diff.apr?.state !== "same" ? (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 16, alignItems: "start", paddingTop: 12 }}>
+            <div className="ttz-review-diff-choice" style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 16, alignItems: "start", paddingTop: 12 }}>
               <DiffRow label="APR" existing={formatPercent(selectedMatch.diff.apr?.existingValue)} next={formatPercent(selectedMatch.diff.apr?.newValue)} />
               <div style={{ marginTop: 4 }}>
                 <Checkbox label="Use new" checked={!!acceptedFields.apr} onChange={() => toggleField("apr")} />
@@ -119,7 +119,7 @@ function MatchSection({ item, isHousehold, onUpdateExisting, onNewDebt, busy }) 
             </div>
           ) : null}
           {selectedMatch.diff.minimumPayment?.newValue != null && selectedMatch.diff.minimumPayment?.state !== "same" ? (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 16, alignItems: "start", paddingTop: 12 }}>
+            <div className="ttz-review-diff-choice" style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 16, alignItems: "start", paddingTop: 12 }}>
               <DiffRow label={FIELD_LABEL.minimumRequiredPayment} existing={formatMoney(selectedMatch.diff.minimumPayment?.existingValue)} next={formatMoney(selectedMatch.diff.minimumPayment?.newValue)} />
               <div style={{ marginTop: 4 }}>
                 <Checkbox label="Use new" checked={!!acceptedFields.minimumRequiredPayment} onChange={() => toggleField("minimumRequiredPayment")} />
@@ -127,7 +127,7 @@ function MatchSection({ item, isHousehold, onUpdateExisting, onNewDebt, busy }) 
             </div>
           ) : null}
           {selectedMatch.diff.dueDay?.newValue && selectedMatch.diff.dueDay?.state !== "same" ? (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 16, alignItems: "start", paddingTop: 12 }}>
+            <div className="ttz-review-diff-choice" style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 16, alignItems: "start", paddingTop: 12 }}>
               <DiffRow label={FIELD_LABEL.dueDay} existing={selectedMatch.diff.dueDay?.existingValue || "Not set"} next={selectedMatch.diff.dueDay?.newValue} />
               <div style={{ marginTop: 4 }}>
                 <Checkbox label="Use new" checked={!!acceptedFields.dueDay} onChange={() => toggleField("dueDay")} />

@@ -60,7 +60,7 @@ export default function ImportCandidateDetail({ candidate, canManage, busy, onUp
       ) : null}
       <ReconciliationSection candidate={candidate} canManage={canManage} busy={busy} onResolveMatch={onResolveMatch} onResolveNew={onResolveNew} />
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div className="ttz-import-candidate-fields" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <Field label="Creditor / debt name">
           <Input disabled={!canManage} value={candidate.accountName} onChange={(event) => onUpdate({ accountName: event.target.value })} />
         </Field>

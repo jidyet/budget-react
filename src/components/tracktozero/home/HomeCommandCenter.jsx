@@ -371,6 +371,7 @@ function NotEnoughHistoryCard({ observed }) {
       <div style={{ display: "grid", gap: 20 }}>
         <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Your debt trend</div>
         <div
+          className="ttz-home-trend-empty-grid"
           style={{
             display: "grid",
             gridTemplateColumns: "minmax(220px, 1.15fr) minmax(260px, 1.5fr) minmax(88px, 0.45fr)",

@@ -3,7 +3,6 @@ import { debtCategoryGroupFor } from "../../../domain/tracktozero/financialItemT
 import { derivePaymentTiming, paymentTimingLabel } from "../../../domain/tracktozero/paymentTiming.js";
 import Card from "../ui/Card.jsx";
 import Badge from "../ui/Badge.jsx";
-import Button from "../ui/Button.jsx";
 import useReducedMotion from "../../../hooks/useReducedMotion.js";
 import { TYPE_SCALE, ttzPalette } from "../theme.js";
 import { formatMoney as money, formatPercent as percent } from "../formatting.js";
@@ -135,19 +134,25 @@ function CategoryTile({ entry, breakdown, insight, onSelect }) {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 2 }}>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            style={{ minWidth: 116 }}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              onSelect(entry.routeSlug);
+          <span
+            aria-hidden="true"
+            style={{
+              minWidth: 116,
+              height: 32,
+              padding: "0 12px",
+              borderRadius: "var(--ttz-radius-sm, 8px)",
+              border: `1px solid ${palette.border2 || palette.border}`,
+              color: palette.tx,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "0.8125rem",
+              fontWeight: 700,
+              boxSizing: "border-box",
             }}
           >
             Open category
-          </Button>
+          </span>
           <div style={{ ...TYPE_SCALE.caption, color: palette.tx2, whiteSpace: "nowrap" }}>
             {breakdown.reviewCount > 0 ? "Needs attention" : "All set"}
           </div>

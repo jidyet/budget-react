@@ -1090,7 +1090,7 @@ function StrategyPageBody({ strategy, title, subtitle, useLabel, applyActionLabe
               <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Current first target</div>
               <Badge tone="success">Step 1 of {Math.max(1, payoffRows.length)}</Badge>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "108px minmax(0, 1fr)", gap: 16, marginTop: GAP, alignItems: "start" }}>
+            <div className="ttz-strategy-target-grid" style={{ display: "grid", gridTemplateColumns: "108px minmax(0, 1fr)", gap: 16, marginTop: GAP, alignItems: "start" }}>
               <div
                 style={{
                   width: 108,
@@ -1109,6 +1109,7 @@ function StrategyPageBody({ strategy, title, subtitle, useLabel, applyActionLabe
               </div>
               <div style={{ display: "grid", gap: 14, minWidth: 0 }}>
                 <div
+                  className="ttz-strategy-target-stats"
                   style={{
                     display: "inline-grid",
                     gap: 4,
@@ -1152,7 +1153,7 @@ function StrategyPageBody({ strategy, title, subtitle, useLabel, applyActionLabe
                   ))}
                 </div>
 
-                <div style={{ display: "flex", gap: 10, alignItems: "stretch", justifyContent: "flex-start", flexWrap: "wrap" }}>
+                <div className="ttz-strategy-target-actions" style={{ display: "flex", gap: 10, alignItems: "stretch", justifyContent: "flex-start", flexWrap: "wrap" }}>
                   <Button variant="primary">Record payment</Button>
                   <Button variant="secondary">View debt</Button>
                 </div>
@@ -1188,7 +1189,7 @@ function StrategyPageBody({ strategy, title, subtitle, useLabel, applyActionLabe
             padding: 18,
           }}
         >
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.6fr) auto auto", gap: 18, alignItems: "center" }}>
+          <div className="ttz-strategy-target-actions" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.6fr) auto auto", gap: 18, alignItems: "center" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <IconBadge icon={Sparkles} tone="go" size="sm" />
               <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx }}>You’re building momentum. Keep it up — every payment gets you closer to freedom.</div>
@@ -1680,7 +1681,7 @@ function CompareStrategiesView({ snapshot, service, refresh, runAction, writeSta
           background: `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`,
         }}
       >
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.8fr) repeat(4, minmax(120px, 0.55fr))", gap: 0 }}>
+        <div className="ttz-compare-recommendation-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.8fr) repeat(4, minmax(120px, 0.55fr))", gap: 0 }}>
           <div style={{ padding: 22, borderRight: `1px solid ${ttzPalette.border}` }}>
             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
               <div style={{ width: 56, height: 56, borderRadius: "50%", background: "rgba(34,197,94,0.12)", border: `1px solid ${ttzPalette.go}`, display: "grid", placeItems: "center", color: ttzPalette.go }}>
@@ -1714,14 +1715,14 @@ function CompareStrategiesView({ snapshot, service, refresh, runAction, writeSta
         </div>
       </Card>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: GAP }}>
+      <div className="ttz-compare-metrics-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: GAP }}>
         <PlanMetric label="Projected debt-free date" value={<>{result.snowball.projectedZeroDate}<span style={{ color: ttzPalette.tx2 }}> vs </span>{result.avalanche.projectedZeroDate}</>} icon={Calendar} />
         <PlanMetric label="Months to $0" value={<>{result.snowball.monthsToZero}<span style={{ color: ttzPalette.tx2 }}> vs </span>{result.avalanche.monthsToZero}</>} icon={Clock} />
         <PlanMetric label="Projected interest" value={<>{money(result.snowball.estimatedInterest)}<span style={{ color: ttzPalette.tx2 }}> vs </span>{money(result.avalanche.estimatedInterest)}</>} icon={DollarSign} />
         <PlanMetric label="First target" value={<>{result.snowball.payoffOrder?.[0]?.name || "n/a"}<span style={{ color: ttzPalette.tx2 }}> vs </span>{result.avalanche.payoffOrder?.[0]?.name || "n/a"}</>} icon={Target} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) minmax(420px, 1.15fr)", gap: GAP, alignItems: "stretch" }}>
+      <div className="ttz-compare-strategy-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) minmax(420px, 1.15fr)", gap: GAP, alignItems: "stretch" }}>
         <Card variant="default" style={{ padding: 20, display: "grid", gap: 14 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1734,7 +1735,7 @@ function CompareStrategiesView({ snapshot, service, refresh, runAction, writeSta
             <Badge tone="info">Inspect strategy</Badge>
           </div>
           <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>Pay off the smallest balances first to build quick wins and keep your momentum high.</div>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 0.95fr) minmax(0, 1.2fr)", gap: 14 }}>
+          <div className="ttz-compare-card-detail-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 0.95fr) minmax(0, 1.2fr)", gap: 14 }}>
             <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${ttzPalette.border}`, background: ttzPalette.surf2 }}>
               <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.ac }}>First target</div>
               <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 700, marginTop: 8 }}>{result.snowball.payoffOrder?.[0]?.name || "n/a"}</div>
@@ -1767,7 +1768,7 @@ function CompareStrategiesView({ snapshot, service, refresh, runAction, writeSta
             <Badge tone="success">{result.activeStrategy === "avalanche" ? "Active strategy" : "Inspect strategy"}</Badge>
           </div>
           <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>Prioritize the highest interest rates first to minimize the total interest you pay.</div>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 0.95fr) minmax(0, 1.2fr)", gap: 14 }}>
+          <div className="ttz-compare-card-detail-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 0.95fr) minmax(0, 1.2fr)", gap: 14 }}>
             <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${ttzPalette.border}`, background: ttzPalette.surf2 }}>
               <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.go }}>First target</div>
               <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 700, marginTop: 8 }}>{result.avalanche.payoffOrder?.[0]?.name || "n/a"}</div>
@@ -1801,7 +1802,7 @@ function CompareStrategiesView({ snapshot, service, refresh, runAction, writeSta
         </SectionCard>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: GAP, alignItems: "stretch" }}>
+      <div className="ttz-compare-charts-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: GAP, alignItems: "stretch" }}>
         <Card variant="default">
           <AllocationDonut
             title="Interest breakdown (Snowball)"
@@ -1827,14 +1828,14 @@ function CompareStrategiesView({ snapshot, service, refresh, runAction, writeSta
           </div>
           {compactScenarioRows.length ? (
             <div style={{ display: "grid", gap: 10 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr 1fr 1.1fr", gap: 8, ...TYPE_SCALE.overline, color: ttzPalette.muted }}>
+              <div className="ttz-compare-table-row" style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr 1fr 1.1fr", gap: 8, ...TYPE_SCALE.overline, color: ttzPalette.muted }}>
                 <div>Strategy</div>
                 <div>Debt-free date</div>
                 <div>Interest</div>
                 <div>Vs. base plan</div>
               </div>
               {compactScenarioRows.map((row) => (
-                <div key={row.strategy} style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr 1fr 1.1fr", gap: 8, alignItems: "center", paddingTop: 10, borderTop: `1px solid ${ttzPalette.border}` }}>
+                <div key={row.strategy} className="ttz-compare-table-row" style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr 1fr 1.1fr", gap: 8, alignItems: "center", paddingTop: 10, borderTop: `1px solid ${ttzPalette.border}` }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, ...TYPE_SCALE.body, color: ttzPalette.tx }}>
                     <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: "50%", background: row.tone === "go" ? ttzPalette.go : ttzPalette.ac, flexShrink: 0 }} />
                     {row.strategy}
@@ -1881,7 +1882,7 @@ function CompareStrategiesView({ snapshot, service, refresh, runAction, writeSta
           borderColor: winnerLabel ? ttzPalette.go : ttzPalette.border,
         }}
       >
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.8fr) repeat(3, minmax(140px, 0.7fr)) auto", gap: 0, alignItems: "stretch" }}>
+        <div className="ttz-compare-summary-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.8fr) repeat(3, minmax(140px, 0.7fr)) auto", gap: 0, alignItems: "stretch" }}>
           <div style={{ padding: 18, display: "flex", alignItems: "center", gap: 14 }}>
             <div style={{ width: 56, height: 56, borderRadius: "50%", background: "rgba(34,197,94,0.12)", border: `1px solid ${ttzPalette.go}`, display: "grid", placeItems: "center", color: ttzPalette.go }}>
               <Trophy size={28} />

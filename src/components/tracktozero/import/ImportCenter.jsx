@@ -285,7 +285,7 @@ export default function ImportCenter({ snapshot, service, refresh, refreshReview
         </WarningCallout>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 300px) 1fr", gap: 16, alignItems: "start" }}>
+      <div className="ttz-import-review-grid" style={{ display: "grid", gridTemplateColumns: "minmax(220px, 300px) 1fr", gap: 16, alignItems: "start" }}>
         <Card variant="default" style={{ maxHeight: 640, overflowY: "auto" }}>
           <ImportCandidateList candidates={candidates} selectedCandidateId={selected?.candidateId} onSelect={setSelectedCandidateId} />
         </Card>

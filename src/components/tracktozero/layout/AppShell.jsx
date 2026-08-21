@@ -3,7 +3,7 @@ import TopBar from "./TopBar.jsx";
 import MobileBottomNav from "./MobileBottomNav.jsx";
 import QuickActionSheet from "./QuickActionSheet.jsx";
 import { ttzPalette, ttzCssVars } from "../theme.js";
-import { useIsMobile } from "../useViewport.js";
+import { useHasMobileBottomNav } from "../useViewport.js";
 
 // AppShell -> PageContainer -> PageHeader -> content sections (UX-1 Part
 // 21). AppShell owns the header/nav chrome and the --ttz-* custom
@@ -20,7 +20,7 @@ import { useIsMobile } from "../useViewport.js";
 // covers the last bit of page content.
 export default function AppShell({ topBarProps, mobileBottomNavProps, quickActionSheetProps, children }) {
   const palette = ttzPalette;
-  const isMobile = useIsMobile();
+  const hasMobileBottomNav = useHasMobileBottomNav();
   return (
     <div
       style={{
@@ -81,6 +81,8 @@ export default function AppShell({ topBarProps, mobileBottomNavProps, quickActio
            column plan flow. A landscape handset can exceed 640px wide, so
            this rule mirrors useIsMobile's short-landscape breakpoint. */
         @media (max-width: 640px), (max-height: 560px) and (orientation: landscape) {
+          .ttz-page-container, .ttz-page-container * { min-width: 0; }
+          .ttz-page-container img, .ttz-page-container svg { max-width: 100%; }
           .ttz-plan-tab-strip {
             display: flex !important;
             flex-wrap: nowrap !important;
@@ -104,11 +106,27 @@ export default function AppShell({ topBarProps, mobileBottomNavProps, quickActio
           .ttz-compare-bottom-grid,
           .ttz-whatif-main-grid,
           .ttz-whatif-strategy-grid { grid-template-columns: 1fr !important; }
+          .ttz-compare-recommendation-grid,
+          .ttz-compare-metrics-grid,
+          .ttz-compare-strategy-grid,
+          .ttz-compare-card-detail-grid,
+          .ttz-compare-charts-grid,
+          .ttz-compare-summary-grid { grid-template-columns: 1fr !important; }
+          .ttz-compare-table-row { grid-template-columns: minmax(0, 1fr) auto !important; }
+          .ttz-compare-table-row > :nth-child(n + 3) { display: none !important; }
+          .ttz-strategy-target-grid { grid-template-columns: 88px minmax(0, 1fr) !important; gap: 10px !important; }
+          .ttz-strategy-target-stats { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+          .ttz-strategy-target-actions { grid-template-columns: 1fr !important; }
           .ttz-plan-health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
           .ttz-plan-next-move-actions { grid-template-columns: 1fr !important; }
           .ttz-whatif-builder { position: static !important; grid-row: auto !important; }
           .ttz-whatif-summary { grid-column: auto !important; }
           .ttz-finish-metrics, .ttz-saved-summary-ribbon, .ttz-saved-metrics { grid-template-columns: 1fr !important; }
+          .ttz-import-review-grid,
+          .ttz-import-candidate-fields,
+          .ttz-home-trend-empty-grid,
+          .ttz-review-diff-row { grid-template-columns: 1fr !important; }
+          .ttz-review-diff-choice { grid-template-columns: minmax(0, 1fr) auto !important; gap: 8px !important; }
         }
         @media (max-width: 390px) {
           .ttz-plan-metric-grid { grid-template-columns: 1fr !important; }
@@ -120,7 +138,7 @@ export default function AppShell({ topBarProps, mobileBottomNavProps, quickActio
         }
       `}</style>
       <TopBar {...topBarProps} />
-      <div style={{ paddingBottom: isMobile ? 76 : 0 }}>{children}</div>
+      <div style={{ minWidth: 0, paddingBottom: hasMobileBottomNav ? 76 : 0 }}>{children}</div>
       <MobileBottomNav {...mobileBottomNavProps} />
       <QuickActionSheet {...quickActionSheetProps} />
     </div>

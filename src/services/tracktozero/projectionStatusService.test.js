@@ -176,6 +176,41 @@ describe("TrackToZero v2 directional status", () => {
       latestSnapshotsByDebt: { d1: snapshot(1000, "2026-01-01T00:00:00.000Z") },
     }).code).toBe("needs_balance_update");
   });
+
+  it("matches generated Mon YYYY checkpoints to the as-of month instead of falling back to the first checkpoint", () => {
+    const result = classifyPlanStatus({
+      debts: [debt()],
+      planVersion: version,
+      // Deliberately unordered: repository reads must not determine which
+      // month is selected for the plan-health calculation.
+      expectedCheckpoints: [
+        { ...checkpoint(700), period: "Mar 2025" },
+        { ...checkpoint(900), period: "Jan 2025" },
+        { ...checkpoint(800), period: "Feb 2025" },
+      ],
+      latestSnapshotsByDebt: { d1: snapshot(700, "2025-03-15T00:00:00.000Z") },
+      asOf: "2025-03-15T00:00:00.000Z",
+    });
+
+    expect(result.code).toBe("on_track");
+    expect(result.expectedTotalBalance).toBe(700);
+  });
+
+  it("continues to support YYYY-MM checkpoints from existing persisted schedules", () => {
+    const result = classifyPlanStatus({
+      debts: [debt()],
+      planVersion: version,
+      expectedCheckpoints: [
+        { ...checkpoint(700), period: "2025-03" },
+        { ...checkpoint(900), period: "2025-01" },
+      ],
+      latestSnapshotsByDebt: { d1: snapshot(700, "2025-03-15T00:00:00.000Z") },
+      asOf: "2025-03-15T00:00:00.000Z",
+    });
+
+    expect(result.code).toBe("on_track");
+    expect(result.expectedTotalBalance).toBe(700);
+  });
 });
 
 describe("UX-0: needs-review debts do not silently drive the active plan", () => {

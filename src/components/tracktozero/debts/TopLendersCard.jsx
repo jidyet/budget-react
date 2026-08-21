@@ -116,7 +116,7 @@ export default function TopLendersCard({ debts, onGoToDebts, onSelectDebt }) {
         </div>
 
         {hiddenCount > 0 ? (
-          <Button variant="ghost" onClick={() => setExpanded(true)}>View all {groups.length} lenders</Button>
+          <Button variant="ghost" onClick={() => setExpanded(true)}>View all {totalAccounts} accounts</Button>
         ) : expanded && groups.length > DEFAULT_PREVIEW_COUNT ? (
           <Button variant="ghost" onClick={() => setExpanded(false)}>Show fewer</Button>
         ) : null}

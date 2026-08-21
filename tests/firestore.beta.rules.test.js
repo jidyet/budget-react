@@ -16,6 +16,7 @@ import { assertFails, assertSucceeds, initializeTestEnvironment } from "@firebas
 // break ordinary functionality.
 
 const PROJECT_ID = "demo-budget-react-v2";
+const [EMULATOR_HOST, EMULATOR_PORT] = (process.env.FIRESTORE_EMULATOR_HOST || "").split(":");
 let testEnv;
 
 const now = () => new Date("2026-01-01T00:00:00.000Z");
@@ -48,9 +49,17 @@ async function seed(callback) {
 }
 
 test.before(async () => {
+  if (!process.env.FIRESTORE_EMULATOR_HOST) {
+    throw new Error(
+      "FIRESTORE_EMULATOR_HOST is not set - refusing to run beta rules tests outside the dedicated emulator runner."
+    );
+  }
   const rulesPath = process.env.TRACKTOZERO_V2_RULES_FILE || "firestore.beta.rules";
   const rules = await readFile(resolve(rulesPath), "utf8");
-  testEnv = await initializeTestEnvironment({ projectId: PROJECT_ID, firestore: { host: "127.0.0.1", port: 8080, rules } });
+  testEnv = await initializeTestEnvironment({
+    projectId: PROJECT_ID,
+    firestore: { host: EMULATOR_HOST, port: Number(EMULATOR_PORT), rules },
+  });
 });
 test.beforeEach(async () => testEnv.clearFirestore());
 test.after(async () => testEnv.cleanup());

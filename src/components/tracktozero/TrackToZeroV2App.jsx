@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { auth as productionAuth, db as productionDb, getFirebaseConfig, getFirebaseStatus, login as productionLogin, logout as productionLogout, signup as productionSignup } from "../../firebase";
@@ -22,13 +22,17 @@ import PageContainer from "./layout/PageContainer.jsx";
 import QaHarnessControls from "./layout/QaHarnessControls.jsx";
 import StatusBadge from "./ui/StatusBadge.jsx";
 import Badge from "./ui/Badge.jsx";
-import ReviewCenter from "./review/ReviewCenter.jsx";
-import HomeCommandCenter from "./home/HomeCommandCenter.jsx";
-import ActivityCenter from "./activity/ActivityCenter.jsx";
-import PlanSection from "./plan/PlanSection.jsx";
 import { navigateToPlanDestination } from "./plan/planRouting.js";
 import { formatMoney as money, formatPercent as percent } from "./formatting.js";
-import DebtsCenter from "./debts/DebtsCenter.jsx";
+
+// Route-sized V2 destinations are intentionally lazy. They are only needed
+// after a user selects the corresponding primary tab, and keeping them out of
+// the shell preserves the first-load budget for controlled-beta testers.
+const ReviewCenter = lazy(() => import("./review/ReviewCenter.jsx"));
+const HomeCommandCenter = lazy(() => import("./home/HomeCommandCenter.jsx"));
+const ActivityCenter = lazy(() => import("./activity/ActivityCenter.jsx"));
+const PlanSection = lazy(() => import("./plan/PlanSection.jsx"));
+const DebtsCenter = lazy(() => import("./debts/DebtsCenter.jsx"));
 
 const styles = {
   shell: {
@@ -1581,6 +1585,7 @@ function TrackToZeroV2AppInner() {
             {writeState.error || writeState.success}
           </div>
         )}
+        <Suspense fallback={<div role="status" aria-live="polite" style={{ ...styles.card, background: ttzPalette.surf, color: ttzPalette.tx, border: `1px solid ${ttzPalette.border2 || ttzPalette.border}`, marginTop: 16 }}>Loading your workspace…</div>}>
         {tab === "home" && <Home
           snapshot={snapshot}
           scenario={scenario}
@@ -1624,6 +1629,7 @@ function TrackToZeroV2AppInner() {
         {tab === "debts" && <DebtsCenter key={snapshot.workspace?.id} snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} refreshReview={() => refreshReview(workspaceId)} runAction={runAction} writeState={writeState} reviewSnapshot={reviewState.snapshot} onGoToReview={() => navigateTab("review")} initialAction={debtsInitialAction} onInitialActionHandled={() => setDebtsInitialAction(null)} />}
         {tab === "plan" && <Plan snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} navigateTab={navigateTab} reviewSnapshot={reviewState.snapshot} />}
         {tab === "settings" && <Settings snapshot={snapshot} repositoryMode={runtime.mode} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} latestInvite={latestInvite} setLatestInvite={setLatestInvite} />}
+        </Suspense>
       </PageContainer>
     </AppShell>
   );

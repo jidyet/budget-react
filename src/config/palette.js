@@ -3,13 +3,17 @@ import { BRAND_COLORS } from "./brand";
 export function buildPalette(theme) {
   const D = theme === "dark";
   return {
+    // Keep the theme identity explicit. Consumers must not infer it from a
+    // particular background hex; the dark shell can evolve without breaking
+    // their dark-mode branches.
+    isDark: D,
     // Backgrounds
-    bg:      D ? "#08111d" : "#f5f9ff",
-    bg2:     D ? "#0d1b2b" : "#edf5ff",
+    bg:      D ? "#000000" : "#f5f9ff",
+    bg2:     D ? "#03070c" : "#edf5ff",
     // Surfaces
-    surf:    D ? "#0d1726" : "#ffffff",
-    surf2:   D ? "#122136" : "#f4f9ff",
-    surf3:   D ? "#172942" : "#e9f2ff",
+    surf:    D ? "#09111c" : "#ffffff",
+    surf2:   D ? "#0d1826" : "#f4f9ff",
+    surf3:   D ? "#13243a" : "#e9f2ff",
     // Borders
     border:  D ? "#21364f" : "#d7e7f6",
     border2: D ? "#2f5f8b" : "#a9cae8",

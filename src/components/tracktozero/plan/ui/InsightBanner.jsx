@@ -35,7 +35,7 @@ export default function InsightBanner({ icon, tone = "ac", headline, detail, chi
         flexWrap: "wrap",
         padding: "16px 20px",
         borderRadius: "var(--ttz-radius-lg, 16px)",
-        background: palette.bg === "#08111d"
+        background: palette.isDark
           ? `linear-gradient(180deg, ${colors.bg}, rgba(9,18,31,0.94))`
           : colors.bg,
         border: `1px solid ${colors.border}`,

@@ -193,17 +193,17 @@ export const ttzCssVars = (palette = ttzPalette) => ({
   "--ttz-border-subtle": palette.border,
   "--ttz-border-strong": palette.border2,
 
-  "--ttz-shadow-sm": palette.bg === "#08111d" ? "0 6px 18px rgba(0,0,0,0.18)" : "0 6px 18px rgba(17,54,87,0.06)",
-  "--ttz-shadow-md": palette.bg === "#08111d" ? "0 18px 40px rgba(0,0,0,0.30)" : "0 18px 40px rgba(17,54,87,0.10)",
-  "--ttz-shadow-lg": palette.bg === "#08111d" ? "0 28px 64px rgba(0,0,0,0.40)" : "0 26px 60px rgba(17,54,87,0.14)",
+  "--ttz-shadow-sm": palette.isDark ? "0 6px 18px rgba(0,0,0,0.28)" : "0 6px 18px rgba(17,54,87,0.06)",
+  "--ttz-shadow-md": palette.isDark ? "0 18px 40px rgba(0,0,0,0.42)" : "0 18px 40px rgba(17,54,87,0.10)",
+  "--ttz-shadow-lg": palette.isDark ? "0 28px 64px rgba(0,0,0,0.56)" : "0 26px 60px rgba(17,54,87,0.14)",
 
   "--ttz-radius-sm": "8px",
   "--ttz-radius-md": "12px",
   "--ttz-radius-lg": "16px",
   "--ttz-radius-xl": "22px",
-  "--ttz-surface-glass": palette.bg === "#08111d" ? "linear-gradient(180deg, rgba(19,34,53,0.96), rgba(12,23,38,0.96))" : "linear-gradient(180deg, rgba(255,255,255,0.96), rgba(247,251,255,0.96))",
-  "--ttz-shell-bg": palette.bg === "#08111d"
-    ? "radial-gradient(circle at top left, rgba(24,167,225,0.16), transparent 28%), radial-gradient(circle at top right, rgba(57,168,68,0.12), transparent 20%), linear-gradient(180deg, #08111d 0%, #0a1421 100%)"
+  "--ttz-surface-glass": palette.isDark ? "linear-gradient(180deg, rgba(13,24,38,0.98), rgba(6,12,20,0.98))" : "linear-gradient(180deg, rgba(255,255,255,0.96), rgba(247,251,255,0.96))",
+  "--ttz-shell-bg": palette.isDark
+    ? "#000000"
     : "radial-gradient(circle at top left, rgba(24,167,225,0.10), transparent 24%), radial-gradient(circle at top right, rgba(57,168,68,0.08), transparent 18%), linear-gradient(180deg, #f8fbff 0%, #eef6ff 52%, #f7fcff 100%)",
 
   "--ttz-space-1": "4px",

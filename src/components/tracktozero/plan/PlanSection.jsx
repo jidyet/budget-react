@@ -95,8 +95,8 @@ function pillTabGroupStyle() {
     flexWrap: "wrap",
     padding: 6,
     borderRadius: 16,
-    border: `1px solid ${ttzPalette.bg === "#08111d" ? ttzPalette.border2 : (ttzPalette.waD || ttzPalette.border2)}`,
-    background: ttzPalette.bg === "#08111d"
+    border: `1px solid ${ttzPalette.isDark ? ttzPalette.border2 : (ttzPalette.waD || ttzPalette.border2)}`,
+    background: ttzPalette.isDark
       ? `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`
       : "linear-gradient(180deg, rgba(242,153,74,0.12) 0%, rgba(255,255,255,0.96) 100%)",
   };
@@ -445,7 +445,7 @@ function MyPlanActiveBody({ snapshot, service, refresh, runAction, writeState, o
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <Badge tone="success">{strategyLabel} active</Badge>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: GAP }}>
+        <div className="ttz-plan-metric-grid" style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: GAP }}>
           <PlanMetric label="Projected debt-free date" value={projectedZeroDateLabel} tone="success" icon={Calendar} />
           <PlanMetric label="Months to $0" value={activePreview ? `${activePreview.monthsToZero} months` : "…"} icon={Clock} />
           <PlanMetric label="Monthly target" value={money(monthlyTargetValue)} tone="feature" icon={DollarSign} />
@@ -455,7 +455,7 @@ function MyPlanActiveBody({ snapshot, service, refresh, runAction, writeState, o
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 7fr) minmax(320px, 5fr)", gap: GAP, alignItems: "start" }}>
+      <div className="ttz-plan-main-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 7fr) minmax(320px, 5fr)", gap: GAP, alignItems: "start" }}>
         <div style={{ display: "grid", gap: GAP }}>
           <SectionCard number={1} title="Balance to $0 over time">
             <TrendChart
@@ -465,7 +465,7 @@ function MyPlanActiveBody({ snapshot, service, refresh, runAction, writeState, o
             />
           </SectionCard>
 
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.35fr) minmax(300px, 0.95fr)", gap: GAP, alignItems: "start" }}>
+          <div className="ttz-plan-payoff-target-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.35fr) minmax(300px, 0.95fr)", gap: GAP, alignItems: "start" }}>
             <SectionCard number={2} title="Your payoff order">
               <PayoffOrderTable debts={visiblePayoffQueue} isHousehold={isHousehold} highlightFirst perDebt={activePreview?.perDebt || {}} />
               {hiddenPayoffCount > 0 ? (
@@ -500,7 +500,7 @@ function MyPlanActiveBody({ snapshot, service, refresh, runAction, writeState, o
           <SectionCard number={4} title="Next move">
             {nextMove ? (
               <div style={{ display: "grid", gap: 18, minHeight: 156 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) minmax(180px, 220px)", gap: 18, alignItems: "start" }}>
+                <div className="ttz-plan-next-move-grid" style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) minmax(180px, 220px)", gap: 18, alignItems: "start" }}>
                   <div
                     style={{
                       width: 92,
@@ -521,7 +521,7 @@ function MyPlanActiveBody({ snapshot, service, refresh, runAction, writeState, o
                     </div>
                     <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, maxWidth: 360 }}>{nextMove.body}</div>
                   </div>
-                  <div style={{ display: "grid", gap: 10, alignSelf: "start" }}>
+                  <div className="ttz-plan-next-move-actions" style={{ display: "grid", gap: 10, alignSelf: "start" }}>
                     <Button variant="primary" size="sm" onClick={scrollToReforecast} style={{ width: "100%", justifyContent: "center" }}>Apply extra payment</Button>
                     {onGoToDebts ? <Button variant="secondary" size="sm" onClick={onGoToDebts} style={{ width: "100%", justifyContent: "center" }}>Record payment</Button> : null}
                   </div>
@@ -533,7 +533,7 @@ function MyPlanActiveBody({ snapshot, service, refresh, runAction, writeState, o
           </SectionCard>
 
           <SectionCard number={5} title="Plan health">
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 0 }}>
+            <div className="ttz-plan-health-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 0 }}>
               <MiniPlanHealthStat icon={STATUS_ICON[statusTone] || CheckCircle2} tone={bannerTone} title="Payments" value="on track" />
               <MiniPlanHealthStat icon={ShieldCheck} tone="neutral" title={String(activeDebtsCount)} value="active debts" />
               <MiniPlanHealthStat icon={Flag} tone="go" title={String(paidOffCount)} value="paid off" />
@@ -541,7 +541,7 @@ function MyPlanActiveBody({ snapshot, service, refresh, runAction, writeState, o
             </div>
           </SectionCard>
 
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: GAP }}>
+          <div className="ttz-plan-secondary-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: GAP }}>
             {otherStrategyResult && activeStrategyResult ? (
               <SectionCard number={6} title="Strategy comparison snapshot">
                 <div style={{ overflowX: "auto" }}>
@@ -968,7 +968,7 @@ function StrategyPageBody({ strategy, title, subtitle, useLabel, applyActionLabe
               overflow: "hidden",
             }}
           >
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(320px, 1.8fr) repeat(4, minmax(120px, 0.5fr))", gap: 0 }}>
+            <div className="ttz-strategy-hero-grid" style={{ display: "grid", gridTemplateColumns: "minmax(320px, 1.8fr) repeat(4, minmax(120px, 0.5fr))", gap: 0 }}>
               <div style={{ padding: 22, borderRight: `1px solid ${ttzPalette.border}` }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
                   <div style={{ width: 56, height: 56, borderRadius: "50%", background: "rgba(34,197,94,0.12)", border: `1px solid ${ttzPalette.go}`, display: "grid", placeItems: "center", color: ttzPalette.go, boxShadow: "0 0 0 8px rgba(34,197,94,0.06)" }}>
@@ -1003,14 +1003,14 @@ function StrategyPageBody({ strategy, title, subtitle, useLabel, applyActionLabe
             </div>
           </Card>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: GAP }}>
+        <div className="ttz-plan-metric-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: GAP }}>
           <PlanMetric label="Projected debt-free date" value={currentResult?.projectedZeroDate || "n/a"} tone="accent" icon={Calendar} />
           <PlanMetric label="Months to $0" value={currentResult?.monthsToZero != null ? `${currentResult.monthsToZero} months` : "n/a"} tone="success" icon={Clock} />
           <PlanMetric label="Projected interest" value={money(currentResult?.estimatedInterest || 0)} tone="success" icon={DollarSign} />
           <PlanMetric label="First target" value={firstTarget ? `${firstTarget.name}${firstTargetOwner ? ` — ${firstTargetOwner}` : ""}` : "n/a"} tone="default" icon={Target} />
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.4fr)", gap: GAP, alignItems: "stretch" }}>
+        <div className="ttz-strategy-main-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.4fr)", gap: GAP, alignItems: "stretch" }}>
           <Card
             variant="default"
             style={{
@@ -1056,7 +1056,7 @@ function StrategyPageBody({ strategy, title, subtitle, useLabel, applyActionLabe
           </Card>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(280px, 0.9fr) minmax(320px, 1fr) minmax(320px, 0.9fr)", gap: GAP, alignItems: "stretch" }}>
+        <div className="ttz-strategy-bottom-grid" style={{ display: "grid", gridTemplateColumns: "minmax(280px, 0.9fr) minmax(320px, 1fr) minmax(320px, 0.9fr)", gap: GAP, alignItems: "stretch" }}>
           <Card
             variant="default"
             style={{
@@ -1208,7 +1208,7 @@ function StrategyPageBody({ strategy, title, subtitle, useLabel, applyActionLabe
 
     return (
       <div style={{ display: "grid", gap: GAP }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: GAP }}>
+        <div className="ttz-plan-metric-grid" style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: GAP }}>
           <PlanMetric label="Projected debt-free date" value={currentResult?.projectedZeroDate || "n/a"} tone="success" icon={Calendar} />
           <PlanMetric label="Total interest" value={money(currentResult?.estimatedInterest || 0)} icon={DollarSign} />
           <PlanMetric label="Total interest saved" value={money(strategyVsMinimumsDelta?.interestSaved || 0)} tone="success" icon={TrendingUp} />
@@ -1217,7 +1217,7 @@ function StrategyPageBody({ strategy, title, subtitle, useLabel, applyActionLabe
           <PlanMetric label="Left to go" value={money(snapshot.totalDebt || 0)} icon={Compass} />
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.45fr) minmax(340px, 0.95fr)", gap: GAP, alignItems: "start" }}>
+        <div className="ttz-strategy-main-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.45fr) minmax(340px, 0.95fr)", gap: GAP, alignItems: "start" }}>
           <Card
             variant="default"
             style={{
@@ -2235,7 +2235,7 @@ function WhatIfView({ snapshot, service, runAction, writeState }) {
         </div>
 
         {preview ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: GAP, marginTop: GAP }}>
+          <div className="ttz-plan-metric-grid" style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: GAP, marginTop: GAP }}>
             <PlanMetric label="Current projected $0" value={preview.baseline?.label || "n/a"} icon={Calendar} />
             <PlanMetric label="Scenario projected $0" value={preview.scenario?.label || "n/a"} tone="success" icon={Calendar} />
             <PlanMetric label="Months saved" value={monthsSaved != null ? String(monthsSaved) : "n/a"} tone="success" icon={Clock} />
@@ -2251,6 +2251,7 @@ function WhatIfView({ snapshot, service, runAction, writeState }) {
       </Card>
 
       <div
+        className="ttz-whatif-main-grid"
         style={{
           display: "grid",
           gridTemplateColumns: "minmax(320px, 0.9fr) minmax(0, 1.1fr) minmax(320px, 0.85fr)",
@@ -2267,6 +2268,7 @@ function WhatIfView({ snapshot, service, runAction, writeState }) {
             top: 12,
             gridRow: otherStrategies ? "1 / span 2" : "1",
           }}
+          className="ttz-whatif-builder"
         >
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <IconBadge icon={FlaskConical} tone="ac" size="sm" />
@@ -2402,13 +2404,13 @@ function WhatIfView({ snapshot, service, runAction, writeState }) {
             </Card>
 
       {otherStrategies ? (
-        <Card variant="default" style={{ gridColumn: "2 / span 2" }}>
+        <Card variant="default" className="ttz-whatif-summary" style={{ gridColumn: "2 / span 2" }}>
           <div style={{ display: "grid", gap: GAP }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <IconBadge icon={PieChart} tone="ac" size="sm" />
               <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Scenario vs other strategies</div>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr)) minmax(280px, 1.2fr)", gap: GAP, alignItems: "stretch" }}>
+            <div className="ttz-whatif-strategy-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr)) minmax(280px, 1.2fr)", gap: GAP, alignItems: "stretch" }}>
               {strategyComparisonTiles.map((tile) => (
                 <div
                   key={tile.label}
@@ -3357,7 +3359,7 @@ export default function PlanSection({ snapshot, service, refresh, runAction, wri
         {destinationSubtitle ? <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 6, marginBottom: 0, maxWidth: 720 }}>{destinationSubtitle}</p> : null}
       </div>
 
-      <div role="tablist" aria-label="Plan sections" style={pillTabGroupStyle()}>
+      <div className="ttz-plan-tab-strip" role="tablist" aria-label="Plan sections" style={pillTabGroupStyle()}>
         {PLAN_DESTINATIONS.map((item) => {
           const active = destination === item.key;
           return (

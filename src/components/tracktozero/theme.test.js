@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { applyTheme, chartColor, CHART_COLOR_GROUPS, CHART_USAGE_RULES, ttzPalette, toneColors } from "./theme.js";
+import { applyTheme, chartColor, CHART_COLOR_GROUPS, CHART_USAGE_RULES, ttzCssVars, ttzPalette, toneColors } from "./theme.js";
 import { resolveInitialTheme } from "./themeStorage.js";
 
 // UX-8: locks in the contrast fix so a future palette/token edit can't
@@ -102,11 +102,19 @@ describe("applyTheme", () => {
 
   it("THEME-02: switching to dark applies buildPalette('dark')'s own values, unmodified by the light-only contrast overrides", () => {
     applyTheme("dark");
-    expect(ttzPalette.bg).toBe("#08111d");
+    expect(ttzPalette.bg).toBe("#000000");
+    expect(ttzPalette.isDark).toBe(true);
     expect(ttzPalette.tx).toBe("#eef6ff");
     // The light-tuned contrast overrides must never stomp dark's own go/wa/info/ac/da.
     expect(ttzPalette.go).toBe("#4ade80");
     expect(ttzPalette.info).toBe("#6bbdff");
+  });
+
+  it("uses a truly black application shell in dark mode while keeping cards as distinct surfaces", () => {
+    applyTheme("dark");
+    const vars = ttzCssVars(ttzPalette);
+    expect(vars["--ttz-shell-bg"]).toBe("#000000");
+    expect(ttzPalette.surf).not.toBe(ttzPalette.bg);
   });
 
   it("THEME-03: switching back to light restores the exact original light+contrast-override values", () => {

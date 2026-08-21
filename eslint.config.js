@@ -7,6 +7,7 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 export default defineConfig([
   globalIgnores([
     'dist',
+    'qa-artifacts/**',
     'node_modules',
     '.git',
     '.gradle-home/**',

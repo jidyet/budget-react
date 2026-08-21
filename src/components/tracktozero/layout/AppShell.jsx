@@ -77,6 +77,42 @@ export default function AppShell({ topBarProps, mobileBottomNavProps, quickActio
           .ttz-saved-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
           .ttz-saved-layout, .ttz-saved-board { grid-template-columns: 1fr !important; }
         }
+        /* Phones in both portrait and landscape need a deliberately single-
+           column plan flow. A landscape handset can exceed 640px wide, so
+           this rule mirrors useIsMobile's short-landscape breakpoint. */
+        @media (max-width: 640px), (max-height: 560px) and (orientation: landscape) {
+          .ttz-plan-tab-strip {
+            display: flex !important;
+            flex-wrap: nowrap !important;
+            overflow-x: auto !important;
+            overscroll-behavior-x: contain;
+            scrollbar-width: none;
+            padding: 4px !important;
+          }
+          .ttz-plan-tab-strip::-webkit-scrollbar { display: none; }
+          .ttz-plan-tab-strip > button { flex: 0 0 auto !important; padding: 8px 10px !important; }
+          .ttz-plan-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
+          .ttz-plan-main-grid,
+          .ttz-plan-payoff-target-grid,
+          .ttz-plan-next-move-grid,
+          .ttz-plan-secondary-grid,
+          .ttz-strategy-hero-grid,
+          .ttz-strategy-main-grid,
+          .ttz-strategy-bottom-grid,
+          .ttz-compare-hero-grid,
+          .ttz-compare-main-grid,
+          .ttz-compare-bottom-grid,
+          .ttz-whatif-main-grid,
+          .ttz-whatif-strategy-grid { grid-template-columns: 1fr !important; }
+          .ttz-plan-health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+          .ttz-plan-next-move-actions { grid-template-columns: 1fr !important; }
+          .ttz-whatif-builder { position: static !important; grid-row: auto !important; }
+          .ttz-whatif-summary { grid-column: auto !important; }
+          .ttz-finish-metrics, .ttz-saved-summary-ribbon, .ttz-saved-metrics { grid-template-columns: 1fr !important; }
+        }
+        @media (max-width: 390px) {
+          .ttz-plan-metric-grid { grid-template-columns: 1fr !important; }
+        }
         @media (prefers-reduced-motion: no-preference) {
           .ttz-card-hover:hover, .ttz-card-hover:focus-visible {
             transform: translateY(-3px) scale(1.012) !important;

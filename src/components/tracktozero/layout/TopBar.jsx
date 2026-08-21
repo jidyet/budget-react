@@ -31,7 +31,7 @@ export default function TopBar({ workspace, repositoryMode, snapshotMode, active
         position: "sticky",
         top: 0,
         zIndex: 30,
-        background: palette.bg === "#08111d" ? "rgba(8,17,29,0.88)" : "rgba(248,251,255,0.88)",
+        background: palette.isDark ? "rgba(0,0,0,0.92)" : "rgba(248,251,255,0.88)",
         borderBottom: `1px solid ${palette.border}`,
         backdropFilter: "blur(16px)",
       }}
@@ -40,15 +40,15 @@ export default function TopBar({ workspace, repositoryMode, snapshotMode, active
         style={{
           maxWidth: "var(--ttz-container-max, 1180px)",
           margin: "0 auto",
-          padding: `12px ${gutter}`,
+          padding: `${isMobile ? 8 : 12}px ${gutter}`,
           display: "flex",
           flexDirection: isCompact ? "column" : "row",
           alignItems: isCompact ? "stretch" : "center",
-          gap: isCompact ? 10 : 20,
+          gap: isMobile ? 8 : isCompact ? 10 : 20,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 16, justifyContent: "space-between" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 10 : 16, justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 10 : 16, minWidth: 0 }}>
             <BrandMark size={isCompact ? "sm" : "md"} />
             {!isCompact ? <WorkspaceIdentity workspace={workspace} /> : null}
           </div>

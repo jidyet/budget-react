@@ -15,7 +15,7 @@ export default function WorkspaceIdentity({ workspace }) {
         padding: "10px 16px",
         borderRadius: 14,
         border: `1px solid ${palette.border2 || palette.border}`,
-        background: palette.bg === "#08111d" ? "rgba(13,23,38,0.92)" : "rgba(255,255,255,0.9)",
+        background: palette.isDark ? "rgba(9,17,28,0.96)" : "rgba(255,255,255,0.9)",
         boxShadow: "var(--ttz-shadow-sm)",
       }}
     >

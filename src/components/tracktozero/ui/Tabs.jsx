@@ -14,7 +14,7 @@ export default function Tabs({ items = [], activeKey, onChange, label = "Tabs" }
         padding: 6,
         borderRadius: 18,
         border: `1px solid ${palette.waD || palette.border2}`,
-        background: palette.bg === "#08111d"
+        background: palette.isDark
           ? "linear-gradient(180deg, rgba(255,180,77,0.10) 0%, rgba(13,23,38,0.92) 100%)"
           : "linear-gradient(180deg, rgba(242,153,74,0.12) 0%, rgba(255,255,255,0.96) 100%)",
       }}

@@ -27,7 +27,7 @@ export default function NextMoveHero({ homeContext, actions }) {
       variant="elevated"
       style={{
         padding: 30,
-        background: ttzPalette.bg === "#08111d"
+        background: ttzPalette.isDark
           ? `radial-gradient(circle at top right, rgba(24,167,225,0.18), transparent 30%), linear-gradient(180deg, rgba(13,23,38,0.98) 0%, rgba(11,19,31,0.98) 100%)`
           : `radial-gradient(circle at top right, rgba(24,167,225,0.10), transparent 28%), linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(246,250,255,0.98) 100%)`,
         border: `1px solid ${ttzPalette.border2}`,

@@ -18,7 +18,7 @@ const VARIANT_STYLES = (palette) => ({
     border: `1px solid ${palette.go}`,
   },
   secondary: {
-    background: palette.bg === "#08111d" ? "rgba(13,23,38,0.88)" : "rgba(255,255,255,0.88)",
+    background: palette.isDark ? "rgba(13,23,38,0.88)" : "rgba(255,255,255,0.88)",
     color: palette.tx,
     border: `1px solid ${palette.border2}`,
   },

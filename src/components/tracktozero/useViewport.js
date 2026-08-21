@@ -28,5 +28,10 @@ const useMediaQuery = (query) => {
   return matches;
 };
 
-export const useIsMobile = () => useMediaQuery(`(max-width: ${BREAKPOINTS.mobile}px)`);
+// A landscape phone can be 800px wide while only 390px tall. Treat it as a
+// mobile layout too; otherwise desktop grids and navigation leak into the
+// viewport even though there is no usable vertical room.
+export const MOBILE_VIEWPORT_QUERY = `(max-width: ${BREAKPOINTS.mobile}px), (max-height: 560px) and (orientation: landscape)`;
+
+export const useIsMobile = () => useMediaQuery(MOBILE_VIEWPORT_QUERY);
 export const useIsTablet = () => useMediaQuery(`(max-width: ${BREAKPOINTS.tablet}px)`);

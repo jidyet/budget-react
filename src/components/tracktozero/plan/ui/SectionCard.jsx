@@ -12,7 +12,7 @@ export default function SectionCard({ number, title, subtitle, actions, children
     <Card
       variant={variant}
       style={{
-        background: palette.bg === "#08111d"
+        background: palette.isDark
           ? "linear-gradient(180deg, rgba(14,24,39,0.96), rgba(10,18,30,0.96))"
           : "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(246,250,255,0.98))",
         border: `1px solid ${palette.border}`,

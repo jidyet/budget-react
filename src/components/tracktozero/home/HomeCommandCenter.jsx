@@ -242,7 +242,7 @@ function DebtSnapshotCard({ homeContext, onGoToDebts }) {
       style={{
         padding: 24,
         borderLeft: `3px solid ${ttzPalette.ac}`,
-        background: ttzPalette.bg === "#08111d"
+        background: ttzPalette.isDark
           ? "linear-gradient(180deg, rgba(19,34,53,0.94), rgba(12,22,36,0.94))"
           : "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(245,250,255,0.98))",
       }}
@@ -283,7 +283,7 @@ function CompactReviewCard({ homeContext, onGoToReview }) {
       style={{
         padding: 24,
         borderLeft: `3px solid ${blocking ? ttzPalette.wa : ttzPalette.info}`,
-        background: ttzPalette.bg === "#08111d"
+        background: ttzPalette.isDark
           ? "linear-gradient(180deg, rgba(19,34,53,0.94), rgba(12,22,36,0.94))"
           : "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(245,250,255,0.98))",
       }}
@@ -325,7 +325,7 @@ function ActivePlanCard({ homeContext, onViewMyPlan, onCompareStrategies, onTryW
       variant="default"
       style={{
         padding: 24,
-        background: ttzPalette.bg === "#08111d"
+        background: ttzPalette.isDark
           ? "linear-gradient(180deg, rgba(15,27,42,0.96), rgba(11,21,34,0.96))"
           : "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(246,250,255,0.98))",
         border: `1px solid ${ttzPalette.border2}`,
@@ -563,7 +563,7 @@ function HouseholdBreakdownCard({ homeContext, onGoToDebts }) {
       style={{
         padding: 24,
         borderLeft: `3px solid ${ttzPalette.in}`,
-        background: ttzPalette.bg === "#08111d"
+        background: ttzPalette.isDark
           ? "linear-gradient(180deg, rgba(19,34,53,0.94), rgba(12,22,36,0.94))"
           : "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(245,250,255,0.98))",
       }}
@@ -621,7 +621,7 @@ function OwnerBreakdownCard({ homeContext, onGoToDebts }) {
       style={{
         padding: 24,
         borderLeft: `3px solid ${ttzPalette.in}`,
-        background: ttzPalette.bg === "#08111d"
+        background: ttzPalette.isDark
           ? "linear-gradient(180deg, rgba(19,34,53,0.94), rgba(12,22,36,0.94))"
           : "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(245,250,255,0.98))",
       }}
@@ -660,7 +660,7 @@ function ReviewSummaryCard({ homeContext, onGoToReview }) {
         style={{
           padding: 20,
           borderLeft: `4px solid ${toneColors(ttzPalette).warning.fg}`,
-          background: ttzPalette.bg === "#08111d"
+          background: ttzPalette.isDark
             ? "linear-gradient(180deg, rgba(40,30,14,0.92), rgba(24,19,10,0.92))"
             : toneColors(ttzPalette).warning.bg,
         }}
@@ -688,8 +688,8 @@ function ReviewSummaryCard({ homeContext, onGoToReview }) {
         padding: 20,
         borderLeft: `4px solid ${colors.fg}`,
         background: tone === "warning"
-          ? (ttzPalette.bg === "#08111d" ? "linear-gradient(180deg, rgba(40,30,14,0.92), rgba(24,19,10,0.92))" : colors.bg)
-          : (ttzPalette.bg === "#08111d" ? "linear-gradient(180deg, rgba(13,28,43,0.96), rgba(10,20,33,0.96))" : ttzPalette.surf),
+          ? (ttzPalette.isDark ? "linear-gradient(180deg, rgba(40,30,14,0.92), rgba(24,19,10,0.92))" : colors.bg)
+          : (ttzPalette.isDark ? "linear-gradient(180deg, rgba(13,28,43,0.96), rgba(10,20,33,0.96))" : ttzPalette.surf),
       }}
     >
       <div style={{ display: "grid", gap: 10 }}>

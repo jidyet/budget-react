@@ -228,7 +228,7 @@ describe("UX-2.1 Home redesign", () => {
       portfolioSummary: { totalWorkspaceDebt: 500, includedDebt: 500, excludedDebt: 0 },
     });
     const recordedHtml = render(h(HomeCommandCenter, { ...baseProps, snapshot: paymentRecorded, reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
-    expect(recordedHtml).toContain("Update balance");
+    expect(recordedHtml).toContain("Record payment");
     expect(recordedHtml).toContain("$500.00");
 
     const balanceUpdated = activePlanSnapshot({

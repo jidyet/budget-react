@@ -1,5 +1,5 @@
 import React from "react";
-import { TYPE_SCALE, ttzPalette } from "../../theme.js";
+import { TYPE_SCALE, chartColor, ttzPalette } from "../../theme.js";
 import { formatMoney as money } from "../../formatting.js";
 
 // GATE-10B.1D: hand-rolled stroke-dasharray donut, same dependency-free
@@ -19,7 +19,7 @@ const percent = (ratio) => `${Math.round(Number(ratio || 0) * 100)}%`;
  */
 export default function AllocationDonut({ segments = [], title, subtitle, centerLabel, centerSupporting, emptyState = null }) {
   const palette = ttzPalette;
-  const colorFor = (token) => palette[token] || palette.ac;
+  const colorFor = (token) => chartColor(token, "base", palette);
   // Zero-value segments are skipped entirely - never drawn as a sliver, and
   // never inflate a color-blind-unfriendly "everything is one color" ring.
   const visible = segments.filter((s) => Number(s.value) > 0);
@@ -66,18 +66,56 @@ export default function AllocationDonut({ segments = [], title, subtitle, center
             ))}
           </svg>
           {(centerLabel || centerSupporting) ? (
-            // A wide dollar figure (e.g. "$15,647.00") doesn't fit the ring's
-            // inner hole at cardTitle size on one line - constrained width +
-            // a smaller size that's allowed to wrap onto two lines instead
-            // of overflowing past the ring, which is what happened before
-            // this fix (found live on Avalanche's debt-composition donut).
-            <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", justifyItems: "center", gap: 2 }}>
+            // Anchor the copy to the actual donut center. This avoids any
+            // perceived left-drift from full-box centering and keeps both
+            // lines visually locked to the ring hole.
+            <div
+              style={{
+                position: "absolute",
+                left: "50%",
+                top: "50%",
+                width: 88,
+                minHeight: 72,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                textAlign: "center",
+                gap: 2,
+                transform: "translate(-50%, -50%)",
+                pointerEvents: "none",
+              }}
+            >
               {centerLabel ? (
-                <div style={{ maxWidth: 92, textAlign: "center", fontFamily: "var(--ttz-font-body)", fontWeight: 800, fontSize: 15, lineHeight: 1.15, color: palette.tx, overflowWrap: "anywhere" }}>
+                <div
+                  style={{
+                    width: "100%",
+                    textAlign: "center",
+                    fontFamily: "var(--ttz-font-body)",
+                    fontWeight: 800,
+                    fontSize: 13,
+                    lineHeight: 1.05,
+                    letterSpacing: "-0.01em",
+                    color: palette.tx,
+                    whiteSpace: "nowrap",
+                  }}
+                >
                   {centerLabel}
                 </div>
               ) : null}
-              {centerSupporting ? <div style={{ ...TYPE_SCALE.caption, color: palette.tx2 }}>{centerSupporting}</div> : null}
+              {centerSupporting ? (
+                <div
+                  style={{
+                    ...TYPE_SCALE.caption,
+                    color: palette.tx2,
+                    textAlign: "center",
+                    lineHeight: 1.1,
+                    width: "100%",
+                  }}
+                >
+                  {centerSupporting}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>

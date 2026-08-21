@@ -39,11 +39,12 @@ const styles = {
   },
   wrap: { maxWidth: 1180, margin: "0 auto", padding: "28px 18px 48px" },
   card: {
-    background: "rgba(255,255,255,0.86)",
-    border: "1px solid #b9dcf8",
-    borderRadius: 22,
+    background: "rgba(255,255,255,0.88)",
+    border: "1px solid #c9def5",
+    borderRadius: 24,
     padding: 20,
     boxShadow: "0 18px 40px rgba(22, 86, 139, 0.08)",
+    backdropFilter: "blur(12px)",
   },
   grid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 14 },
   button: {
@@ -56,10 +57,10 @@ const styles = {
     cursor: "pointer",
   },
   primaryButton: {
-    border: "1px solid #0ea5e9",
+    border: "1px solid #0f9c6d",
     borderRadius: 14,
-    background: "#0ea5e9",
-    color: "#071523",
+    background: "linear-gradient(135deg, #21c97a 0%, #10b981 100%)",
+    color: "#062114",
     fontWeight: 900,
     padding: "10px 14px",
     cursor: "pointer",
@@ -97,7 +98,15 @@ const styles = {
 function Section({ title, eyebrow, children }) {
   const palette = ttzPalette;
   return (
-    <section style={{ ...styles.card, background: palette.surf, border: `1px solid ${palette.border}`, color: palette.tx, marginTop: 16 }}>
+    <section
+      style={{
+        ...styles.card,
+        background: `linear-gradient(180deg, ${palette.surf2} 0%, ${palette.surf} 100%)`,
+        border: `1px solid ${palette.border2 || palette.border}`,
+        color: palette.tx,
+        marginTop: 16,
+      }}
+    >
       {eyebrow && <p style={{ margin: "0 0 6px", letterSpacing: ".08em", textTransform: "uppercase", fontWeight: 900, color: palette.ac, fontSize: 12 }}>{eyebrow}</p>}
       <h2 style={{ margin: "0 0 12px", fontSize: 24 }}>{title}</h2>
       {children}
@@ -546,6 +555,23 @@ function Settings({ snapshot, repositoryMode, service, refresh, runAction, write
   const unlinkedPeople = (snapshot.people || []).filter((person) => person.status !== "merged" && !person.workspaceMembershipId);
   return (
     <Section title="Workspace settings" eyebrow="Settings">
+      <div style={{ ...styles.grid, marginBottom: 18 }}>
+        <div style={{ ...styles.card, background: `linear-gradient(180deg, ${palette.surf2} 0%, ${palette.surf} 100%)`, border: `1px solid ${palette.border2 || palette.border}`, boxShadow: "none" }}>
+          <div style={{ color: palette.tx2, fontSize: 12, fontWeight: 900, letterSpacing: ".08em", textTransform: "uppercase" }}>Workspace mode</div>
+          <div style={{ color: palette.tx, fontSize: 26, fontWeight: 900, marginTop: 8 }}>{snapshot.workspace.type === "household" ? "Household" : "Personal"}</div>
+          <div style={{ color: palette.tx2, marginTop: 6 }}>{dataMode}</div>
+        </div>
+        <div style={{ ...styles.card, background: `linear-gradient(180deg, ${palette.surf2} 0%, ${palette.surf} 100%)`, border: `1px solid ${palette.border2 || palette.border}`, boxShadow: "none" }}>
+          <div style={{ color: palette.tx2, fontSize: 12, fontWeight: 900, letterSpacing: ".08em", textTransform: "uppercase" }}>Verified members</div>
+          <div style={{ color: palette.tx, fontSize: 26, fontWeight: 900, marginTop: 8 }}>{snapshot.members.length}</div>
+          <div style={{ color: palette.tx2, marginTop: 6 }}>people with real access to this workspace</div>
+        </div>
+        <div style={{ ...styles.card, background: `linear-gradient(180deg, ${palette.surf2} 0%, ${palette.surf} 100%)`, border: `1px solid ${palette.border2 || palette.border}`, boxShadow: "none" }}>
+          <div style={{ color: palette.tx2, fontSize: 12, fontWeight: 900, letterSpacing: ".08em", textTransform: "uppercase" }}>Pending invites</div>
+          <div style={{ color: palette.tx, fontSize: 26, fontWeight: 900, marginTop: 8 }}>{snapshot.memberInvites?.filter((invite) => invite.derivedStatus === "pending").length || 0}</div>
+          <div style={{ color: palette.tx2, marginTop: 6 }}>people still waiting to join</div>
+        </div>
+      </div>
       <div style={styles.grid}>
         <div>
           <p><strong>Workspace name:</strong> {snapshot.workspace.name || (snapshot.workspace.type === "household" ? "Your household" : "Personal workspace")}</p>
@@ -1453,7 +1479,7 @@ function TrackToZeroV2AppInner() {
     );
   }
 
-  const qaControlsVisible = !usesRealAuthUi;
+  const qaControlsVisible = false;
   const topBarProps = {
     workspace: snapshot.workspace,
     repositoryMode: runtime.mode,

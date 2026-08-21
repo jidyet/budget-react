@@ -30,11 +30,27 @@ export default function ScopeSelector({ snapshot, ownerFilter, onChange, people 
     { key: "unassigned", label: "Unassigned" },
   ];
   return (
-    <div style={{ display: "grid", gap: 8 }}>
+    <div
+      style={{
+        display: "grid",
+        gap: 10,
+        padding: 16,
+        borderRadius: 20,
+        border: `1px solid ${palette.border}`,
+        background: `linear-gradient(180deg, ${palette.surf2} 0%, ${palette.surf} 100%)`,
+        boxShadow: "var(--ttz-shadow-sm)",
+      }}
+    >
+      <div>
+        <div style={{ ...TYPE_SCALE.overline, color: palette.ac }}>Filter your view</div>
+        <div style={{ ...TYPE_SCALE.body, color: palette.tx2, marginTop: 4 }}>
+          Slice the debt view by verified member, shared debt, or unassigned accounts so nothing gets muddy.
+        </div>
+      </div>
       <Tabs label="Filter by owner" items={items} activeKey={ownerFilter} onChange={onChange} />
       {financialProfiles.length ? (
         <div>
-          <div style={{ ...TYPE_SCALE.caption, color: palette.tx2, marginBottom: 4 }}>Financial profiles (not connected to an account)</div>
+          <div style={{ ...TYPE_SCALE.caption, color: palette.tx2, marginBottom: 6 }}>Financial profiles (not connected to a verified account)</div>
           <Tabs
             label="Filter by financial profile"
             items={financialProfiles.map((person) => ({ key: person.id, label: person.displayName }))}

@@ -6,37 +6,8 @@ import Select from "../ui/Select.jsx";
 import MoneyInput from "../ui/MoneyInput.jsx";
 import { TYPE_SCALE, ttzPalette } from "../theme.js";
 
-// UX-6.1: replaces the "Record observed reality" section - that exact
-// engineering phrase is gone from the product entirely. This is ongoing
-// account MAINTENANCE (ADD DEBT is account creation and stays a separate,
-// page-level action - see AddDebtModal.jsx). Progressive disclosure: no
-// field is visible until the user picks an action, matching the "Made a
-// payment? / Got your latest balance?" pattern.
-//
-// PAYMENT/BALANCE SEMANTICS ARE LOCKED - unchanged from the prior UI:
-// - Record payment -> service.recordPayment -> a PaymentEvent. It means
-//   "the user says a payment occurred." It does NOT move the confirmed
-//   balance.
-// - Update balance -> service.recordBalanceSnapshot -> a BalanceSnapshot.
-//   This IS the confirmed observed debt amount as of a date, and is what
-//   moves confirmed progress.
-// Only the entry point changed (hidden behind an action instead of always
-// rendered); the underlying service calls and their meaning did not.
-//
-// UX-8.4 follow-up: previously a tall, always-vertical card living in its
-// own dedicated 320px sidebar column that ran the full height of the page -
-// direct feedback was that this reserved a whole vertical strip of mostly
-// empty space (the card itself is short) at the cost of the page's usable
-// width. Now a single horizontal bar: title on the left, both prompts (and
-// whichever form is active) flowing inline on the right, wrapping onto a
-// new line only at narrow widths. The caller (DebtsCenter.jsx) renders this
-// full-width above the main content instead of beside it.
-// GATE-10B.1: `initialMode` lets a caller (the mobile QuickActionSheet's
-// generic "Record payment"/"Update balance" actions, which have no specific
-// debt to jump straight to) open this rail's form pre-expanded instead of
-// requiring one more tap after navigating to Debts.
 export default function QuickUpdateRail({ snapshot, service, refresh, runAction, writeState, canObserve, initialMode = null }) {
-  const [mode, setMode] = useState(canObserve ? initialMode : null); // null | "payment" | "balance"
+  const [mode, setMode] = useState(canObserve ? initialMode : null);
   const [payment, setPayment] = useState({ debtId: snapshot.debts[0]?.id || "", amount: "" });
   const [balance, setBalance] = useState({ debtId: snapshot.debts[0]?.id || "", amount: "" });
   const palette = ttzPalette;
@@ -62,19 +33,34 @@ export default function QuickUpdateRail({ snapshot, service, refresh, runAction,
   };
 
   return (
-    <Card variant="elevated" style={{ display: "flex", flexWrap: "wrap", gap: 20, alignItems: "center" }}>
-      <div style={{ minWidth: 180 }}>
-        <div style={{ ...TYPE_SCALE.overline, color: palette.tx2 }}>Quick update</div>
-        <div style={{ ...TYPE_SCALE.cardTitle, color: palette.tx, marginTop: 2 }}>Keep your debts current and avoid late fees</div>
+    <Card
+      variant="elevated"
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 14,
+        alignItems: "center",
+        background: `linear-gradient(180deg, ${palette.surf2} 0%, ${palette.surf} 100%)`,
+        border: `1px solid ${palette.border2 || palette.border}`,
+        boxShadow: "var(--ttz-shadow-md)",
+        padding: "18px 22px",
+      }}
+    >
+      <div style={{ minWidth: 240, display: "grid", gap: 4 }}>
+        <div style={{ ...TYPE_SCALE.overline, color: palette.ac }}>Quick update</div>
+        <div style={{ ...TYPE_SCALE.cardTitle, color: palette.tx, marginTop: 2 }}>Keep your debt view fresh</div>
+        <div style={{ ...TYPE_SCALE.supporting, color: palette.tx2 }}>
+          Log payments, lock in fresh balances, and keep the whole page clean.
+        </div>
         {!canObserve ? (
-          <p style={{ ...TYPE_SCALE.supporting, color: palette.tx2, margin: "6px 0 0" }}>Your role is read-only for payment/balance updates.</p>
+          <p style={{ ...TYPE_SCALE.supporting, color: palette.tx2, margin: 0 }}>Your role is read-only for payment and balance updates.</p>
         ) : null}
       </div>
 
       {canObserve ? (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 20, flex: 1, alignItems: "flex-end", justifyContent: "flex-end" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 16, flex: 1, alignItems: "center", justifyContent: "flex-end" }}>
           {mode !== "payment" ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <span style={{ ...TYPE_SCALE.body, color: palette.tx }}>Made a payment?</span>
               <Button type="button" onClick={() => setMode("payment")}>Record payment</Button>
             </div>
@@ -98,7 +84,7 @@ export default function QuickUpdateRail({ snapshot, service, refresh, runAction,
           )}
 
           {mode !== "balance" ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <span style={{ ...TYPE_SCALE.body, color: palette.tx }}>Got your latest balance?</span>
               <Button type="button" onClick={() => setMode("balance")}>Update balance</Button>
             </div>

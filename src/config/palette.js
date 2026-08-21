@@ -4,23 +4,23 @@ export function buildPalette(theme) {
   const D = theme === "dark";
   return {
     // Backgrounds
-    bg:      D ? "#07131f" : "#f0f6ff",
-    bg2:     D ? "#0f2236" : "#e6f0fb",
+    bg:      D ? "#08111d" : "#f5f9ff",
+    bg2:     D ? "#0d1b2b" : "#edf5ff",
     // Surfaces
-    surf:    D ? "#112235" : "#ffffff",
-    surf2:   D ? "#0c1c2c" : "#e8f3ff",
-    surf3:   D ? "#162840" : "#deeef9",
+    surf:    D ? "#0d1726" : "#ffffff",
+    surf2:   D ? "#122136" : "#f4f9ff",
+    surf3:   D ? "#172942" : "#e9f2ff",
     // Borders
-    border:  D ? "#274864" : "#c2ddf0",
-    border2: D ? "#39729e" : "#7bbee8",
+    border:  D ? "#21364f" : "#d7e7f6",
+    border2: D ? "#2f5f8b" : "#a9cae8",
     // Text
-    tx:      D ? "#f0f8ff" : "#0a2236",
-    tx2:     D ? "#c8dff5" : "#1e3d54",
-    muted:   D ? "#8ab4d8" : "#2e6080",
+    tx:      D ? "#eef6ff" : "#10263d",
+    tx2:     D ? "#bfd4ea" : "#34556f",
+    muted:   D ? "#85a7c8" : "#5d7b95",
     // Accent - blue-led app theme
     ac:      D ? "#3ab4f2" : BRAND_COLORS.blue,
-    acD:     D ? "rgba(58,180,242,.22)" : "rgba(24,167,225,.22)",
-    acS:     D ? "rgba(58,180,242,.10)" : "rgba(24,167,225,.10)",
+    acD:     D ? "rgba(58,180,242,.24)" : "rgba(24,167,225,.20)",
+    acS:     D ? "rgba(58,180,242,.12)" : "rgba(24,167,225,.08)",
     acText:  "#000000",
     // Secondary accent - deeper blue
     in:      D ? "#6cc8ff" : "#0d8ecb",

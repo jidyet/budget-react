@@ -39,12 +39,12 @@ const DEFAULT_FILTERS = { eventTypeFilter: "all", actorFilter: "all", ownerFilte
 function ActivityRow({ entry }) {
   const showOwner = entry.ownerName && entry.ownerName !== entry.actorName;
   return (
-    <div style={{ display: "grid", gap: 4, padding: "14px 0", borderBottom: `1px solid ${ttzPalette.border}` }}>
+    <div style={{ display: "grid", gap: 6, padding: "16px 0", borderBottom: `1px solid ${ttzPalette.border}` }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           {entry.debtName ? <LenderIdentity creditorName={entry.debtName} size="sm" showName={false} /> : null}
           <Badge tone="neutral">{KIND_LABELS[entry.kind] || "Update"}</Badge>
-          <span style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 600 }}>{entry.title}</span>
+          <span style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 700 }}>{entry.title}</span>
         </div>
         <span style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted }}>{formatLocalTimeLabel(entry.at)}</span>
       </div>
@@ -138,9 +138,6 @@ export default function ActivityCenter({ page, loading, onLoadMore, workspace })
   const visibleCount = (page?.cursor || 0) + (page?.limit || PAGE_SIZE);
   const visibleEntries = entries.slice(0, visibleCount);
 
-  // Actor options: verified authenticated workspace members only - never a
-  // pending invite, never a financial profile (which has no login and can
-  // never actually be the uid that performed a write).
   const actorOptions = useMemo(() => {
     const seen = new Set();
     const options = [];
@@ -153,9 +150,6 @@ export default function ActivityCenter({ page, loading, onLoadMore, workspace })
     return options;
   }, [page]);
 
-  // Owner options: the same real ownership identity every other screen
-  // uses (member/person/joint/unassigned) - built from the workspace's
-  // actual debts, not guessed from whichever entries happen to be loaded.
   const ownerOptions = useMemo(() => {
     const byKey = new Map();
     for (const debt of page?.records?.debts || []) {
@@ -213,10 +207,11 @@ export default function ActivityCenter({ page, loading, onLoadMore, workspace })
   };
 
   const filterProps = { eventTypeFilter, setEventTypeFilter, actorFilter, setActorFilter, ownerFilter, setOwnerFilter, debtFilter, setDebtFilter, dateRangeFilter, setDateRangeFilter, sortOrder, setSortOrder, actorOptions, ownerOptions, debtOptions };
+  const latestEntry = sortedEntries[0] || visibleEntries[0] || null;
 
   return (
     <main>
-      <PageHeader title="Activity" description="A history of what actually happened - confirmed balances, recorded payments, and plan changes." />
+      <PageHeader title="Activity" description="A history of what actually happened — confirmed balances, recorded payments, and plan changes." />
 
       {loading ? <LoadingState label="Loading activity" /> : null}
 
@@ -229,18 +224,45 @@ export default function ActivityCenter({ page, loading, onLoadMore, workspace })
 
       {visibleEntries.length ? (
         <div style={{ display: "grid", gap: 16 }}>
+          <Card
+            variant="default"
+            style={{
+              background: `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`,
+              border: `1px solid ${ttzPalette.border2 || ttzPalette.border}`,
+              boxShadow: "var(--ttz-shadow-sm)",
+            }}
+          >
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16 }}>
+              <div>
+                <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Loaded activity</div>
+                <div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.tx, marginTop: 8 }}>{visibleEntries.length}</div>
+                <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 4 }}>events in this session view</div>
+              </div>
+              <div>
+                <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Verified actors</div>
+                <div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.tx, marginTop: 8 }}>{actorOptions.length}</div>
+                <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 4 }}>real members behind the updates</div>
+              </div>
+              <div>
+                <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Latest movement</div>
+                <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 700, marginTop: 8 }}>{latestEntry?.title || "No activity yet"}</div>
+                <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 4 }}>{latestEntry ? formatLocalTimeLabel(latestEntry.at) : "Waiting for updates"}</div>
+              </div>
+            </div>
+          </Card>
+
           {isTablet ? (
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <Button variant="secondary" onClick={() => setFilterSheetOpen(true)}>
                 Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}
               </Button>
               {hasActiveFilters ? <Button variant="ghost" onClick={clearFilters}>Clear filters</Button> : null}
-              <FilterSheet open={filterSheetOpen} onClose={() => setFilterSheetOpen(false)} title="Filters &amp; sort">
+              <FilterSheet open={filterSheetOpen} onClose={() => setFilterSheetOpen(false)} title="Filters & sort">
                 <FilterControls {...filterProps} />
               </FilterSheet>
             </div>
           ) : (
-            <Card variant="default" style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "flex-end" }}>
+            <Card variant="default" style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "flex-end", background: `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)` }}>
               <FilterControls {...filterProps} />
               {hasActiveFilters ? (
                 <Button variant="ghost" size="sm" onClick={clearFilters} style={{ alignSelf: "center" }}>Clear filters</Button>
@@ -257,7 +279,7 @@ export default function ActivityCenter({ page, loading, onLoadMore, workspace })
           {sortedEntries.length === 0 ? (
             <EmptyState title="No activity matches these filters" description="Try clearing a filter or choosing a different date range." actionLabel="Clear filters" onAction={clearFilters} />
           ) : (
-            <Card variant="default" style={{ padding: 24 }}>
+            <Card variant="default" style={{ padding: 24, background: `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`, boxShadow: "var(--ttz-shadow-md)" }}>
               {dayGroups.map((group) => (
                 <div key={group.dayKey} style={{ marginBottom: 12 }}>
                   <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted, margin: "12px 0 4px" }}>
@@ -269,7 +291,7 @@ export default function ActivityCenter({ page, loading, onLoadMore, workspace })
               {!page?.exhausted ? (
                 <div style={{ marginTop: 16, textAlign: "center" }}>
                   <Button variant="secondary" onClick={handleLoadMore} disabled={loadingMore}>
-                    {loadingMore ? "Loading…" : "Load more"}
+                    {loadingMore ? "Loading..." : "Load more"}
                   </Button>
                 </div>
               ) : null}

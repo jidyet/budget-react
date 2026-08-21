@@ -20,12 +20,12 @@ export default function PayoffOrderTable({ debts = [], isHousehold = false, high
   const palette = ttzPalette;
   if (!debts.length) return <p style={{ ...TYPE_SCALE.body, color: palette.tx2 }}>No debts included in this preview.</p>;
 
-  const thStyle = { textAlign: "left", padding: "8px 10px", ...TYPE_SCALE.overline, color: palette.tx2, borderBottom: `1px solid ${palette.border}` };
-  const tdStyle = { padding: "10px", ...TYPE_SCALE.body, color: palette.tx, borderBottom: `1px solid ${palette.border}`, verticalAlign: "middle" };
+  const thStyle = { textAlign: "left", padding: "10px 12px", ...TYPE_SCALE.overline, color: palette.tx2, borderBottom: `1px solid ${palette.border}` };
+  const tdStyle = { padding: "12px", ...TYPE_SCALE.body, color: palette.tx, borderBottom: `1px solid ${palette.border}`, verticalAlign: "middle" };
 
   return (
-    <div style={{ overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
+    <div style={{ overflowX: "auto hidden" }}>
+      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: showMomentum ? 0 : 520, tableLayout: "fixed" }}>
         <thead>
           <tr>
             <th style={thStyle}>#</th>

@@ -26,9 +26,12 @@ export default function NextMoveHero({ homeContext, actions }) {
     <Card
       variant="elevated"
       style={{
-        padding: 28,
-        background: `linear-gradient(135deg, ${ttzPalette.surf} 0%, ${ttzPalette.acS} 100%)`,
-        border: `1px solid ${ttzPalette.border}`,
+        padding: 30,
+        background: ttzPalette.bg === "#08111d"
+          ? `radial-gradient(circle at top right, rgba(24,167,225,0.18), transparent 30%), linear-gradient(180deg, rgba(13,23,38,0.98) 0%, rgba(11,19,31,0.98) 100%)`
+          : `radial-gradient(circle at top right, rgba(24,167,225,0.10), transparent 28%), linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(246,250,255,0.98) 100%)`,
+        border: `1px solid ${ttzPalette.border2}`,
+        boxShadow: "var(--ttz-shadow-lg)",
       }}
     >
       <div style={{ display: "grid", gap: 16 }}>
@@ -55,8 +58,11 @@ export default function NextMoveHero({ homeContext, actions }) {
 
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
           <Button variant="primary" onClick={handler}>{nextMove?.ctaLabel || "View details"}</Button>
-          <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>
-            {money(primaryRemainingDebt)} remaining
+          <div style={{ display: "grid", justifyItems: "end", gap: 2 }}>
+            <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted }}>Left to go</div>
+            <div style={{ fontFamily: "var(--ttz-font-body)", fontVariantNumeric: "tabular-nums", fontWeight: 800, fontSize: 18, color: ttzPalette.tx }}>
+              {money(primaryRemainingDebt)}
+            </div>
           </div>
         </div>
       </div>

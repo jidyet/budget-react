@@ -1,6 +1,6 @@
 import React from "react";
 import Card from "../../ui/Card.jsx";
-import { TYPE_SCALE, ttzPalette } from "../../theme.js";
+import { TYPE_SCALE, CHART_USAGE_RULES, ttzPalette } from "../../theme.js";
 import { formatMoney as money } from "../../formatting.js";
 import TrendChart from "./TrendChart.jsx";
 
@@ -12,7 +12,11 @@ import TrendChart from "./TrendChart.jsx";
 // object (projectedZeroDate/monthsToZero/estimatedInterest/projection),
 // already fetched by the caller - this component performs no simulation of
 // its own.
-const COLOR_TOKENS = ["ac", "go", "info", "wa"];
+const COLOR_TOKENS = [
+  CHART_USAGE_RULES.baseline,
+  CHART_USAGE_RULES.improvement,
+  CHART_USAGE_RULES.secondary,
+];
 
 /**
  * entries: Array<{ label, previewResult }> (2-3 entries)

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { applyTheme, ttzPalette, toneColors } from "./theme.js";
+import { applyTheme, chartColor, CHART_COLOR_GROUPS, CHART_USAGE_RULES, ttzPalette, toneColors } from "./theme.js";
 import { resolveInitialTheme } from "./themeStorage.js";
 
 // UX-8: locks in the contrast fix so a future palette/token edit can't
@@ -59,6 +59,30 @@ describe("UX-8: tone text colors clear WCAG AA (4.5:1) against white and against
   });
 });
 
+describe("chart palette tokens", () => {
+  it("defines exactly the three approved chart families: blue, green, and orange", () => {
+    expect(Object.keys(CHART_COLOR_GROUPS)).toEqual(["blue", "green", "orange"]);
+  });
+
+  it("maps current/baseline chart usage to blue, positive/active to green, and caution/buffer to orange", () => {
+    expect(CHART_USAGE_RULES.current).toBe("blue");
+    expect(CHART_USAGE_RULES.baseline).toBe("blue");
+    expect(CHART_USAGE_RULES.active).toBe("green");
+    expect(CHART_USAGE_RULES.improvement).toBe("green");
+    expect(CHART_USAGE_RULES.caution).toBe("orange");
+    expect(CHART_USAGE_RULES.buffer).toBe("orange");
+  });
+
+  it("resolves both new chart groups and legacy component tokens through the same shared chart palette", () => {
+    expect(chartColor("blue")).toBe(CHART_COLOR_GROUPS.blue.base);
+    expect(chartColor("green")).toBe(CHART_COLOR_GROUPS.green.base);
+    expect(chartColor("orange")).toBe(CHART_COLOR_GROUPS.orange.base);
+    expect(chartColor("ac")).toBe(CHART_COLOR_GROUPS.blue.base);
+    expect(chartColor("go")).toBe(CHART_COLOR_GROUPS.green.base);
+    expect(chartColor("wa")).toBe(CHART_COLOR_GROUPS.orange.base);
+  });
+});
+
 // GATE-10B.1C: applyTheme mutates the ONE shared ttzPalette object in place
 // rather than replacing the export - every one of the ~60 component files
 // that `import { ttzPalette }` holds onto that same reference for the
@@ -78,8 +102,8 @@ describe("applyTheme", () => {
 
   it("THEME-02: switching to dark applies buildPalette('dark')'s own values, unmodified by the light-only contrast overrides", () => {
     applyTheme("dark");
-    expect(ttzPalette.bg).toBe("#07131f");
-    expect(ttzPalette.tx).toBe("#f0f8ff");
+    expect(ttzPalette.bg).toBe("#08111d");
+    expect(ttzPalette.tx).toBe("#eef6ff");
     // The light-tuned contrast overrides must never stomp dark's own go/wa/info/ac/da.
     expect(ttzPalette.go).toBe("#4ade80");
     expect(ttzPalette.info).toBe("#6bbdff");
@@ -98,7 +122,7 @@ describe("applyTheme", () => {
     applyTheme("dark");
     const resolved = applyTheme("neon-crypto-mode");
     expect(resolved).toBe("light");
-    expect(ttzPalette.bg).toBe("#f0f6ff");
+    expect(ttzPalette.bg).toBe("#f5f9ff");
   });
 
   it("never leaves a stale key from one theme's shape on the other (defensive against future palette-key drift)", () => {

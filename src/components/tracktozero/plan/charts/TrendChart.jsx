@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { TYPE_SCALE, ttzPalette } from "../../theme.js";
+import { TYPE_SCALE, chartColor, ttzPalette } from "../../theme.js";
 import { formatMoney as money } from "../../formatting.js";
 import { valueForMode, withCumulativeInterest } from "./trendChartMath.js";
 
@@ -110,7 +110,7 @@ export default function TrendChart({ series = [], rangeOptions = DEFAULT_RANGE_O
     .map((s) => `${s.label}: starts at ${money(s.points[0]?.balance || 0)}${s.payoffMonth ? `, reaches $0 in ${s.payoffMonth}` : ""}.`)
     .join(" ");
 
-  const colorFor = (token) => palette[token] || palette.ac;
+  const colorFor = (token) => chartColor(token, "base", palette);
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -174,8 +174,15 @@ export default function TrendChart({ series = [], rangeOptions = DEFAULT_RANGE_O
         </div>
       ) : null}
 
-      <div role="img" aria-label={summary} style={{ position: "relative" }}>
+      <div role="img" aria-label={summary} style={{ position: "relative", borderRadius: 16, overflow: "hidden" }}>
         <svg width="100%" viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
+          <defs>
+            <linearGradient id="ttzPlanChartBg" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={palette.acS} />
+              <stop offset="100%" stopColor="transparent" />
+            </linearGradient>
+          </defs>
+          <rect x={0} y={0} width={width} height={height} fill="url(#ttzPlanChartBg)" opacity="0.55" />
           <line x1={pad} y1={height - pad} x2={width - pad} y2={height - pad} stroke={palette.border2} strokeWidth="1" />
           <line x1={pad} y1={pad} x2={pad} y2={height - pad} stroke={palette.border2} strokeWidth="1" />
 

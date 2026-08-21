@@ -8,12 +8,17 @@ import useReducedMotion from "../../../hooks/useReducedMotion.js";
 // own onClick/type/disabled/etc.
 const VARIANT_STYLES = (palette) => ({
   primary: {
-    background: palette.go,
+    background: `linear-gradient(135deg, ${palette.wa} 0%, #ff8a1a 100%)`,
+    color: "#ffffff",
+    border: `1px solid ${palette.wa}`,
+  },
+  success: {
+    background: `linear-gradient(135deg, ${palette.go} 0%, #2f8c39 100%)`,
     color: "#ffffff",
     border: `1px solid ${palette.go}`,
   },
   secondary: {
-    background: palette.surf,
+    background: palette.bg === "#08111d" ? "rgba(13,23,38,0.88)" : "rgba(255,255,255,0.88)",
     color: palette.tx,
     border: `1px solid ${palette.border2}`,
   },
@@ -65,7 +70,8 @@ const Button = forwardRef(function Button(
         fontWeight: 700,
         cursor: isDisabled ? "not-allowed" : "pointer",
         opacity: isDisabled ? 0.55 : 1,
-        transition: reducedMotion ? "none" : "background-color 120ms ease, border-color 120ms ease, opacity 120ms ease",
+        boxShadow: variant === "primary" ? "var(--ttz-shadow-sm)" : "none",
+        transition: reducedMotion ? "none" : "background-color 120ms ease, border-color 120ms ease, opacity 120ms ease, transform 120ms ease, box-shadow 120ms ease",
         outlineOffset: 2,
         ...style,
       }}

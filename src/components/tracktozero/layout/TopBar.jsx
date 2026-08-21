@@ -31,15 +31,16 @@ export default function TopBar({ workspace, repositoryMode, snapshotMode, active
         position: "sticky",
         top: 0,
         zIndex: 30,
-        background: palette.surf,
+        background: palette.bg === "#08111d" ? "rgba(8,17,29,0.88)" : "rgba(248,251,255,0.88)",
         borderBottom: `1px solid ${palette.border}`,
+        backdropFilter: "blur(16px)",
       }}
     >
       <div
         style={{
           maxWidth: "var(--ttz-container-max, 1180px)",
           margin: "0 auto",
-          padding: `10px ${gutter}`,
+          padding: `12px ${gutter}`,
           display: "flex",
           flexDirection: isCompact ? "column" : "row",
           alignItems: isCompact ? "stretch" : "center",

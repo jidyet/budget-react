@@ -96,6 +96,65 @@ export const toneColors = (palette = ttzPalette) => ({
   neutral: { fg: palette.muted, bg: palette.surf2, border: palette.border },
 });
 
+// Shared chart/diagram palette - we keep the core app/status tones
+// separate from chart storytelling on purpose. Charts use ONLY these three
+// visual families so plan, compare, donut, and trend visuals feel like one
+// system instead of each page improvising. Usage rule:
+// - blue: primary/current/baseline values
+// - green: positive outcome / active recommendation / improved result
+// - orange: caution / secondary emphasis / buffer / watch-this area
+export const CHART_COLOR_GROUPS = Object.freeze({
+  blue: Object.freeze({
+    strong: "#1479FF",
+    base: "#2F80ED",
+    soft: "#DCEBFF",
+  }),
+  green: Object.freeze({
+    strong: "#16A34A",
+    base: "#27AE60",
+    soft: "#DCFCE7",
+  }),
+  orange: Object.freeze({
+    strong: "#F97316",
+    base: "#F2994A",
+    soft: "#FFEDD5",
+  }),
+});
+
+export const CHART_USAGE_RULES = Object.freeze({
+  baseline: "blue",
+  current: "blue",
+  primary: "blue",
+  positive: "green",
+  active: "green",
+  improvement: "green",
+  caution: "orange",
+  secondary: "orange",
+  buffer: "orange",
+});
+
+const LEGACY_CHART_TOKEN_MAP = Object.freeze({
+  ac: ["blue", "base"],
+  info: ["blue", "base"],
+  in: ["blue", "strong"],
+  go: ["green", "base"],
+  wa: ["orange", "base"],
+  ur: ["orange", "strong"],
+  muted: null,
+});
+
+export function chartColor(tokenOrGroup, shade = "base", palette = ttzPalette) {
+  if (tokenOrGroup in CHART_COLOR_GROUPS) {
+    return CHART_COLOR_GROUPS[tokenOrGroup][shade] || CHART_COLOR_GROUPS[tokenOrGroup].base;
+  }
+  const legacy = LEGACY_CHART_TOKEN_MAP[tokenOrGroup];
+  if (legacy) {
+    const [group, resolvedShade] = legacy;
+    return CHART_COLOR_GROUPS[group][resolvedShade];
+  }
+  return palette[tokenOrGroup] || CHART_COLOR_GROUPS.blue.base;
+}
+
 // Centralized --ttz-* custom properties, generated from the SAME palette -
 // never hand-authored hex values scattered through components. Spread onto
 // a wrapping element's style prop (see layout/AppShell.jsx) so descendants
@@ -105,6 +164,16 @@ export const ttzCssVars = (palette = ttzPalette) => ({
   "--ttz-brand-primary-hover": "#2f8c39",
   "--ttz-brand-secondary": BRAND_COLORS.blue,
   "--ttz-brand-accent": BRAND_COLORS.orange,
+
+  "--ttz-chart-blue-strong": CHART_COLOR_GROUPS.blue.strong,
+  "--ttz-chart-blue-base": CHART_COLOR_GROUPS.blue.base,
+  "--ttz-chart-blue-soft": CHART_COLOR_GROUPS.blue.soft,
+  "--ttz-chart-green-strong": CHART_COLOR_GROUPS.green.strong,
+  "--ttz-chart-green-base": CHART_COLOR_GROUPS.green.base,
+  "--ttz-chart-green-soft": CHART_COLOR_GROUPS.green.soft,
+  "--ttz-chart-orange-strong": CHART_COLOR_GROUPS.orange.strong,
+  "--ttz-chart-orange-base": CHART_COLOR_GROUPS.orange.base,
+  "--ttz-chart-orange-soft": CHART_COLOR_GROUPS.orange.soft,
 
   "--ttz-success": palette.go,
   "--ttz-warning": palette.wa,
@@ -124,14 +193,18 @@ export const ttzCssVars = (palette = ttzPalette) => ({
   "--ttz-border-subtle": palette.border,
   "--ttz-border-strong": palette.border2,
 
-  "--ttz-shadow-sm": "0 1px 2px rgba(10,34,54,0.06)",
-  "--ttz-shadow-md": "0 8px 24px rgba(10,34,54,0.08)",
-  "--ttz-shadow-lg": "0 18px 40px rgba(10,34,54,0.12)",
+  "--ttz-shadow-sm": palette.bg === "#08111d" ? "0 6px 18px rgba(0,0,0,0.18)" : "0 6px 18px rgba(17,54,87,0.06)",
+  "--ttz-shadow-md": palette.bg === "#08111d" ? "0 18px 40px rgba(0,0,0,0.30)" : "0 18px 40px rgba(17,54,87,0.10)",
+  "--ttz-shadow-lg": palette.bg === "#08111d" ? "0 28px 64px rgba(0,0,0,0.40)" : "0 26px 60px rgba(17,54,87,0.14)",
 
   "--ttz-radius-sm": "8px",
   "--ttz-radius-md": "12px",
   "--ttz-radius-lg": "16px",
   "--ttz-radius-xl": "22px",
+  "--ttz-surface-glass": palette.bg === "#08111d" ? "linear-gradient(180deg, rgba(19,34,53,0.96), rgba(12,23,38,0.96))" : "linear-gradient(180deg, rgba(255,255,255,0.96), rgba(247,251,255,0.96))",
+  "--ttz-shell-bg": palette.bg === "#08111d"
+    ? "radial-gradient(circle at top left, rgba(24,167,225,0.16), transparent 28%), radial-gradient(circle at top right, rgba(57,168,68,0.12), transparent 20%), linear-gradient(180deg, #08111d 0%, #0a1421 100%)"
+    : "radial-gradient(circle at top left, rgba(24,167,225,0.10), transparent 24%), radial-gradient(circle at top right, rgba(57,168,68,0.08), transparent 18%), linear-gradient(180deg, #f8fbff 0%, #eef6ff 52%, #f7fcff 100%)",
 
   "--ttz-space-1": "4px",
   "--ttz-space-2": "8px",

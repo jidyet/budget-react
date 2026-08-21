@@ -79,11 +79,18 @@ export default function UpcomingPaymentsCard({ homeContext, onGoToDebts, onRecor
   return (
     <Card variant="default" style={{ padding: 24, borderLeft: `3px solid ${ttzPalette.wa}` }}>
       <div style={{ display: "grid", gap: 14 }}>
-        <div>
-          <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Upcoming payments</div>
-          <div style={{ ...TYPE_SCALE.supporting, color: ttzPalette.tx2, marginTop: 4 }}>
-            What&apos;s due on your debts - separate from what your plan is putting extra money toward.
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
+          <div>
+            <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Upcoming payments</div>
+            <div style={{ ...TYPE_SCALE.supporting, color: ttzPalette.tx2, marginTop: 4 }}>
+              What&apos;s due on your debts - separate from what your plan is putting extra money toward.
+            </div>
           </div>
+          {upcoming.count > 0 ? (
+            <Button variant="ghost" onClick={() => (hiddenCount > 0 ? setExpanded(true) : onGoToDebts?.())}>
+              {`View all ${upcoming.entries.length} payment${upcoming.entries.length === 1 ? "" : "s"} →`}
+            </Button>
+          ) : null}
         </div>
 
         <div role="status" aria-live="polite" style={{ ...TYPE_SCALE.body, color: ttzPalette.tx }}>
@@ -94,7 +101,7 @@ export default function UpcomingPaymentsCard({ homeContext, onGoToDebts, onRecor
           <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>You&apos;re caught up for the next 7 days.</div>
         ) : (
           <>
-            <div style={{ display: "grid", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
               {visibleEntries.map((entry) => {
                 const toneKey = STATUS_TONE_KEY[entry.timing.status] || "info";
                 const isPaid = markedPaidIds.has(entry.debt.id);
@@ -104,18 +111,15 @@ export default function UpcomingPaymentsCard({ homeContext, onGoToDebts, onRecor
                   <div
                     key={entry.debt.id}
                     style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
+                      display: "grid",
                       gap: 12,
-                      flexWrap: "wrap",
-                      padding: 12,
-                      borderRadius: 12,
+                      padding: 16,
+                      borderRadius: 16,
                       background: ttzPalette.surf2,
                       border: `1px solid ${ttzPalette.border}`,
                     }}
                   >
-                    <div style={{ display: "grid", gap: 4, minWidth: 0 }}>
+                    <div style={{ display: "grid", gap: 6, minWidth: 0 }}>
                       <LenderIdentity creditorName={entry.debt.name} debtType={entry.debt.debtType} lastFour={entry.debt.accountReferenceSafe} size="sm" />
                       <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>
                         {isHousehold ? `${presentedOwnerLabel(entry.debt)} · ` : ""}
@@ -138,7 +142,7 @@ export default function UpcomingPaymentsCard({ homeContext, onGoToDebts, onRecor
                     ) : isPaid ? (
                       <Badge tone="success">Paid</Badge>
                     ) : (
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                         <Badge tone={toneKey}>{entry.label}</Badge>
                         {canOfferMarkPaid ? (
                           <Button variant="secondary" onClick={() => setConfirmingId(entry.debt.id)}>Mark as paid</Button>
@@ -151,9 +155,7 @@ export default function UpcomingPaymentsCard({ homeContext, onGoToDebts, onRecor
                 );
               })}
             </div>
-            {hiddenCount > 0 ? (
-              <Button variant="ghost" onClick={() => setExpanded(true)}>View all {upcoming.entries.length} payments</Button>
-            ) : expanded && upcoming.entries.length > DEFAULT_PREVIEW_COUNT ? (
+            {expanded && upcoming.entries.length > DEFAULT_PREVIEW_COUNT ? (
               <Button variant="ghost" onClick={() => setExpanded(false)}>Show fewer</Button>
             ) : null}
           </>

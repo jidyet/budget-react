@@ -26,10 +26,12 @@ function QueueRow({ item, active, onSelect }) {
         gap: 8,
         width: "100%",
         boxSizing: "border-box",
-        padding: "8px 10px",
-        borderRadius: "var(--ttz-radius-sm, 8px)",
+        padding: "10px 12px",
+        borderRadius: "var(--ttz-radius-md, 16px)",
         cursor: "pointer",
-        background: active ? (palette.acS || palette.surf2) : "transparent",
+        background: active ? `linear-gradient(180deg, ${palette.acS || palette.surf2} 0%, ${palette.surf} 100%)` : palette.surf,
+        border: `1px solid ${active ? (palette.border2 || palette.ac) : palette.border}`,
+        boxShadow: active ? "var(--ttz-shadow-sm)" : "none",
       }}
     >
       <span aria-hidden="true" style={{ ...TYPE_SCALE.supporting, color: item.blocking ? palette.wa : palette.tx2, width: 14, flexShrink: 0 }}>
@@ -48,7 +50,7 @@ function QueueRow({ item, active, onSelect }) {
 export default function ReviewQueueList({ items, currentItemId, onSelect }) {
   if (!items.length) return null;
   return (
-    <div role="list" aria-label="Review queue" style={{ display: "grid", gap: 2 }}>
+    <div role="list" aria-label="Review queue" style={{ display: "grid", gap: 8 }}>
       {items.map((item) => (
         <div role="listitem" key={item.id}>
           <QueueRow item={item} active={item.id === currentItemId} onSelect={onSelect} />

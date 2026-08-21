@@ -371,7 +371,18 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
           </FilterSheet>
         </div>
       ) : (
-        <Card variant="default" style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "flex-end" }}>
+        <Card
+          variant="default"
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 16,
+            alignItems: "flex-end",
+            background: `linear-gradient(180deg, ${palette.surf2} 0%, ${palette.surf} 100%)`,
+            border: `1px solid ${palette.border2 || palette.border}`,
+            boxShadow: "var(--ttz-shadow-sm)",
+          }}
+        >
           <FilterControls {...filterProps} />
           {hasActiveFilters ? (
             <Button variant="ghost" size="sm" onClick={clearFilters} style={{ alignSelf: "center" }}>Clear filters</Button>
@@ -381,8 +392,8 @@ export default function CategoryDetailPage({ snapshot, portfolio, categorySlug, 
 
       {debts.length === 0 ? (
         <EmptyState
-          title="No debts match these filters"
-          description="Try clearing a filter or choosing a different owner scope."
+          title="Nothing matches this combo right now"
+          description="Try clearing a filter or switching owner scope so the real list can show itself again."
           actionLabel={hasActiveFilters ? "Clear filters" : undefined}
           onAction={hasActiveFilters ? clearFilters : undefined}
         />

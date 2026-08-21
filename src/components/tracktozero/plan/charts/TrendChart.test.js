@@ -3,7 +3,7 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import TrendChart from "./TrendChart.jsx";
 import { valueForMode, withCumulativeInterest } from "./trendChartMath.js";
-import { applyTheme, ttzPalette } from "../../theme.js";
+import { applyTheme, CHART_COLOR_GROUPS, ttzPalette } from "../../theme.js";
 
 const render = (element) => renderToStaticMarkup(element);
 
@@ -68,6 +68,13 @@ describe("GATE-10B.1D: TrendChart", () => {
     expect(lightHtml).toContain(lightAc);
     expect(darkHtml).toContain(darkAc);
     expect(darkHtml).not.toContain(lightAc);
+  });
+
+  it("accepts the shared chart color groups directly so charts stay on the approved blue/green/orange system", () => {
+    const html = render(h(TrendChart, {
+      series: [{ id: "a", label: "Scenario", colorToken: "orange", points: points([1000, 700, 400, 0]) }],
+    }));
+    expect(html).toContain(CHART_COLOR_GROUPS.orange.base);
   });
 
   it("range windowing only slices the displayed points - never changes the underlying series values passed in", () => {

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import AllocationDonut from "./AllocationDonut.jsx";
-import { applyTheme, ttzPalette } from "../../theme.js";
+import { applyTheme, chartColor, CHART_COLOR_GROUPS, ttzPalette } from "../../theme.js";
 
 const render = (element) => renderToStaticMarkup(element);
 
@@ -56,15 +56,22 @@ describe("GATE-10B.1D: AllocationDonut", () => {
     expect(html).toContain("monthly");
   });
 
-  it("PLAN-THEME-08: resolves arc colors from ttzPalette fresh at render, following a theme change", () => {
+  it("PLAN-THEME-08: resolves arc colors through the shared chart palette, including across theme changes", () => {
     applyTheme("light");
     const lightHtml = render(h(AllocationDonut, { segments: [{ id: "a", label: "Minimums", value: 500, colorToken: "info" }] }));
-    const lightInfo = ttzPalette.info;
+    const lightInfo = chartColor("info", "base", ttzPalette);
     applyTheme("dark");
     const darkHtml = render(h(AllocationDonut, { segments: [{ id: "a", label: "Minimums", value: 500, colorToken: "info" }] }));
-    const darkInfo = ttzPalette.info;
-    expect(darkInfo).not.toBe(lightInfo);
+    const darkInfo = chartColor("info", "base", ttzPalette);
+    expect(darkInfo).toBe(lightInfo);
     expect(lightHtml).toContain(lightInfo);
     expect(darkHtml).toContain(darkInfo);
+  });
+
+  it("accepts the shared chart color groups directly so donut segments stay on blue/green/orange", () => {
+    const html = render(h(AllocationDonut, {
+      segments: [{ id: "buffer", label: "Buffer", value: 100, colorToken: "orange" }],
+    }));
+    expect(html).toContain(CHART_COLOR_GROUPS.orange.base);
   });
 });

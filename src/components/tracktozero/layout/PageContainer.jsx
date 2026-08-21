@@ -11,7 +11,7 @@ export default function PageContainer({ children, style }) {
       style={{
         maxWidth: "var(--ttz-container-max, 1180px)",
         margin: "0 auto",
-        padding: `var(--ttz-space-5, 24px) ${gutter} var(--ttz-space-8, 48px)`,
+        padding: `calc(var(--ttz-space-5, 24px) + 4px) ${gutter} calc(var(--ttz-space-8, 48px) + 8px)`,
         ...style,
       }}
     >

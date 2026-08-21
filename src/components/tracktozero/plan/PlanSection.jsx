@@ -45,6 +45,7 @@ import {
   HeartPulse, GitCompare, PieChart, CheckCircle2, AlertTriangle, AlertCircle, Info, Snowflake, Mountain,
   ArrowLeft, Trophy, Sparkles, ArrowRight, Lightbulb, ShieldCheck, Upload, FlaskConical, Flag, Archive,
 } from "lucide-react";
+import { derivePaymentTiming, paymentTimingLabel } from "../../../domain/tracktozero/paymentTiming.js";
 
 const DEFAULT_PAYOFF_ORDER_PREVIEW_COUNT = 5;
 
@@ -87,6 +88,35 @@ const toBalancePoints = (projection = []) => projection.map((row) => ({ month: r
 
 const GAP = "var(--ttz-space-4, 16px)";
 
+function pillTabGroupStyle() {
+  return {
+    display: "flex",
+    gap: 6,
+    flexWrap: "wrap",
+    padding: 6,
+    borderRadius: 16,
+    border: `1px solid ${ttzPalette.bg === "#08111d" ? ttzPalette.border2 : (ttzPalette.waD || ttzPalette.border2)}`,
+    background: ttzPalette.bg === "#08111d"
+      ? `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`
+      : "linear-gradient(180deg, rgba(242,153,74,0.12) 0%, rgba(255,255,255,0.96) 100%)",
+  };
+}
+
+function pillTabButtonStyle(active) {
+  return {
+    ...TYPE_SCALE.supporting,
+    minHeight: 32,
+    border: `1px solid ${active ? ttzPalette.wa : "transparent"}`,
+    background: active ? (ttzPalette.waD || ttzPalette.surf) : "transparent",
+    color: active ? ttzPalette.wa : ttzPalette.tx2,
+    padding: "0 12px",
+    borderRadius: 999,
+    cursor: "pointer",
+    fontWeight: 800,
+    boxShadow: active ? "var(--ttz-shadow-sm)" : "none",
+  };
+}
+
 function PlanMetric({ label, value, tone = "default", icon }) {
   // GATE-10B.1C: warning/success used to be hardcoded light-mode-only hex
   // values (e.g. "#fff7ed") that bypassed ttzPalette entirely, so they never
@@ -98,17 +128,28 @@ function PlanMetric({ label, value, tone = "default", icon }) {
   const colors = {
     default: { bg: ttzPalette.surf2, border: ttzPalette.border, color: ttzPalette.tx },
     accent: { bg: ttzPalette.acS, border: ttzPalette.ac, color: ttzPalette.ac },
+    feature: { bg: `linear-gradient(180deg, ${ttzPalette.acS} 0%, ${ttzPalette.surf2} 100%)`, border: ttzPalette.ac, color: ttzPalette.ac },
     warning: { bg: tones.warning.bg, border: tones.warning.border, color: tones.warning.fg },
     success: { bg: tones.success.bg, border: tones.success.border, color: tones.success.fg },
   }[tone] || { bg: ttzPalette.surf2, border: ttzPalette.border, color: ttzPalette.tx };
 
   return (
-    <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${colors.border}`, background: colors.bg, minWidth: 0 }}>
+    <div
+      style={{
+        padding: 16,
+        borderRadius: 18,
+        border: `1px solid ${colors.border}`,
+        background: colors.bg,
+        boxShadow: "var(--ttz-shadow-sm)",
+        minWidth: 0,
+        minHeight: 104,
+      }}
+    >
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
         <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>{label}</div>
-        {icon ? <IconBadge icon={icon} tone={tone === "accent" ? "ac" : tone === "warning" ? "wa" : tone === "success" ? "go" : "neutral"} size="sm" /> : null}
+        {icon ? <IconBadge icon={icon} tone={tone === "accent" || tone === "feature" ? "ac" : tone === "warning" ? "wa" : tone === "success" ? "go" : "neutral"} size="sm" /> : null}
       </div>
-      <div style={{ ...TYPE_SCALE.metricSm, color: colors.color, marginTop: 6, minWidth: 0 }}>{value}</div>
+      <div style={{ ...(tone === "feature" ? TYPE_SCALE.metricLg : TYPE_SCALE.metricSm), color: colors.color, marginTop: 8, minWidth: 0 }}>{value}</div>
     </div>
   );
 }
@@ -350,9 +391,6 @@ function MyPlanActiveBody({ snapshot, service, refresh, runAction, writeState, o
   const otherStrategyLabel = otherStrategy === "snowball" ? "Snowball" : "Avalanche";
   const otherStrategyResult = strategyCompare?.[otherStrategy];
   const activeStrategyResult = strategyCompare?.[activeVersion.strategy];
-  const minimumsInterestDelta = activeStrategyResult && minimumsPreview
-    ? safePercentDelta(minimumsPreview.estimatedInterest, activeStrategyResult.estimatedInterest)
-    : null;
   const interestSavedVsMinimums = minimumsPreview && activePreview
     ? Math.abs(Number(minimumsPreview.estimatedInterest || 0) - Number(activePreview.estimatedInterest || 0))
     : null;
@@ -362,28 +400,33 @@ function MyPlanActiveBody({ snapshot, service, refresh, runAction, writeState, o
 
   const chartSeries = [
     activePreview ? {
-      id: "active", label: `Your plan (${strategyLabel})`, colorToken: "ac",
-      points: toBalancePoints(activePreview.projection), payoffMonth: activePreview.projectedZeroDate || undefined,
+      id: "active",
+      label: `Your plan (${strategyLabel})`,
+      colorToken: "ac",
+      points: toBalancePoints(activePreview.projection),
+      payoffMonth: activePreview.projectedZeroDate || undefined,
     } : null,
     minimumsPreview ? {
-      id: "minimums", label: "Minimum payments", colorToken: "muted", dashed: true,
-      points: toBalancePoints(minimumsPreview.projection), payoffMonth: minimumsPreview.projectedZeroDate || undefined,
+      id: "minimums",
+      label: "Minimum payments",
+      colorToken: "muted",
+      dashed: true,
+      points: toBalancePoints(minimumsPreview.projection),
+      payoffMonth: minimumsPreview.projectedZeroDate || undefined,
     } : null,
   ].filter(Boolean);
 
   const statusCode = snapshot.status?.code;
   const statusTone = STATUS_TONE[statusCode] || "info";
   const bannerTone = STATUS_TO_BANNER_TONE[statusTone] || "info";
-  const BannerIcon = STATUS_ICON[statusTone] || Info;
-
-  // GATE-10B.1E: Plan Health's 4-stat row - "import items needing review"
-  // reuses the SAME reviewSnapshot count already computed once for the top
-  // nav's "Review" badge (TrackToZeroV2App.jsx's navBadges.review), threaded
-  // down as a prop rather than re-queried here, so the two numbers can never
-  // drift.
   const activeDebtsCount = (snapshot.debts || []).filter((debt) => debt.status === "active").length;
   const paidOffCount = (snapshot.debts || []).filter((debt) => debt.status === "paid_off").length;
   const importReviewCount = (reviewSnapshot?.actionableCount ?? reviewSnapshot?.openCount ?? 0) || (reviewSnapshot?.staleBatchCount ?? 0);
+  const projectedZeroDateLabel = activePreview?.projectedZeroDate || snapshot.projectedZeroDate || "n/a";
+  const monthlyTargetValue = allocation.total || 0;
+  const firstTargetTiming = targetDebt
+    ? paymentTimingLabel(derivePaymentTiming(targetDebt, { paymentEvents: snapshot.paymentEventsByDebt?.[targetDebt.id] || [] }))
+    : "Not scheduled";
 
   return (
     <div style={{ display: "grid", gap: GAP }}>
@@ -397,187 +440,201 @@ function MyPlanActiveBody({ snapshot, service, refresh, runAction, writeState, o
           </div>
         </WarningCallout>
       ) : null}
-      <Card variant="default" style={{ padding: 20 }}>
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+
+      <div style={{ display: "grid", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <Badge tone="success">{strategyLabel} active</Badge>
         </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: GAP, marginTop: GAP }}>
-          <PlanMetric label="Projected debt-free" value={snapshot.projectedZeroDate || "n/a"} tone="accent" icon={Calendar} />
-          <PlanMetric label="Months to $0" value={activePreview ? String(activePreview.monthsToZero) : "…"} icon={Clock} />
-          <PlanMetric label="Monthly target" value={money(activeVersion.extraMonthlyPayment || 0)} tone="accent" icon={DollarSign} />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: GAP }}>
+          <PlanMetric label="Projected debt-free date" value={projectedZeroDateLabel} tone="success" icon={Calendar} />
+          <PlanMetric label="Months to $0" value={activePreview ? `${activePreview.monthsToZero} months` : "…"} icon={Clock} />
+          <PlanMetric label="Monthly target" value={money(monthlyTargetValue)} tone="feature" icon={DollarSign} />
           <PlanMetric label="Projected interest" value={activePreview ? money(activePreview.estimatedInterest) : "…"} icon={TrendingUp} />
           <PlanMetric label="Total left to go" value={money(totalLeftToGo)} icon={Wallet} />
-          <PlanMetric label="Strategy" value={strategyLabel} icon={Compass} />
+          <PlanMetric label="Strategy" value={strategyLabel} tone="success" icon={Compass} />
         </div>
-        <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 10 }}>
-          Based on {payoffQueue.length} included debt{payoffQueue.length === 1 ? "" : "s"}.
-          {snapshot.excludedDebts?.length ? ` ${snapshot.excludedDebts.length} debt${snapshot.excludedDebts.length === 1 ? " is" : "s are"} excluded until reviewed.` : ""}
-        </div>
-      </Card>
-
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.6fr) minmax(260px, 0.9fr)", gap: GAP }}>
-        <SectionCard number={1} title="Balance to $0 over time">
-          <TrendChart
-            series={chartSeries}
-            showModes
-            emptyState={<div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>Loading your projection…</div>}
-          />
-        </SectionCard>
-
-        <SectionCard number={4} title="Next move">
-          {nextMove ? (
-            <div style={{ display: "grid", gap: 10 }}>
-              <IconBadge icon={Zap} tone="ac" size="lg" />
-              <div>
-                <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 700 }}>Focus extra payment on: {nextMove.targetDebtName}</div>
-                <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 6 }}>{nextMove.body}</div>
-                {nextMove.payoffMonth ? (
-                  <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted, marginTop: 8 }}>Projected payoff for this debt: {nextMove.payoffMonth}</div>
-                ) : null}
-              </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <Button variant="primary" size="sm" onClick={scrollToReforecast}>Apply extra payment</Button>
-                {onGoToDebts ? <Button variant="secondary" size="sm" onClick={onGoToDebts}>Record payment</Button> : null}
-              </div>
-            </div>
-          ) : (
-            <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, margin: 0 }}>No target debt yet.</p>
-          )}
-        </SectionCard>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.6fr) minmax(260px, 0.9fr)", gap: GAP }}>
-        <SectionCard number={2} title="Your payoff order">
-          <PayoffOrderTable debts={visiblePayoffQueue} isHousehold={isHousehold} highlightFirst perDebt={activePreview?.perDebt || {}} />
-          {hiddenPayoffCount > 0 ? (
-            <Button variant="ghost" onClick={() => setShowAllPayoffOrder(true)} style={{ marginTop: GAP }}>View full payoff schedule ({payoffQueue.length}) →</Button>
-          ) : showAllPayoffOrder && payoffQueue.length > DEFAULT_PAYOFF_ORDER_PREVIEW_COUNT ? (
-            <Button variant="ghost" onClick={() => setShowAllPayoffOrder(false)} style={{ marginTop: GAP }}>Show fewer</Button>
-          ) : null}
-        </SectionCard>
-
-        <SectionCard number={3} title="Current first target">
-          <div style={{ display: "grid", gap: 10 }}>
-            <LenderIdentity creditorName={targetDebt?.name || ""} size="lg" layout="column" />
-            <div style={{ display: "grid", gap: 6 }}>
-              <LabelValueRow label="Current balance" value={money(targetDebt?.currentBalance || 0)} />
-              <LabelValueRow label="APR" value={targetDebt?.aprStatus === "unknown" ? "Unknown APR" : percent(targetDebt?.apr || 0)} />
-              <LabelValueRow label="Minimum due" value={targetDebt?.minimumRequiredPayment == null ? "Not set" : money(targetDebt.minimumRequiredPayment)} />
-              <LabelValueRow label="Owner" value={presentedOwnerLabel(targetDebt)} />
-            </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {onGoToDebts ? <Button variant="primary" size="sm" onClick={onGoToDebts}>Record payment</Button> : null}
-              {onGoToDebts ? <Button variant="secondary" size="sm" onClick={onGoToDebts}>View debt</Button> : null}
-            </div>
-          </div>
-        </SectionCard>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: GAP }}>
-        <SectionCard number={5} title="Plan health">
-          <div style={{ display: "grid", gap: 12 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <IconBadge icon={STATUS_ICON[statusTone] || CheckCircle2} tone={bannerTone} size="sm" />
-              <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 700 }}>{snapshot.status?.label || "Needs confirmation"}</div>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <IconBadge icon={ShieldCheck} tone="neutral" size="sm" />
-                <div>
-                  <div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.tx }}>{activeDebtsCount}</div>
-                  <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>active debts</div>
-                </div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <IconBadge icon={Flag} tone="neutral" size="sm" />
-                <div>
-                  <div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.tx }}>{paidOffCount}</div>
-                  <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>paid off</div>
-                </div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, gridColumn: "1 / -1" }}>
-                <IconBadge icon={AlertTriangle} tone={importReviewCount > 0 ? "wa" : "neutral"} size="sm" />
-                <div>
-                  <div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.tx }}>{importReviewCount}</div>
-                  <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>import items needing review</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </SectionCard>
-
-        {otherStrategyResult && activeStrategyResult ? (
-          <SectionCard number={6} title="Strategy comparison snapshot">
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr>
-                    <th style={{ textAlign: "left", padding: "6px 8px", ...TYPE_SCALE.caption, color: ttzPalette.tx2 }} />
-                    <th style={{ textAlign: "left", padding: "6px 8px", ...TYPE_SCALE.caption, color: ttzPalette.ac, fontWeight: 800 }}>{strategyLabel} (active)</th>
-                    <th style={{ textAlign: "left", padding: "6px 8px", ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>{otherStrategyLabel}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    ["Debt-free date", activeStrategyResult.projectedZeroDate, otherStrategyResult.projectedZeroDate],
-                    ["Total interest", money(activeStrategyResult.estimatedInterest), money(otherStrategyResult.estimatedInterest)],
-                    ["Months to $0", String(activeStrategyResult.monthsToZero), String(otherStrategyResult.monthsToZero)],
-                  ].map(([rowLabel, a, b]) => (
-                    <tr key={rowLabel}>
-                      <td style={{ padding: "6px 8px", ...TYPE_SCALE.caption, color: ttzPalette.tx2, borderTop: `1px solid ${ttzPalette.border}` }}>{rowLabel}</td>
-                      <td style={{ padding: "6px 8px", ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 700, borderTop: `1px solid ${ttzPalette.border}` }}>{a}</td>
-                      <td style={{ padding: "6px 8px", ...TYPE_SCALE.body, color: ttzPalette.tx2, borderTop: `1px solid ${ttzPalette.border}` }}>{b}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {minimumsInterestDelta?.value != null ? (
-              <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 8 }}>
-                {strategyLabel} saves {minimumsInterestDelta.value.toFixed(1)}% in interest vs. paying minimums only.
-              </div>
-            ) : null}
-            <Button variant="secondary" size="sm" onClick={() => navigateToPlanDestination("compare")} style={{ marginTop: GAP }}>Compare strategies</Button>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 7fr) minmax(320px, 5fr)", gap: GAP, alignItems: "start" }}>
+        <div style={{ display: "grid", gap: GAP }}>
+          <SectionCard number={1} title="Balance to $0 over time">
+            <TrendChart
+              series={chartSeries}
+              showModes
+              emptyState={<div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>Loading your projection...</div>}
+            />
           </SectionCard>
-        ) : null}
 
-        <SectionCard number={7} title="Payment allocation">
-          <AllocationDonut
-            segments={allocation.segments}
-            centerLabel={money(allocation.total)}
-            centerSupporting="per month"
-          />
-          {allocation.unknownMinimumCount > 0 ? (
-            <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted, marginTop: 8 }}>
-              {allocation.unknownMinimumCount} debt{allocation.unknownMinimumCount === 1 ? "" : "s"} with an unknown minimum {allocation.unknownMinimumCount === 1 ? "isn't" : "aren't"} included in this total.
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.35fr) minmax(300px, 0.95fr)", gap: GAP, alignItems: "start" }}>
+            <SectionCard number={2} title="Your payoff order">
+              <PayoffOrderTable debts={visiblePayoffQueue} isHousehold={isHousehold} highlightFirst perDebt={activePreview?.perDebt || {}} />
+              {hiddenPayoffCount > 0 ? (
+                <Button variant="ghost" onClick={() => setShowAllPayoffOrder(true)} style={{ marginTop: GAP }}>View full payoff schedule -&gt;</Button>
+              ) : showAllPayoffOrder && payoffQueue.length > DEFAULT_PAYOFF_ORDER_PREVIEW_COUNT ? (
+                <Button variant="ghost" onClick={() => setShowAllPayoffOrder(false)} style={{ marginTop: GAP }}>Show fewer</Button>
+              ) : null}
+            </SectionCard>
+
+            <SectionCard number={3} title="Current first target">
+              <div style={{ display: "grid", gap: 14 }}>
+                <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                  <LenderIdentity creditorName={targetDebt?.name || ""} size="lg" />
+                  {isHousehold && targetDebt ? <Badge tone="neutral">{presentedOwnerLabel(targetDebt)}</Badge> : null}
+                </div>
+                <div style={{ display: "grid", gap: 8 }}>
+                  <LabelValueRow label="Current balance" value={money(targetDebt?.currentBalance || 0)} />
+                  <LabelValueRow label="APR" value={targetDebt?.aprStatus === "unknown" ? "Unknown APR" : percent(targetDebt?.apr || 0)} />
+                  <LabelValueRow label="Minimum due" value={targetDebt?.minimumRequiredPayment == null ? "Not set" : money(targetDebt.minimumRequiredPayment)} />
+                  <LabelValueRow label="Due date" value={firstTargetTiming} />
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {onGoToDebts ? <Button variant="primary" size="sm" onClick={onGoToDebts}>Record payment</Button> : null}
+                  {onGoToDebts ? <Button variant="secondary" size="sm" onClick={onGoToDebts}>View debt ?</Button> : null}
+                </div>
+              </div>
+            </SectionCard>
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gap: GAP, alignSelf: "stretch" }}>
+          <SectionCard number={4} title="Next move">
+            {nextMove ? (
+              <div style={{ display: "grid", gap: 18, minHeight: 156 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) minmax(180px, 220px)", gap: 18, alignItems: "start" }}>
+                  <div
+                    style={{
+                      width: 92,
+                      height: 92,
+                      borderRadius: 999,
+                      border: `1px dashed ${ttzPalette.go}`,
+                      display: "grid",
+                      placeItems: "center",
+                      background: `radial-gradient(circle at 50% 50%, ${ttzPalette.goS} 0%, transparent 72%)`,
+                    }}
+                  >
+                    <IconBadge icon={Target} tone="go" size="lg" />
+                  </div>
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Next move</div>
+                    <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>
+                      Focus extra payment on <span style={{ color: ttzPalette.go }}>{nextMove.targetDebtName}</span>
+                    </div>
+                    <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, maxWidth: 360 }}>{nextMove.body}</div>
+                  </div>
+                  <div style={{ display: "grid", gap: 10, alignSelf: "start" }}>
+                    <Button variant="primary" size="sm" onClick={scrollToReforecast} style={{ width: "100%", justifyContent: "center" }}>Apply extra payment</Button>
+                    {onGoToDebts ? <Button variant="secondary" size="sm" onClick={onGoToDebts} style={{ width: "100%", justifyContent: "center" }}>Record payment</Button> : null}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, margin: 0 }}>No target debt yet.</p>
+            )}
+          </SectionCard>
+
+          <SectionCard number={5} title="Plan health">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 0 }}>
+              <MiniPlanHealthStat icon={STATUS_ICON[statusTone] || CheckCircle2} tone={bannerTone} title="Payments" value="on track" />
+              <MiniPlanHealthStat icon={ShieldCheck} tone="neutral" title={String(activeDebtsCount)} value="active debts" />
+              <MiniPlanHealthStat icon={Flag} tone="go" title={String(paidOffCount)} value="paid off" />
+              <MiniPlanHealthStat icon={AlertTriangle} tone={importReviewCount > 0 ? "wa" : "neutral"} title={String(importReviewCount)} value="import items needing review" />
             </div>
-          ) : null}
-        </SectionCard>
-      </div>
+          </SectionCard>
 
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: GAP }}>
+            {otherStrategyResult && activeStrategyResult ? (
+              <SectionCard number={6} title="Strategy comparison snapshot">
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: "left", padding: "6px 8px", ...TYPE_SCALE.caption, color: ttzPalette.tx2 }} />
+                        <th style={{ textAlign: "left", padding: "6px 8px", ...TYPE_SCALE.caption, color: ttzPalette.go, fontWeight: 800 }}>{strategyLabel} (active)</th>
+                        <th style={{ textAlign: "left", padding: "6px 8px", ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>{otherStrategyLabel}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        ["Debt-free date", activeStrategyResult.projectedZeroDate, otherStrategyResult.projectedZeroDate],
+                        ["Total interest", money(activeStrategyResult.estimatedInterest), money(otherStrategyResult.estimatedInterest)],
+                        ["Months to $0", String(activeStrategyResult.monthsToZero), String(otherStrategyResult.monthsToZero)],
+                        ["vs Snowball", strategyLabel === "Snowball" ? "?" : monthLabelDeltaText(otherStrategyResult.projectedZeroDate, activeStrategyResult.projectedZeroDate), strategyLabel === "Snowball" ? monthLabelDeltaText(activeStrategyResult.projectedZeroDate, otherStrategyResult.projectedZeroDate) : "?"],
+                      ].map(([rowLabel, a, b]) => (
+                        <tr key={rowLabel}>
+                          <td style={{ padding: "7px 8px", ...TYPE_SCALE.caption, color: ttzPalette.tx2, borderTop: `1px solid ${ttzPalette.border}` }}>{rowLabel}</td>
+                          <td style={{ padding: "7px 8px", ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 700, borderTop: `1px solid ${ttzPalette.border}` }}>{a}</td>
+                          <td style={{ padding: "7px 8px", ...TYPE_SCALE.body, color: ttzPalette.tx2, borderTop: `1px solid ${ttzPalette.border}` }}>{b}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </SectionCard>
+            ) : <div />}
+
+            <SectionCard number={7} title="Payment allocation">
+              <AllocationDonut
+                segments={allocation.segments}
+                centerLabel={money(monthlyTargetValue)}
+                centerSupporting="/ month"
+              />
+              <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 10 }}>
+                This split keeps your minimums covered first, then pushes the extra toward your current target debt.
+              </div>
+              {allocation.unknownMinimumCount > 0 ? (
+                <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.muted, marginTop: 8 }}>
+                  {allocation.unknownMinimumCount} debt{allocation.unknownMinimumCount === 1 ? "" : "s"} with an unknown minimum {allocation.unknownMinimumCount === 1 ? "isn't" : "aren't"} included in this total.
+                </div>
+              ) : null}
+            </SectionCard>
+          </div>
+        </div>
+      </div>
       {snapshot.excludedDebts?.length ? (
         <Card variant="default">
           <ExcludedDebtsSection debts={snapshot.excludedDebts} isHousehold={isHousehold} onGoToDebts={onGoToDebts} />
         </Card>
       ) : null}
 
-      {snapshot.warnings?.length ? (
-        <WarningCallout title="Plan status">{snapshot.warnings.map((warning) => warning.message || warning.code).join(" ")}</WarningCallout>
-      ) : null}
-
       <InsightBanner
-        icon={BannerIcon}
-        tone={bannerTone}
-        headline={snapshot.status?.label || "Plan status"}
-        detail={snapshot.status?.message || `Keep paying ${money(activeVersion.extraMonthlyPayment || 0)}/month to stay on schedule.`}
+        icon={Target}
+        tone="go"
+        headline={projectedZeroDateLabel && projectedZeroDateLabel !== "n/a" ? `You're on track to be debt-free by ${projectedZeroDateLabel}.` : "You're on track with your payoff plan."}
+        detail={`Keep paying ${money(monthlyTargetValue)}/month to stay on schedule.`}
         chips={[
           interestSavedVsMinimums != null ? { label: "Interest saved vs. minimums", value: money(interestSavedVsMinimums) } : null,
-          { label: "Active strategy", value: strategyLabel, tone: "ac" },
+          { label: "Active strategy", value: strategyLabel, tone: "go" },
         ].filter(Boolean)}
       />
 
+      {snapshot.warnings?.length ? (
+        <InfoCallout title="Projection notes">
+          {snapshot.warnings.map((warning) => warning.message || warning.code).join(" ")}
+        </InfoCallout>
+      ) : null}
+
       <ManagePlanCard snapshot={snapshot} service={service} refresh={refresh} runAction={runAction} writeState={writeState} activeVersion={activeVersion} />
+    </div>
+  );
+}
+
+function MiniPlanHealthStat({ icon, tone = "neutral", title, value }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        minWidth: 0,
+        padding: "4px 14px",
+        borderLeft: `1px solid ${ttzPalette.border}`,
+      }}
+    >
+      <IconBadge icon={icon} tone={tone} size="sm" />
+      <div style={{ minWidth: 0 }}>
+        <div style={{ ...TYPE_SCALE.metricXs, color: ttzPalette.tx, textTransform: "none" }}>{title}</div>
+        <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>{value}</div>
+      </div>
     </div>
   );
 }
@@ -729,7 +786,16 @@ function StrategyExperience({ title, subtitle, result, isActive, isHousehold, ha
   });
 
   return (
-    <Card variant={isActive ? "highlight" : "default"}>
+    <Card
+      variant={isActive ? "highlight" : "default"}
+      style={{
+        background: isActive
+          ? `linear-gradient(180deg, ${ttzPalette.goD || ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`
+          : `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`,
+        border: `1px solid ${isActive ? ttzPalette.go : ttzPalette.border}`,
+        boxShadow: "var(--ttz-shadow-md)",
+      }}
+    >
       <StrategyHeader title={title} subtitle={subtitle} isActive={isActive} warnings={result?.warnings || []} icon={icon} />
 
       <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 6 }}>
@@ -871,12 +937,389 @@ function StrategyPageBody({ strategy, title, subtitle, useLabel, applyActionLabe
   // SAME minimumsPreview/strategyPreview already fetched for the chart
   // above, never a separate computation, so the card and the chart can
   // never silently disagree.
-  const minimumsComparisonDelta = strategy === "avalanche" && minimumsPreview && strategyPreview
+  const strategyVsMinimumsDelta = minimumsPreview && strategyPreview
     ? {
         interestSaved: Math.max(0, Number(minimumsPreview.estimatedInterest || 0) - Number(strategyPreview.estimatedInterest || 0)),
         monthsSooner: Math.max(0, Number(minimumsPreview.monthsToZero || 0) - Number(strategyPreview.monthsToZero || 0)),
       }
     : null;
+
+  if (strategy === "snowball") {
+    const currentResult = result[strategy];
+    const payoffRows = currentResult?.payoffOrder || [];
+    const firstTarget = payoffRows[0] || null;
+    const firstTargetOwner = firstTarget ? presentedOwnerLabel(firstTarget) : null;
+    const firstTargetPerDebt = currentResult?.perDebt?.[firstTarget?.id] || null;
+    const dueLabel = firstTarget ? paymentTimingLabel(derivePaymentTiming(firstTarget)) : "n/a";
+    const versusOtherMonths = currentResult?.monthsToZero != null && otherResult?.monthsToZero != null
+      ? Math.max(0, Number(otherResult.monthsToZero) - Number(currentResult.monthsToZero))
+      : 0;
+    const versusOtherInterest = currentResult && otherResult
+      ? Math.max(0, Number(otherResult.estimatedInterest || 0) - Number(currentResult.estimatedInterest || 0))
+      : 0;
+
+    return (
+      <div style={{ display: "grid", gap: GAP }}>
+        <Card
+            variant="default"
+            style={{
+              background: `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`,
+              boxShadow: "var(--ttz-shadow-md)",
+              overflow: "hidden",
+            }}
+          >
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(320px, 1.8fr) repeat(4, minmax(120px, 0.5fr))", gap: 0 }}>
+              <div style={{ padding: 22, borderRight: `1px solid ${ttzPalette.border}` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                  <div style={{ width: 56, height: 56, borderRadius: "50%", background: "rgba(34,197,94,0.12)", border: `1px solid ${ttzPalette.go}`, display: "grid", placeItems: "center", color: ttzPalette.go, boxShadow: "0 0 0 8px rgba(34,197,94,0.06)" }}>
+                    <CheckCircle2 size={28} />
+                  </div>
+                  <div style={{ minWidth: 0, display: "grid", gap: 6, flex: 1 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>Snowball strategy is active</div>
+                      <Badge tone="success">Recommended</Badge>
+                    </div>
+                    <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, maxWidth: 560 }}>You&apos;ll be debt-free on {currentResult?.projectedZeroDate || "n/a"}. Keep going—momentum is on your side.</div>
+                  </div>
+                </div>
+              </div>
+              <div style={{ padding: 22, borderRight: `1px solid ${ttzPalette.border}` }}>
+                <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Projected debt-free date</div>
+                <div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.go, marginTop: 8 }}>{currentResult?.projectedZeroDate || "n/a"}</div>
+              </div>
+              <div style={{ padding: 22, borderRight: `1px solid ${ttzPalette.border}` }}>
+                <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Months to $0</div>
+                <div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.go, marginTop: 8 }}>{currentResult?.monthsToZero ?? "n/a"}</div>
+              </div>
+              <div style={{ padding: 22, borderRight: `1px solid ${ttzPalette.border}` }}>
+                <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Projected interest</div>
+                <div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.go, marginTop: 8 }}>{money(currentResult?.estimatedInterest || 0)}</div>
+              </div>
+              <div style={{ padding: 22 }}>
+                <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>First target debt</div>
+                <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 800, marginTop: 8 }}>{firstTarget ? `${firstTarget.name}${firstTargetOwner ? ` — ${firstTargetOwner}` : ""}` : "n/a"}</div>
+                <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.go, marginTop: 4 }}>{money(firstTarget?.currentBalance || 0)}</div>
+              </div>
+            </div>
+          </Card>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: GAP }}>
+          <PlanMetric label="Projected debt-free date" value={currentResult?.projectedZeroDate || "n/a"} tone="accent" icon={Calendar} />
+          <PlanMetric label="Months to $0" value={currentResult?.monthsToZero != null ? `${currentResult.monthsToZero} months` : "n/a"} tone="success" icon={Clock} />
+          <PlanMetric label="Projected interest" value={money(currentResult?.estimatedInterest || 0)} tone="success" icon={DollarSign} />
+          <PlanMetric label="First target" value={firstTarget ? `${firstTarget.name}${firstTargetOwner ? ` — ${firstTargetOwner}` : ""}` : "n/a"} tone="default" icon={Target} />
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.4fr)", gap: GAP, alignItems: "stretch" }}>
+          <Card
+            variant="default"
+            style={{
+              background: `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`,
+              boxShadow: "var(--ttz-shadow-md)",
+            }}
+          >
+            <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Payoff order (Snowball)</div>
+            <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 4 }}>Smallest balance first</div>
+            <div style={{ marginTop: GAP }}>
+              <PayoffOrderTable
+                debts={payoffRows}
+                isHousehold={snapshot.workspace.type === "household"}
+                highlightFirst
+                perDebt={currentResult?.perDebt || {}}
+                showMomentum
+              />
+            </div>
+          </Card>
+
+          <Card
+            variant="default"
+            style={{
+              background: `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`,
+              boxShadow: "var(--ttz-shadow-md)",
+            }}
+          >
+            <TrendChart
+              title="Balance to $0 over time"
+              subtitle=""
+              series={chartSeries}
+              showModes
+              emptyState={<div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>Loading your projection…</div>}
+            />
+            <div style={{ marginTop: GAP }}>
+              <InsightBanner
+                icon={CheckCircle2}
+                tone="go"
+                headline={`You’ll be debt-free on ${currentResult?.projectedZeroDate || "n/a"}.`}
+                detail={monthLabelDeltaText(snapshot.projectedZeroDate, currentResult?.projectedZeroDate) || "Every payment gets you closer to freedom."}
+              />
+            </div>
+          </Card>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(280px, 0.9fr) minmax(320px, 1fr) minmax(320px, 0.9fr)", gap: GAP, alignItems: "stretch" }}>
+          <Card
+            variant="default"
+            style={{
+              background: `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`,
+              boxShadow: "var(--ttz-shadow-md)",
+            }}
+          >
+            <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Want to speed this up?</div>
+            <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 6 }}>Small extra payments can create big results.</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: GAP }}>
+              <Button variant="primary" onClick={() => navigateToPlanDestination("what-if")}>Run What If</Button>
+              <Button variant="secondary">Add extra monthly payment</Button>
+            </div>
+            {speedUp ? (
+              <div style={{ marginTop: GAP }}>
+                <InfoCallout>
+                  Add {money(speedUp.additionalMonthly)}/month to finish {speedUp.monthsSaved} month{speedUp.monthsSaved === 1 ? "" : "s"} earlier and save {money(speedUp.interestSaved)} in interest.
+                </InfoCallout>
+              </div>
+            ) : null}
+          </Card>
+
+          <Card
+            variant="default"
+            style={{
+              background: `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`,
+              boxShadow: "var(--ttz-shadow-md)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Current first target</div>
+              <Badge tone="success">Step 1 of {Math.max(1, payoffRows.length)}</Badge>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "108px minmax(0, 1fr)", gap: 16, marginTop: GAP, alignItems: "start" }}>
+              <div
+                style={{
+                  width: 108,
+                  height: 108,
+                  borderRadius: 16,
+                  border: `1px solid ${ttzPalette.border}`,
+                  background: ttzPalette.surf,
+                  display: "grid",
+                  placeItems: "center",
+                  flexShrink: 0,
+                  padding: 12,
+                  boxSizing: "border-box",
+                }}
+              >
+                <LenderIdentity creditorName={firstTarget?.name} size="xl" showName={false} />
+              </div>
+              <div style={{ display: "grid", gap: 14, minWidth: 0 }}>
+                <div
+                  style={{
+                    display: "inline-grid",
+                    gap: 4,
+                    width: "fit-content",
+                    maxWidth: "100%",
+                    padding: "8px 14px",
+                    borderRadius: 12,
+                    border: `1px solid ${ttzPalette.border}`,
+                    background: "rgba(15,23,42,0.18)",
+                  }}
+                >
+                  <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx, lineHeight: 1.1, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {firstTarget ? `${firstTarget.name}${firstTargetOwner ? ` — ${firstTargetOwner}` : ""}` : "n/a"}
+                  </div>
+                  <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>
+                    {String(firstTarget?.debtType || "Debt")
+                      .replace(/_/g, " ")
+                      .replace(/\b\w/g, (char) => char.toUpperCase())}
+                  </div>
+                </div>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                    gap: 0,
+                    border: `1px solid ${ttzPalette.border}`,
+                    borderRadius: 18,
+                    overflow: "hidden",
+                    background: "rgba(15,23,42,0.18)",
+                  }}
+                >
+                  {[
+                    ["Current balance", money(firstTarget?.currentBalance || 0)],
+                    ["APR", firstTarget?.aprStatus === "unknown" ? "Unknown APR" : percent(firstTarget?.apr || 0)],
+                    ["Min. due", money(firstTarget?.minimumRequiredPayment || 0)],
+                  ].map(([label, value], index) => (
+                    <div key={label} style={{ minWidth: 0, padding: "14px 16px", borderLeft: index === 0 ? "none" : `1px solid ${ttzPalette.border}` }}>
+                      <div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.tx, fontSize: 13, lineHeight: 1.2 }}>{value}</div>
+                      <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 6 }}>{label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ display: "flex", gap: 10, alignItems: "stretch", justifyContent: "flex-start", flexWrap: "wrap" }}>
+                  <Button variant="primary">Record payment</Button>
+                  <Button variant="secondary">View debt</Button>
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          <Card
+            variant="default"
+            style={{
+              background: `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`,
+              boxShadow: "var(--ttz-shadow-md)",
+            }}
+          >
+            <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Snowball vs Avalanche</div>
+            <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 6 }}>See how Snowball compares to the Avalanche strategy.</div>
+            <div style={{ marginTop: GAP, display: "grid", gap: 10 }}>
+              <ProgressStatRowInline label="Debt-free date" a={currentResult?.projectedZeroDate} b={otherResult?.projectedZeroDate} />
+              <ProgressStatRowInline label="Total interest" a={money(currentResult?.estimatedInterest || 0)} b={money(otherResult?.estimatedInterest || 0)} />
+              <ProgressStatRowInline label="Interest saved vs minimums" a={strategyVsMinimumsDelta ? money(strategyVsMinimumsDelta.interestSaved) : "n/a"} b={otherResult ? money(Math.max(0, Number(minimumsPreview?.estimatedInterest || 0) - Number(otherResult.estimatedInterest || 0))) : "n/a"} />
+            </div>
+            <div style={{ marginTop: GAP }}>
+              <Button variant="secondary" onClick={() => navigateToPlanDestination("compare")}>Compare strategies</Button>
+            </div>
+          </Card>
+        </div>
+
+        <Card
+          variant="default"
+          style={{
+            background: `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`,
+            boxShadow: "var(--ttz-shadow-md)",
+            padding: 18,
+          }}
+        >
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.6fr) auto auto", gap: 18, alignItems: "center" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <IconBadge icon={Sparkles} tone="go" size="sm" />
+              <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx }}>You’re building momentum. Keep it up — every payment gets you closer to freedom.</div>
+            </div>
+            <Badge tone="success">Payments on track</Badge>
+            <button type="button" onClick={() => navigateToPlanDestination("scenarios")} style={{ all: "unset", cursor: "pointer", ...TYPE_SCALE.body, color: ttzPalette.ac, fontWeight: 700 }}>View activity →</button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (strategy === "avalanche") {
+    const activePlan = snapshot.activeContext?.version;
+    const currentResult = result[strategy];
+    const payoffRows = currentResult?.payoffOrder || [];
+
+    return (
+      <div style={{ display: "grid", gap: GAP }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: GAP }}>
+          <PlanMetric label="Projected debt-free date" value={currentResult?.projectedZeroDate || "n/a"} tone="success" icon={Calendar} />
+          <PlanMetric label="Total interest" value={money(currentResult?.estimatedInterest || 0)} icon={DollarSign} />
+          <PlanMetric label="Total interest saved" value={money(strategyVsMinimumsDelta?.interestSaved || 0)} tone="success" icon={TrendingUp} />
+          <PlanMetric label="Monthly target" value={money(Number(currentResult?.monthlyTarget || activePlan?.monthlyTarget || activePlan?.requiredTotalMonthly || 0))} tone="feature" icon={Target} />
+          <PlanMetric label="Extra payoff amount" value={money(Number(currentExtra || 0))} tone="warning" icon={Wallet} />
+          <PlanMetric label="Left to go" value={money(snapshot.totalDebt || 0)} icon={Compass} />
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.45fr) minmax(340px, 0.95fr)", gap: GAP, alignItems: "start" }}>
+          <Card
+            variant="default"
+            style={{
+              background: `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`,
+              boxShadow: "var(--ttz-shadow-md)",
+            }}
+          >
+            <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>Your path to $0</div>
+            <div style={{ marginTop: GAP }}>
+              <TrendChart
+                title=""
+                subtitle=""
+                series={chartSeries}
+                emptyState={<div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>Loading your projection…</div>}
+              />
+            </div>
+
+            {strategyVsMinimumsDelta ? (
+              <div style={{ marginTop: GAP }}>
+                <InfoCallout>
+                  You&apos;ll be debt-free ~{strategyVsMinimumsDelta.monthsSooner} month{strategyVsMinimumsDelta.monthsSooner === 1 ? "" : "s"} sooner and save {money(strategyVsMinimumsDelta.interestSaved)} in interest with your {money(currentExtra)}/month extra payoff.
+                </InfoCallout>
+              </div>
+            ) : null}
+
+            <div style={{ marginTop: GAP }}>
+              <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Avalanche payoff order (highest APR first)</div>
+              <div style={{ marginTop: 12 }}>
+                <PayoffOrderTable
+                  debts={payoffRows}
+                  isHousehold={snapshot.workspace.type === "household"}
+                  highlightFirst
+                  perDebt={currentResult?.perDebt || {}}
+                />
+              </div>
+            </div>
+          </Card>
+
+          <div style={{ display: "grid", gap: GAP }}>
+            <Card
+              variant="default"
+              style={{
+                background: `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`,
+                boxShadow: "var(--ttz-shadow-md)",
+              }}
+            >
+              <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>Balance breakdown</div>
+              <div style={{ marginTop: GAP }}>
+                <AllocationDonut
+                  segments={compositionSegments}
+                  centerLabel={money(compositionTotal)}
+                  centerSupporting="Total debt"
+                />
+              </div>
+            </Card>
+
+            <Card
+              variant="default"
+              style={{
+                background: `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`,
+                boxShadow: "var(--ttz-shadow-md)",
+              }}
+            >
+              <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>Compare to paying minimums</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: GAP, marginTop: GAP }}>
+                <div style={{ padding: 16, borderRadius: 16, border: `1px solid ${ttzPalette.ac}`, background: ttzPalette.acS }}>
+                  <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.ac }}>Avalanche (+{money(currentExtra)}/mo)</div>
+                  <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+                    <LabelValueRow label="Debt-free date" value={strategyPreview?.projectedZeroDate || "n/a"} />
+                    <LabelValueRow label="Total interest" value={strategyPreview ? money(strategyPreview.estimatedInterest) : "n/a"} />
+                    <LabelValueRow label="Interest saved" value={money(strategyVsMinimumsDelta?.interestSaved || 0)} />
+                    <LabelValueRow label="Months debt-free sooner" value={strategyVsMinimumsDelta?.monthsSooner ? `${strategyVsMinimumsDelta.monthsSooner} months` : "—"} />
+                  </div>
+                </div>
+
+                <div style={{ padding: 16, borderRadius: 16, border: `1px solid ${ttzPalette.border}`, background: ttzPalette.surf2 }}>
+                  <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.tx2 }}>Paying minimums only</div>
+                  <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+                    <LabelValueRow label="Debt-free date" value={minimumsPreview?.projectedZeroDate || "n/a"} />
+                    <LabelValueRow label="Total interest" value={minimumsPreview ? money(minimumsPreview.estimatedInterest) : "n/a"} />
+                    <LabelValueRow label="Interest saved" value="—" />
+                    <LabelValueRow label="Months debt-free sooner" value="—" />
+                  </div>
+                </div>
+              </div>
+
+              {strategyVsMinimumsDelta ? (
+                <div style={{ marginTop: GAP }}>
+                  <InsightBanner
+                    icon={CheckCircle2}
+                    tone="go"
+                    headline="Great choice!"
+                    detail={`You'll save ${money(strategyVsMinimumsDelta.interestSaved)} and be debt free ${strategyVsMinimumsDelta.monthsSooner} month${strategyVsMinimumsDelta.monthsSooner === 1 ? "" : "s"} sooner.`}
+                  />
+                </div>
+              ) : null}
+            </Card>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: "grid", gap: GAP }}>
@@ -916,7 +1359,13 @@ function StrategyPageBody({ strategy, title, subtitle, useLabel, applyActionLabe
         }}
       />
 
-      <Card variant="default">
+      <Card
+        variant="default"
+        style={{
+          background: `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`,
+          boxShadow: "var(--ttz-shadow-md)",
+        }}
+      >
         <TrendChart
           title="Balance to $0"
           subtitle="Paying minimums vs this strategy, plus an extra-payment scenario once you preview one below."
@@ -938,9 +1387,15 @@ function StrategyPageBody({ strategy, title, subtitle, useLabel, applyActionLabe
         </Card>
       ) : null}
 
-      {minimumsComparisonDelta ? (
+      {strategyVsMinimumsDelta ? (
         <>
-          <Card variant="default">
+          <Card
+            variant="default"
+            style={{
+              background: `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`,
+              boxShadow: "var(--ttz-shadow-sm)",
+            }}
+          >
             <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Compare to paying minimums</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: GAP, marginTop: GAP }}>
               <div>
@@ -963,7 +1418,7 @@ function StrategyPageBody({ strategy, title, subtitle, useLabel, applyActionLabe
             icon={Sparkles}
             tone="go"
             headline="Great choice!"
-            detail={`You'll save ${money(minimumsComparisonDelta.interestSaved)}${minimumsComparisonDelta.monthsSooner > 0 ? ` and be debt-free ${minimumsComparisonDelta.monthsSooner} month${minimumsComparisonDelta.monthsSooner === 1 ? "" : "s"} sooner` : ""}.`}
+                  detail={`You'll save ${money(strategyVsMinimumsDelta.interestSaved)}${strategyVsMinimumsDelta.monthsSooner > 0 ? ` and be debt-free ${strategyVsMinimumsDelta.monthsSooner} month${strategyVsMinimumsDelta.monthsSooner === 1 ? "" : "s"} sooner` : ""}.`}
           />
         </>
       ) : null}
@@ -983,7 +1438,13 @@ function StrategyPageBody({ strategy, title, subtitle, useLabel, applyActionLabe
         </Card>
       ) : null}
 
-      <Card variant="default">
+      <Card
+        variant="default"
+        style={{
+          background: `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`,
+          boxShadow: "var(--ttz-shadow-sm)",
+        }}
+      >
         <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Add extra monthly payment</div>
         <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", marginTop: GAP }}>
           <Field label="Extra per month">
@@ -1089,18 +1550,90 @@ function CompareStrategiesView({ snapshot, service, refresh, runAction, writeSta
   const recommendation = deriveStrategyRecommendation({ snowball: result.snowball, avalanche: result.avalanche });
   const winnerLabel = recommendation.code === "avalanche_better" ? "Avalanche" : recommendation.code === "snowball_better" ? "Snowball" : null;
   const winnerStrategy = recommendation.code === "avalanche_better" ? "avalanche" : recommendation.code === "snowball_better" ? "snowball" : null;
+  const activeStrategyKey = result.activeStrategy || winnerStrategy || "avalanche";
+  const activeStrategyLabel = activeStrategyKey === "snowball" ? "Snowball" : "Avalanche";
+  const activeStrategyResult = result[activeStrategyKey];
+  const winnerResult = winnerStrategy ? result[winnerStrategy] : activeStrategyResult;
+  const winnerTone = winnerStrategy === "snowball" ? "ac" : "go";
+  const comparisonTokens = ["blue", "green", "orange"];
 
   const chartSeries = [
-    { id: "snowball", label: "Snowball", colorToken: "ac", points: toBalancePoints(result.snowball.projection), payoffMonth: result.snowball.projectedZeroDate || undefined },
-    { id: "avalanche", label: "Avalanche", colorToken: "go", dashed: true, points: toBalancePoints(result.avalanche.projection), payoffMonth: result.avalanche.projectedZeroDate || undefined },
+    { id: "snowball", label: "Snowball", colorToken: "blue", points: toBalancePoints(result.snowball.projection), payoffMonth: result.snowball.projectedZeroDate || undefined },
+    { id: "avalanche", label: "Avalanche", colorToken: "green", points: toBalancePoints(result.avalanche.projection), payoffMonth: result.avalanche.projectedZeroDate || undefined },
   ];
 
   const interestByDebtEntries = [
     ...deriveInterestBreakdownSegments(result.snowball.perDebt, snapshot.payoffQueue || []),
   ];
   const compositionEntries = deriveDebtCompositionSegments(snapshot.payoffQueue || []);
-  const compositionTokens = ["ac", "go", "info", "wa"];
   const allocation = deriveAllocationSegments(snapshot.payoffQueue || [], result[result.activeStrategy || "avalanche"]?.extraMonthlyPayment || 0);
+  const winnerTarget = winnerResult?.payoffOrder?.[0] || null;
+  const strategyTargetDelta = winnerStrategy
+    ? Math.abs(Number(result.snowball.monthsToZero || 0) - Number(result.avalanche.monthsToZero || 0))
+    : 0;
+  const currentFirstTarget = activeStrategyResult?.payoffOrder?.[0] || null;
+  const orangePrimaryStyle = {
+    background: `linear-gradient(135deg, ${ttzPalette.wa} 0%, #ff8a1a 100%)`,
+    border: `1px solid ${ttzPalette.wa}`,
+    color: "#ffffff",
+  };
+  const compactScenarioRows = scenarioCompare ? [
+    {
+      strategy: "Snowball",
+      payoff: scenarioCompare.snowballPlus?.projectedZeroDate || "n/a",
+      interest: money(scenarioCompare.snowballPlus?.estimatedInterest || 0),
+      delta: `~ ${Math.max(0, Number(result.snowball.monthsToZero || 0) - Number(scenarioCompare.snowballPlus?.monthsToZero || 0))} mo faster`,
+      saved: `${money(Math.max(0, Number(result.snowball.estimatedInterest || 0) - Number(scenarioCompare.snowballPlus?.estimatedInterest || 0)))} saved`,
+      tone: "ac",
+    },
+    {
+      strategy: "Avalanche",
+      payoff: scenarioCompare.avalanchePlus?.projectedZeroDate || "n/a",
+      interest: money(scenarioCompare.avalanchePlus?.estimatedInterest || 0),
+      delta: `~ ${Math.max(0, Number(result.avalanche.monthsToZero || 0) - Number(scenarioCompare.avalanchePlus?.monthsToZero || 0))} mo faster`,
+      saved: `${money(Math.max(0, Number(result.avalanche.estimatedInterest || 0) - Number(scenarioCompare.avalanchePlus?.estimatedInterest || 0)))} saved`,
+      tone: "go",
+    },
+  ] : [];
+
+  const renderMiniPayoffRows = (debts = [], tone = "ac") => (
+    <div style={{ display: "grid", gap: 8 }}>
+      {debts.slice(0, 5).map((debt, index) => (
+        <div
+          key={`${tone}-${debt.id}`}
+          style={{
+            display: "grid",
+            gridTemplateColumns: "28px minmax(0, 1fr) auto auto",
+            gap: 10,
+            alignItems: "center",
+            paddingBottom: 8,
+            borderBottom: `1px solid ${ttzPalette.border}`,
+          }}
+        >
+          <div
+            style={{
+              width: 20,
+              height: 20,
+              borderRadius: 999,
+              display: "grid",
+              placeItems: "center",
+              background: tone === "go" ? ttzPalette.goD : ttzPalette.acS,
+              color: tone === "go" ? ttzPalette.go : ttzPalette.ac,
+              ...TYPE_SCALE.caption,
+              fontWeight: 800,
+            }}
+          >
+            {index + 1}
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{debt.name}</div>
+          </div>
+          <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx }}>{money(debt.currentBalance || 0)}</div>
+          <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>{percent(debt.apr)}</div>
+        </div>
+      ))}
+    </div>
+  );
 
   const confirmApply = () => runAction(`use ${confirmStrategy}`, async () => {
     await activateOrReforecastStrategy(service, workspaceId, confirmStrategy, hasActivePlan);
@@ -1133,62 +1666,147 @@ function CompareStrategiesView({ snapshot, service, refresh, runAction, writeSta
           type="button"
           onClick={() => navigateToPlanDestination("my-plan")}
           className="ttz-focus-ring"
-          style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, ...TYPE_SCALE.body, color: ttzPalette.ac, fontWeight: 700 }}
+          style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, ...TYPE_SCALE.body, color: ttzPalette.wa, fontWeight: 700 }}
         >
           <ArrowLeft size={16} aria-hidden="true" /> Back to My Plan
         </button>
       </div>
 
-      <InsightBanner
-        icon={recommendation.code === "tie" ? Info : recommendation.code === "tradeoff" ? GitCompare : Trophy}
-        tone={recommendationTone}
-        headline={recommendation.headline}
-        detail={recommendation.detail}
-        chips={[
-          interestPercentDelta?.value != null ? { label: "Less interest", value: `${interestPercentDelta.value.toFixed(1)}%` } : null,
-          recommendation.monthsDelta ? { label: "Months faster", value: String(recommendation.monthsDelta) } : null,
-          recommendation.interestDelta ? { label: "Interest saved", value: money(recommendation.interestDelta) } : null,
-          { label: "Payoff month", value: recommendation.monthsDelta ? "Different" : "Same" },
-        ].filter(Boolean)}
-      />
+      <Card
+        variant="default"
+        style={{
+          padding: 0,
+          overflow: "hidden",
+          background: `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`,
+        }}
+      >
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.8fr) repeat(4, minmax(120px, 0.55fr))", gap: 0 }}>
+          <div style={{ padding: 22, borderRight: `1px solid ${ttzPalette.border}` }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <div style={{ width: 56, height: 56, borderRadius: "50%", background: "rgba(34,197,94,0.12)", border: `1px solid ${ttzPalette.go}`, display: "grid", placeItems: "center", color: ttzPalette.go }}>
+                {winnerStrategy ? <CheckCircle2 size={28} /> : <GitCompare size={28} />}
+              </div>
+              <div>
+                <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx }}>
+                  {winnerLabel ? `${winnerLabel} is the better fit right now` : "Snowball and Avalanche are effectively tied right now"}
+                </div>
+                <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 4 }}>{recommendation.detail}</div>
+              </div>
+            </div>
+          </div>
 
-      <Card variant="default">
-        <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Snowball vs Avalanche</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: GAP, marginTop: GAP }}>
-          <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${ttzPalette.border}`, background: ttzPalette.surf2 }}>
-            <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Projected debt-free date</div>
-            <ProgressStatRowInline label="" a={result.snowball.projectedZeroDate || "n/a"} b={result.avalanche.projectedZeroDate || "n/a"} />
+          <div style={{ padding: 18, borderRight: `1px solid ${ttzPalette.border}` }}>
+            <div style={{ ...TYPE_SCALE.metricSm, color: winnerLabel ? ttzPalette.go : ttzPalette.tx }}>{interestPercentDelta?.value != null ? `${interestPercentDelta.value.toFixed(1)}%` : "Same"}</div>
+            <div style={{ ...TYPE_SCALE.caption, color: winnerLabel ? ttzPalette.go : ttzPalette.tx2, marginTop: 4 }}>{winnerLabel ? "Less interest" : "Interest profile"}</div>
           </div>
-          <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${ttzPalette.border}`, background: ttzPalette.surf2 }}>
-            <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Months to $0</div>
-            <ProgressStatRowInline label="" a={String(result.snowball.monthsToZero ?? "n/a")} b={String(result.avalanche.monthsToZero ?? "n/a")} />
+          <div style={{ padding: 18, borderRight: `1px solid ${ttzPalette.border}` }}>
+            <div style={{ ...TYPE_SCALE.metricSm, color: winnerLabel ? ttzPalette.go : ttzPalette.tx }}>{strategyTargetDelta || "Same"}</div>
+            <div style={{ ...TYPE_SCALE.caption, color: winnerLabel ? ttzPalette.go : ttzPalette.tx2, marginTop: 4 }}>{winnerLabel ? "Months faster" : "Months to $0"}</div>
           </div>
-          <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${ttzPalette.border}`, background: ttzPalette.surf2 }}>
-            <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Projected interest</div>
-            <ProgressStatRowInline label="" a={money(result.snowball.estimatedInterest || 0)} b={money(result.avalanche.estimatedInterest || 0)} />
+          <div style={{ padding: 18, borderRight: `1px solid ${ttzPalette.border}` }}>
+            <div style={{ ...TYPE_SCALE.metricSm, color: winnerLabel ? ttzPalette.go : ttzPalette.tx }}>{recommendation.interestDelta ? money(recommendation.interestDelta) : "$0"}</div>
+            <div style={{ ...TYPE_SCALE.caption, color: winnerLabel ? ttzPalette.go : ttzPalette.tx2, marginTop: 4 }}>{winnerLabel ? "Interest saved" : "Interest delta"}</div>
           </div>
-          <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${ttzPalette.border}`, background: ttzPalette.surf2 }}>
-            <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>First target</div>
-            <ProgressStatRowInline label="" a={result.snowball.payoffOrder?.[0]?.name || "n/a"} b={result.avalanche.payoffOrder?.[0]?.name || "n/a"} />
+          <div style={{ padding: 18 }}>
+            <div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.tx }}>{winnerLabel ? (strategyTargetDelta ? "Different" : "Same") : "Same"}</div>
+            <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 4 }}>Payoff month</div>
           </div>
         </div>
       </Card>
 
-      <Card variant="default">
-        <TrendChart title="Balance to $0" subtitle="Snowball vs Avalanche, both against your current debts and payment." series={chartSeries} />
-      </Card>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: GAP }}>
-        <StrategyExperience title="Snowball" subtitle="Smallest balance first" result={result.snowball} isActive={result.activeStrategy === "snowball"} isHousehold={isHousehold} useLabel="Inspect Snowball" onInspect={() => navigateToPlanDestination("snowball")} onGoToDebts={onGoToDebts} icon={Snowflake} />
-        <StrategyExperience title="Avalanche" subtitle="Highest APR first" result={result.avalanche} isActive={result.activeStrategy === "avalanche"} isHousehold={isHousehold} useLabel="Inspect Avalanche" onInspect={() => navigateToPlanDestination("avalanche")} onGoToDebts={onGoToDebts} icon={Mountain} />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: GAP }}>
+        <PlanMetric label="Projected debt-free date" value={<>{result.snowball.projectedZeroDate}<span style={{ color: ttzPalette.tx2 }}> vs </span>{result.avalanche.projectedZeroDate}</>} icon={Calendar} />
+        <PlanMetric label="Months to $0" value={<>{result.snowball.monthsToZero}<span style={{ color: ttzPalette.tx2 }}> vs </span>{result.avalanche.monthsToZero}</>} icon={Clock} />
+        <PlanMetric label="Projected interest" value={<>{money(result.snowball.estimatedInterest)}<span style={{ color: ttzPalette.tx2 }}> vs </span>{money(result.avalanche.estimatedInterest)}</>} icon={DollarSign} />
+        <PlanMetric label="First target" value={<>{result.snowball.payoffOrder?.[0]?.name || "n/a"}<span style={{ color: ttzPalette.tx2 }}> vs </span>{result.avalanche.payoffOrder?.[0]?.name || "n/a"}</>} icon={Target} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: GAP }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) minmax(420px, 1.15fr)", gap: GAP, alignItems: "stretch" }}>
+        <Card variant="default" style={{ padding: 20, display: "grid", gap: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <IconBadge icon={Snowflake} tone="ac" size="md" />
+              <div>
+                <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Snowball</div>
+                <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Momentum builder</div>
+              </div>
+            </div>
+            <Badge tone="info">Inspect strategy</Badge>
+          </div>
+          <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>Pay off the smallest balances first to build quick wins and keep your momentum high.</div>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 0.95fr) minmax(0, 1.2fr)", gap: 14 }}>
+            <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${ttzPalette.border}`, background: ttzPalette.surf2 }}>
+              <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.ac }}>First target</div>
+              <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 700, marginTop: 8 }}>{result.snowball.payoffOrder?.[0]?.name || "n/a"}</div>
+              <div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.tx, marginTop: 8 }}>{money(result.snowball.payoffOrder?.[0]?.currentBalance || 0)}</div>
+              <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 6 }}>{percent(result.snowball.payoffOrder?.[0]?.apr)}</div>
+            </div>
+            <div>
+              <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted, marginBottom: 8 }}>Payoff order (top 5)</div>
+              {renderMiniPayoffRows(result.snowball.payoffOrder, "ac")}
+            </div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: "auto" }}>
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+              <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Total payoff time <span style={{ color: ttzPalette.tx, marginLeft: 6 }}>{result.snowball.monthsToZero} months</span></div>
+              <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Total interest <span style={{ color: ttzPalette.ac, marginLeft: 6 }}>{money(result.snowball.estimatedInterest)}</span></div>
+            </div>
+            <Button variant="secondary" onClick={() => navigateToPlanDestination("snowball")}>Inspect strategy</Button>
+          </div>
+        </Card>
+
+        <Card variant="default" style={{ padding: 20, display: "grid", gap: 14, border: `1px solid ${ttzPalette.go}` }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <IconBadge icon={Mountain} tone="go" size="md" />
+              <div>
+                <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Avalanche</div>
+                <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Interest optimizer</div>
+              </div>
+            </div>
+            <Badge tone="success">{result.activeStrategy === "avalanche" ? "Active strategy" : "Inspect strategy"}</Badge>
+          </div>
+          <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>Prioritize the highest interest rates first to minimize the total interest you pay.</div>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 0.95fr) minmax(0, 1.2fr)", gap: 14 }}>
+            <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${ttzPalette.border}`, background: ttzPalette.surf2 }}>
+              <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.go }}>First target</div>
+              <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 700, marginTop: 8 }}>{result.avalanche.payoffOrder?.[0]?.name || "n/a"}</div>
+              <div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.tx, marginTop: 8 }}>{money(result.avalanche.payoffOrder?.[0]?.currentBalance || 0)}</div>
+              <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 6 }}>{percent(result.avalanche.payoffOrder?.[0]?.apr)}</div>
+            </div>
+            <div>
+              <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted, marginBottom: 8 }}>Payoff order (top 5)</div>
+              {renderMiniPayoffRows(result.avalanche.payoffOrder, "go")}
+            </div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: "auto" }}>
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+              <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Total payoff time <span style={{ color: ttzPalette.tx, marginLeft: 6 }}>{result.avalanche.monthsToZero} months</span></div>
+              <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Total interest <span style={{ color: ttzPalette.go, marginLeft: 6 }}>{money(result.avalanche.estimatedInterest)}</span></div>
+            </div>
+            <Button variant="secondary" onClick={() => navigateToPlanDestination("avalanche")}>Inspect strategy</Button>
+          </div>
+        </Card>
+
+        <SectionCard
+          number={4}
+          title="Balance to $0 over time"
+          actions={<div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}><span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 12, height: 0, borderTop: `3px solid ${ttzPalette.ac}` }} /> Snowball</span><span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 12, height: 0, borderTop: `3px solid ${ttzPalette.go}` }} /> Avalanche</span></div>}
+          style={{ padding: 20 }}
+        >
+          <TrendChart series={chartSeries} />
+          <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.go, marginTop: 12 }}>
+            {winnerLabel ? `${winnerLabel} becomes debt-free ${strategyTargetDelta} month${strategyTargetDelta === 1 ? "" : "s"} sooner.` : "These strategies are effectively tied on timing."}
+          </div>
+        </SectionCard>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: GAP, alignItems: "stretch" }}>
         <Card variant="default">
           <AllocationDonut
             title="Interest breakdown (Snowball)"
             subtitle="Projected interest by debt."
-            segments={interestByDebtEntries.map((entry, index) => ({ ...entry, colorToken: compositionTokens[index % compositionTokens.length] }))}
+            segments={interestByDebtEntries.map((entry, index) => ({ ...entry, colorToken: comparisonTokens[index % comparisonTokens.length] }))}
             centerLabel={money(result.snowball.estimatedInterest || 0)}
             centerSupporting="total interest"
           />
@@ -1197,57 +1815,117 @@ function CompareStrategiesView({ snapshot, service, refresh, runAction, writeSta
           <AllocationDonut
             title="Debt composition"
             subtitle="Included balance by category."
-            segments={compositionEntries.map((entry, index) => ({ id: entry.group, label: categoryConfigForGroup(entry.group)?.label || "Other", value: entry.balance, colorToken: compositionTokens[index % compositionTokens.length] }))}
+            segments={compositionEntries.map((entry, index) => ({ id: entry.group, label: categoryConfigForGroup(entry.group)?.label || "Other", value: entry.balance, colorToken: comparisonTokens[index % comparisonTokens.length] }))}
             centerLabel={money(compositionEntries.reduce((sum, entry) => sum + entry.balance, 0))}
-            centerSupporting="included"
+            centerSupporting="Total balance"
           />
+        </Card>
+        <Card variant="default" style={{ display: "grid", gap: 12 }}>
+          <div>
+            <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Scenario compare (+{money(SCENARIO_COMPARE_AMOUNT)} / month)</div>
+            <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 4 }}>Add the same extra payment to each strategy and see the impact.</div>
+          </div>
+          {compactScenarioRows.length ? (
+            <div style={{ display: "grid", gap: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr 1fr 1.1fr", gap: 8, ...TYPE_SCALE.overline, color: ttzPalette.muted }}>
+                <div>Strategy</div>
+                <div>Debt-free date</div>
+                <div>Interest</div>
+                <div>Vs. base plan</div>
+              </div>
+              {compactScenarioRows.map((row) => (
+                <div key={row.strategy} style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr 1fr 1.1fr", gap: 8, alignItems: "center", paddingTop: 10, borderTop: `1px solid ${ttzPalette.border}` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, ...TYPE_SCALE.body, color: ttzPalette.tx }}>
+                    <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: "50%", background: row.tone === "go" ? ttzPalette.go : ttzPalette.ac, flexShrink: 0 }} />
+                    {row.strategy}
+                  </div>
+                  <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx }}>{row.payoff}</div>
+                  <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx }}>{row.interest}</div>
+                  <div style={{ display: "grid", gap: 2 }}>
+                    <div style={{ ...TYPE_SCALE.caption, color: row.tone === "go" ? ttzPalette.go : ttzPalette.ac }}>{row.delta}</div>
+                    <div style={{ ...TYPE_SCALE.caption, color: row.tone === "go" ? ttzPalette.go : ttzPalette.ac }}>{row.saved}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : <LoadingState label="Loading scenario compare..." />}
+          <div style={{ marginTop: "auto", textAlign: "right" }}>
+            <button
+              type="button"
+              onClick={() => navigateToPlanDestination("what-if")}
+              className="ttz-focus-ring"
+              style={{ all: "unset", cursor: "pointer", ...TYPE_SCALE.body, color: ttzPalette.ac, fontWeight: 700 }}
+            >
+              Explore more in What If
+            </button>
+          </div>
         </Card>
         <Card variant="default">
           <AllocationDonut
-            title="Payment allocation"
-            subtitle={`Based on the ${result.activeStrategy ? (result.activeStrategy === "snowball" ? "Snowball" : "Avalanche") : "current"} plan's monthly payment.`}
+            title="Payment allocation (now)"
+            subtitle={`Based on the ${activeStrategyLabel} plan's monthly payment.`}
             segments={allocation.segments}
             centerLabel={money(allocation.total)}
-            centerSupporting="per month"
+            centerSupporting="monthly payment"
           />
+          <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 10 }}>
+            This split keeps your required payments covered first, then sends the extra toward the target debt.
+          </div>
         </Card>
       </div>
 
-      {scenarioCompare ? (
-        <MultiScenarioCompareCard
-          title={`Scenario Compare (+${money(SCENARIO_COMPARE_AMOUNT)}/month)`}
-          subtitle="What would adding the same extra payment do to each strategy?"
-          entries={[
-            { label: "Snowball baseline", previewResult: result.snowball },
-            { label: `Snowball + ${money(SCENARIO_COMPARE_AMOUNT)}`, previewResult: scenarioCompare.snowballPlus },
-            { label: "Avalanche baseline", previewResult: result.avalanche },
-            { label: `Avalanche + ${money(SCENARIO_COMPARE_AMOUNT)}`, previewResult: scenarioCompare.avalanchePlus },
-          ]}
-        />
-      ) : null}
-
-      <Card variant={winnerLabel ? "highlight" : "default"}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <IconBadge icon={Trophy} tone={winnerLabel ? "go" : "neutral"} size="md" />
-          <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Decision summary</div>
-        </div>
-        <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx, marginTop: 6 }}>{recommendation.headline}</div>
-        <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 6 }}>{recommendation.detail}</div>
-        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: GAP, alignItems: "center" }}>
-          {winnerStrategy && result.activeStrategy !== winnerStrategy ? (
-            <Button variant="primary" onClick={() => setConfirmStrategy(winnerStrategy)} disabled={writeState?.inProgress}>
-              Choose {winnerLabel}
-            </Button>
-          ) : null}
-          <button
-            type="button"
-            onClick={saveComparison}
-            disabled={writeState?.inProgress || savedComparison}
-            className="ttz-focus-ring"
-            style={{ all: "unset", cursor: savedComparison ? "default" : "pointer", ...TYPE_SCALE.body, color: savedComparison ? ttzPalette.tx2 : ttzPalette.ac, fontWeight: 700 }}
-          >
-            {savedComparison ? "Comparison saved" : "Save this comparison"}
-          </button>
+      <Card
+        variant="default"
+        style={{
+          background: `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`,
+          borderColor: winnerLabel ? ttzPalette.go : ttzPalette.border,
+        }}
+      >
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.8fr) repeat(3, minmax(140px, 0.7fr)) auto", gap: 0, alignItems: "stretch" }}>
+          <div style={{ padding: 18, display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{ width: 56, height: 56, borderRadius: "50%", background: "rgba(34,197,94,0.12)", border: `1px solid ${ttzPalette.go}`, display: "grid", placeItems: "center", color: ttzPalette.go }}>
+              <Trophy size={28} />
+            </div>
+            <div>
+              <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>Decision summary</div>
+              <div style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx, marginTop: 4 }}>{recommendation.headline}</div>
+              <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 4 }}>{recommendation.detail}</div>
+            </div>
+          </div>
+          <div style={{ padding: 18, borderLeft: `1px solid ${ttzPalette.border}`, display: "grid", placeItems: "center" }}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ ...TYPE_SCALE.metricSm, color: winnerLabel ? ttzPalette.go : ttzPalette.tx }}>{strategyTargetDelta}</div>
+              <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Months sooner</div>
+            </div>
+          </div>
+          <div style={{ padding: 18, borderLeft: `1px solid ${ttzPalette.border}`, display: "grid", placeItems: "center" }}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ ...TYPE_SCALE.metricSm, color: winnerLabel ? ttzPalette.go : ttzPalette.tx }}>{recommendation.interestDelta ? money(recommendation.interestDelta) : "$0"}</div>
+              <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Interest saved</div>
+            </div>
+          </div>
+          <div style={{ padding: 18, borderLeft: `1px solid ${ttzPalette.border}`, display: "grid", placeItems: "center" }}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ ...TYPE_SCALE.metricSm, color: activeStrategyLabel === "Avalanche" ? ttzPalette.go : ttzPalette.ac }}>{activeStrategyLabel}</div>
+              <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Active strategy</div>
+            </div>
+          </div>
+          <div style={{ padding: 18, borderLeft: `1px solid ${ttzPalette.border}`, display: "grid", alignContent: "center", gap: 10 }}>
+            {winnerStrategy && result.activeStrategy !== winnerStrategy ? (
+              <Button variant="primary" style={orangePrimaryStyle} onClick={() => setConfirmStrategy(winnerStrategy)} disabled={writeState?.inProgress}>
+                Choose {winnerLabel}
+              </Button>
+            ) : null}
+            <button
+              type="button"
+              onClick={saveComparison}
+              disabled={writeState?.inProgress || savedComparison}
+              className="ttz-focus-ring"
+              style={{ all: "unset", cursor: savedComparison ? "default" : "pointer", ...TYPE_SCALE.body, color: savedComparison ? ttzPalette.tx2 : ttzPalette.ac, fontWeight: 700, textAlign: "center" }}
+            >
+              {savedComparison ? "Comparison saved" : "Save this comparison"}
+            </button>
+          </div>
         </div>
       </Card>
 
@@ -1454,10 +2132,6 @@ function WhatIfView({ snapshot, service, runAction, writeState }) {
     setScenarioName("");
   });
 
-  const chartSeries = preview ? [
-    { id: "baseline", label: "Current plan", colorToken: "muted", dashed: true, points: toBalancePoints(preview.baseline?.projection), payoffMonth: preview.baseline?.label || undefined },
-    { id: "scenario", label: "Scenario", colorToken: "ac", points: toBalancePoints(preview.scenario?.projection), payoffMonth: preview.scenario?.label || undefined },
-  ] : [];
   const interestDelta = preview ? safePercentDelta(preview.baseline?.interest, preview.scenario?.interest) : null;
   const interestDeltaMoney = preview ? Math.abs(Number(preview.scenario?.interest || 0) - Number(preview.baseline?.interest || 0)) : 0;
   const impactRows = preview ? derivePerDebtImpactRows(preview.baseline?.perDebt, preview.scenario?.perDebt, snapshot.payoffQueue || []) : [];
@@ -1475,73 +2149,180 @@ function WhatIfView({ snapshot, service, runAction, writeState }) {
     { label: "Current Avalanche", preview: otherStrategies.avalancheBase },
     { label: "Avalanche + this scenario", preview: otherStrategies.avalancheScenario },
   ]) : null;
+  const strategyContextLabel = strategyContext === "snowball" ? "Snowball" : "Avalanche";
+  const chartSeriesForWhatIf = preview ? [
+    {
+      id: "baseline",
+      label: `Current plan (${strategyContextLabel})`,
+      colorToken: "blue",
+      points: toBalancePoints(preview.baseline?.projection),
+      payoffMonth: preview.baseline?.label || undefined,
+    },
+    {
+      id: "scenario",
+      label: "What-if scenario",
+      colorToken: "green",
+      points: toBalancePoints(preview.scenario?.projection),
+      payoffMonth: preview.scenario?.label || undefined,
+    },
+  ] : [];
+  const strategyComparisonTiles = otherStrategies ? [
+    {
+      label: "Current Snowball",
+      supporting: "Your plan",
+      projectedZeroDate: otherStrategies.snowballBase?.projectedZeroDate || "n/a",
+      estimatedInterest: otherStrategies.snowballBase?.estimatedInterest || 0,
+      monthsToZero: otherStrategies.snowballBase?.monthsToZero ?? null,
+      tone: "blue",
+      active: strategyContext === "snowball",
+    },
+    {
+      label: "Snowball + What If",
+      supporting: scenarioName.trim() || "+$100 to Chase",
+      projectedZeroDate: otherStrategies.snowballScenario?.projectedZeroDate || "n/a",
+      estimatedInterest: otherStrategies.snowballScenario?.estimatedInterest || 0,
+      monthsToZero: otherStrategies.snowballScenario?.monthsToZero ?? null,
+      tone: "green",
+      active: strategyContext === "snowball",
+    },
+    {
+      label: "Avalanche baseline",
+      supporting: "For comparison",
+      projectedZeroDate: otherStrategies.avalancheBase?.projectedZeroDate || "n/a",
+      estimatedInterest: otherStrategies.avalancheBase?.estimatedInterest || 0,
+      monthsToZero: otherStrategies.avalancheBase?.monthsToZero ?? null,
+      tone: "blue",
+      active: strategyContext === "avalanche",
+    },
+    {
+      label: "Avalanche + What If",
+      supporting: scenarioName.trim() || "+$100 to Chase",
+      projectedZeroDate: otherStrategies.avalancheScenario?.projectedZeroDate || "n/a",
+      estimatedInterest: otherStrategies.avalancheScenario?.estimatedInterest || 0,
+      monthsToZero: otherStrategies.avalancheScenario?.monthsToZero ?? null,
+      tone: "green",
+      active: strategyContext === "avalanche",
+    },
+  ] : [];
+  const firstDebtAffectedLabel = mostAffectedDebt?.debtName || "n/a";
+  const compactImpactRows = impactRows.slice(0, 4);
+  const currentPlanPillStyle = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    ...TYPE_SCALE.caption,
+    color: ttzPalette.tx2,
+  };
 
   return (
     <div style={{ display: "grid", gap: GAP }}>
-      <Card variant="default">
-        <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>What do you want to test?</div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: GAP }}>
-          {[
-            { key: "recurring", label: "Add money every month" },
-            { key: "one-time", label: "Make a one-time payment" },
-            { key: "target", label: "Target another debt" },
-            { key: "custom", label: "Custom scenario" },
-          ].map((option) => (
-            <button
-              key={option.key}
-              type="button"
-              onClick={() => { setMode(option.key); setPreview(null); setPreviewNotice(""); setOtherStrategies(null); }}
-              style={{
-                border: `1px solid ${mode === option.key ? ttzPalette.ac : ttzPalette.border}`,
-                background: mode === option.key ? ttzPalette.acS : "transparent",
-                color: mode === option.key ? ttzPalette.ac : ttzPalette.tx2,
-                padding: "8px 12px",
-                borderRadius: 999,
-                fontWeight: 700,
-                cursor: "pointer",
-              }}
-            >
-              {option.label}
-            </button>
-          ))}
+      <Card
+        variant="default"
+        style={{
+          background: `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`,
+          boxShadow: "var(--ttz-shadow-md)",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <IconBadge icon={TrendingUp} tone="ac" size="sm" />
+            <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Scenario impact</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+            <span style={currentPlanPillStyle}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--ttz-chart-blue-base)" }} /> Current plan</span>
+            <span style={currentPlanPillStyle}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--ttz-chart-green-base)" }} /> Scenario</span>
+          </div>
         </div>
+
+        {preview ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: GAP, marginTop: GAP }}>
+            <PlanMetric label="Current projected $0" value={preview.baseline?.label || "n/a"} icon={Calendar} />
+            <PlanMetric label="Scenario projected $0" value={preview.scenario?.label || "n/a"} tone="success" icon={Calendar} />
+            <PlanMetric label="Months saved" value={monthsSaved != null ? String(monthsSaved) : "n/a"} tone="success" icon={Clock} />
+            <PlanMetric label="Interest saved" value={money(interestDeltaMoney)} tone="success" icon={DollarSign} />
+            <PlanMetric label="Additional monthly payment" value={additionalMonthlyPayment != null ? money(additionalMonthlyPayment) : money(Number(amount) || 0)} tone="warning" icon={Wallet} />
+            <PlanMetric label="First debt affected" value={firstDebtAffectedLabel} icon={Target} />
+          </div>
+        ) : (
+          <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: GAP, marginBottom: 0 }}>
+            Build a scenario below and preview it to see payoff timing, savings, and which debt feels the change first.
+          </p>
+        )}
       </Card>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.1fr) minmax(0, 1.4fr)", gap: GAP }}>
-        <Card variant="default">
-          <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Choose scenario</div>
-          {mode === "recurring" ? (
-            <div style={{ display: "grid", gap: GAP, marginTop: GAP }}>
-              <Field label="Extra per month">
-                <MoneyInput value={extra} onChange={(event) => { setExtra(event.target.value); setPreview(null); setPreviewNotice(""); setOtherStrategies(null); }} />
-              </Field>
-              <Field label="Apply toward" help="Leave on All to add it to your overall plan payment - your strategy decides where it goes.">
-                <Select value={targetDebtId} onChange={(event) => { setTargetDebtId(event.target.value); setPreview(null); setPreviewNotice(""); setOtherStrategies(null); }}>
-                  {debtOptions.map((debt) => (
-                    <option key={debt.id || "all-included"} value={debt.id}>{debt.name}</option>
-                  ))}
-                </Select>
-              </Field>
-            </div>
-          ) : null}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(320px, 0.9fr) minmax(0, 1.1fr) minmax(320px, 0.85fr)",
+          gap: GAP,
+          alignItems: "stretch",
+        }}
+      >
+        <Card
+          variant="default"
+          style={{
+            background: `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`,
+            boxShadow: "var(--ttz-shadow-md)",
+            position: "sticky",
+            top: 12,
+            gridRow: otherStrategies ? "1 / span 2" : "1",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <IconBadge icon={FlaskConical} tone="ac" size="sm" />
+            <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Scenario builder</div>
+          </div>
 
-          {mode === "one-time" ? (
-            <div style={{ display: "grid", gap: GAP, marginTop: GAP }}>
-              <Field label="Apply toward">
-                <Select value={targetDebtId} onChange={(event) => setTargetDebtId(event.target.value)}>
-                  {debtOptions.map((debt) => (
-                    <option key={debt.id || "all-included"} value={debt.id}>{debt.name}</option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="One-time payment">
-                <MoneyInput value={amount} onChange={(event) => setAmount(event.target.value)} />
-              </Field>
-            </div>
-          ) : null}
+          <div style={{ ...pillTabGroupStyle(), marginTop: GAP }}>
+            {[
+              { key: "recurring", label: "Add money every month" },
+              { key: "one-time", label: "Make a one-time payment" },
+              { key: "target", label: "Target another debt" },
+              { key: "custom", label: "Custom scenario" },
+            ].map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                onClick={() => { setMode(option.key); setPreview(null); setPreviewNotice(""); setOtherStrategies(null); }}
+                style={pillTabButtonStyle(mode === option.key)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
 
-          {mode === "target" || mode === "custom" ? (
-            <div style={{ display: "grid", gap: GAP, marginTop: GAP }}>
+          <div style={{ display: "grid", gap: GAP, marginTop: GAP }}>
+            {mode === "recurring" ? (
+              <>
+                <Field label="Extra per month">
+                  <MoneyInput value={extra} onChange={(event) => { setExtra(event.target.value); setPreview(null); setPreviewNotice(""); setOtherStrategies(null); }} />
+                </Field>
+                <Field label="Apply toward">
+                  <Select value={targetDebtId} onChange={(event) => { setTargetDebtId(event.target.value); setPreview(null); setPreviewNotice(""); setOtherStrategies(null); }}>
+                    {debtOptions.map((debt) => (
+                      <option key={debt.id || "all-included"} value={debt.id}>{debt.name}</option>
+                    ))}
+                  </Select>
+                </Field>
+              </>
+            ) : null}
+
+            {mode === "one-time" ? (
+              <>
+                <Field label="Apply toward">
+                  <Select value={targetDebtId} onChange={(event) => setTargetDebtId(event.target.value)}>
+                    {debtOptions.map((debt) => (
+                      <option key={debt.id || "all-included"} value={debt.id}>{debt.name}</option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="One-time payment">
+                  <MoneyInput value={amount} onChange={(event) => setAmount(event.target.value)} />
+                </Field>
+              </>
+            ) : null}
+
+            {(mode === "target" || mode === "custom") ? (
               <Field label="Target debt">
                 <Select value={targetDebtId} onChange={(event) => setTargetDebtId(event.target.value)}>
                   {debtOptions.map((debt) => (
@@ -1549,102 +2330,128 @@ function WhatIfView({ snapshot, service, runAction, writeState }) {
                   ))}
                 </Select>
               </Field>
-            </div>
-          ) : null}
+            ) : null}
 
-          <div style={{ marginTop: GAP }}>
-            <Field label="Strategy context" help="Which strategy's payoff order this scenario is previewed against.">
+            <Field label="Strategy context">
               <Select value={strategyContext} onChange={(event) => { setStrategyContext(event.target.value); setPreview(null); setPreviewNotice(""); setOtherStrategies(null); }}>
-                <option value="avalanche">Avalanche - highest APR first</option>
-                <option value="snowball">Snowball - smallest balance first</option>
+                <option value="avalanche">Avalanche</option>
+                <option value="snowball">Snowball</option>
               </Select>
             </Field>
-          </div>
 
-          <div style={{ marginTop: GAP, display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <Button variant="primary" onClick={runPreview} disabled={writeState.inProgress} loading={writeState.action === "preview what-if"}>Preview impact</Button>
-            <Button variant="secondary" onClick={saveScenario} disabled={writeState.inProgress} loading={writeState.action === "save scenario"}>Save scenario</Button>
-          </div>
-          <div style={{ marginTop: GAP }}>
-            <Input value={scenarioName} placeholder="Scenario name" onChange={(event) => setScenarioName(event.target.value)} />
-          </div>
-        </Card>
+            <Field label="Scenario name">
+              <Input value={scenarioName} placeholder="+$100 to Chase" onChange={(event) => setScenarioName(event.target.value)} />
+            </Field>
 
-        <Card variant="default">
-          <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Current vs scenario</div>
-          {preview ? (
-            <div style={{ display: "grid", gap: GAP, marginTop: GAP }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: GAP }}>
-                <PlanMetric label="Current plan" value={preview.baseline?.label || "n/a"} icon={Calendar} />
-                <PlanMetric label="Scenario" value={preview.scenario?.label || "n/a"} tone="accent" icon={Calendar} />
-                <PlanMetric label="Current interest" value={money(preview.baseline?.interest || 0)} icon={TrendingUp} />
-                <PlanMetric label="Scenario interest" value={money(preview.scenario?.interest || 0)} tone="success" icon={TrendingUp} />
-                <PlanMetric label="Months saved" value={monthsSaved != null ? String(monthsSaved) : "n/a"} icon={Clock} />
-                {additionalMonthlyPayment != null ? (
-                  <PlanMetric label="Additional monthly payment" value={money(additionalMonthlyPayment)} icon={DollarSign} />
-                ) : (
-                  <PlanMetric label="Most affected debt" value={mostAffectedDebt?.debtName || "n/a"} icon={Target} />
-                )}
-              </div>
-              {additionalMonthlyPayment != null && mostAffectedDebt ? (
-                <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Most affected debt: {mostAffectedDebt.debtName}</div>
-              ) : null}
-              <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, margin: 0 }}>{monthLabelDeltaText(preview.baseline?.label, preview.scenario?.label) || "Same payoff time as your current plan"}</p>
-              <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, margin: 0 }}>{describePercentDelta(interestDelta, interestDeltaMoney)}</p>
-              <InfoCallout>This is a hypothetical preview only. It will not create a PaymentEvent.</InfoCallout>
+            <div style={{ display: "grid", gap: 10 }}>
+              <Button variant="primary" onClick={runPreview} disabled={writeState.inProgress} loading={writeState.action === "preview what-if"}>Preview impact</Button>
+              <Button variant="secondary" onClick={saveScenario} disabled={writeState.inProgress} loading={writeState.action === "save scenario"}>Save scenario</Button>
+              <Button variant="ghost" disabled style={{ justifyContent: "center", border: `1px solid ${ttzPalette.border}` }}>Apply to plan</Button>
             </div>
-          ) : previewNotice ? (
-            <WarningCallout style={{ marginTop: GAP }}>{previewNotice}</WarningCallout>
-          ) : (
-            <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: GAP }}>Choose a scenario and preview what would happen before saving or applying.</p>
-          )}
-        </Card>
-      </div>
 
-      {preview ? (
-        <Card variant="default">
-          <TrendChart title="Balance to $0" subtitle="Your current plan vs this scenario." series={chartSeries} />
+            {previewNotice ? <WarningCallout>{previewNotice}</WarningCallout> : null}
+            <InfoCallout>This is a hypothetical preview only. It will not create a PaymentEvent.</InfoCallout>
+          </div>
         </Card>
-      ) : null}
 
-      {impactRows.length ? (
-        <Card variant="default">
-          <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Per-debt impact</div>
-          <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 4, marginBottom: GAP }}>How this scenario changes each debt&apos;s own payoff timing, biggest change first.</p>
-          <PerDebtImpactTable rows={impactRows} />
-        </Card>
-      ) : null}
+            <Card variant="default" style={{ height: "100%" }}>
+              {preview ? (
+                <TrendChart
+                  title="Trend to zero"
+                  subtitle="Current plan vs what-if scenario"
+                  series={chartSeriesForWhatIf}
+                  modeToggle
+                />
+              ) : (
+                <>
+                  <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Trend to zero</div>
+                  <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: GAP, marginBottom: 0 }}>Preview a scenario to see how the debt line moves when you change the plan.</p>
+                </>
+              )}
+            </Card>
+
+            <Card variant="default" style={{ height: "100%" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <IconBadge icon={GitCompare} tone="go" size="sm" />
+                <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>How your debt reacts over time</div>
+              </div>
+              {compactImpactRows.length ? (
+                <div style={{ display: "grid", gap: 12, marginTop: GAP }}>
+                  {compactImpactRows.map((row) => (
+                    <div key={row.debtId} style={{ padding: 14, borderRadius: 14, border: `1px solid ${ttzPalette.border}`, background: ttzPalette.surf2 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.35fr) auto auto auto", gap: 10, alignItems: "center" }}>
+                        <div>
+                          <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 700 }}>{row.debtName}</div>
+                          <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 4 }}>{money(row.balance || 0)}</div>
+                        </div>
+                        <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>{row.baselineDate || "n/a"}</div>
+                        <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>{row.scenarioDate || "n/a"}</div>
+                        <Badge tone={row.monthsDelta > 0 ? "success" : row.monthsDelta < 0 ? "warning" : "neutral"}>
+                          {row.monthsDelta > 0 ? `${row.monthsDelta} months earlier` : row.monthsDelta < 0 ? `${Math.abs(row.monthsDelta)} months later` : "No change"}
+                        </Badge>
+                      </div>
+                      <div style={{ ...TYPE_SCALE.caption, color: row.monthsDelta > 0 ? ttzPalette.go : row.monthsDelta < 0 ? ttzPalette.wa : ttzPalette.tx2, marginTop: 10 }}>
+                        {row.monthsDelta > 0 ? "Paid off faster with extra money applied." : row.monthsDelta < 0 ? "Payoff order shifts later." : "No change yet."}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: GAP, marginBottom: 0 }}>Once you preview a scenario, we’ll show which debts move sooner, later, or stay flat.</p>
+              )}
+            </Card>
 
       {otherStrategies ? (
-        <>
-          <Card variant="default">
-            <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Scenario vs other strategies</div>
-            <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 4, marginBottom: GAP }}>The same change, applied to Snowball and Avalanche instead.</p>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: GAP }}>
-              {[
-                { key: "snowballBase", label: "Current Snowball", tone: "neutral" },
-                { key: "snowballScenario", label: "Snowball + this scenario", tone: strategyContext === "snowball" ? "go" : "neutral" },
-                { key: "avalancheBase", label: "Current Avalanche", tone: "neutral" },
-                { key: "avalancheScenario", label: "Avalanche + this scenario", tone: strategyContext === "avalanche" ? "go" : "neutral" },
-              ].map(({ key, label, tone }) => (
-                <div key={key} style={{ padding: 14, borderRadius: 14, border: `1px solid ${tone === "go" ? ttzPalette.go : ttzPalette.border}`, background: tone === "go" ? ttzPalette.goD : ttzPalette.surf2 }}>
-                  <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.tx2 }}>{label}</div>
-                  <div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.tx, marginTop: 6 }}>{otherStrategies[key]?.projectedZeroDate || "n/a"}</div>
-                  <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 4 }}>{money(otherStrategies[key]?.estimatedInterest || 0)} interest</div>
+        <Card variant="default" style={{ gridColumn: "2 / span 2" }}>
+          <div style={{ display: "grid", gap: GAP }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <IconBadge icon={PieChart} tone="ac" size="sm" />
+              <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Scenario vs other strategies</div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr)) minmax(280px, 1.2fr)", gap: GAP, alignItems: "stretch" }}>
+              {strategyComparisonTiles.map((tile) => (
+                <div
+                  key={tile.label}
+                  style={{
+                    padding: 16,
+                    borderRadius: 16,
+                    border: `1px solid ${tile.tone === "green" ? ttzPalette.goD : ttzPalette.border}`,
+                    background: tile.tone === "green" ? ttzPalette.goD : ttzPalette.surf2,
+                  }}
+                >
+                  <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, fontWeight: 700 }}>{tile.label}</div>
+                  <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 2 }}>{tile.supporting}</div>
+                  <div style={{ display: "grid", gap: 6, marginTop: 12 }}>
+                    <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Interest vs current plan</div>
+                    <div style={{ ...TYPE_SCALE.body, color: tile.tone === "green" ? ttzPalette.go : ttzPalette.tx }}>{tile.active && tile.tone === "green" && interestDelta ? `${interestDelta.value?.toFixed(1) || "0"}%` : "Baseline"}</div>
+                    <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Months to $0</div>
+                    <div style={{ ...TYPE_SCALE.body, color: tile.tone === "green" ? ttzPalette.go : ttzPalette.tx }}>{tile.monthsToZero != null ? `${tile.monthsToZero} months` : "n/a"}</div>
+                    <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>{tile.projectedZeroDate}</div>
+                  </div>
                 </div>
               ))}
+
+              <div style={{ padding: 18, borderRadius: 18, border: `1px solid ${ttzPalette.goD}`, background: `linear-gradient(180deg, ${ttzPalette.goD} 0%, ${ttzPalette.surf} 100%)`, display: "grid", gap: 10, alignContent: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <IconBadge icon={Trophy} tone="go" size="sm" />
+                  <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Best scenario read</div>
+                </div>
+                <p style={{ ...TYPE_SCALE.sectionTitle, color: ttzPalette.tx, margin: 0 }}>
+                  {bestOtherStrategy
+                    ? `This scenario beats current ${strategyContextLabel} by ${monthsSaved != null ? monthsSaved : 0} months`
+                    : "We’ll compare your strongest what-if outcome here."}
+                </p>
+                <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, margin: 0 }}>
+                  {bestOtherStrategy
+                    ? `Projected ${bestOtherStrategy.preview.projectedZeroDate} and narrows the gap with ${bestOtherStrategy.label}.`
+                    : "Run a preview to rank the scenarios side by side."}
+                </p>
+              </div>
             </div>
-          </Card>
-          {bestOtherStrategy ? (
-            <InsightBanner
-              icon={Trophy}
-              tone="go"
-              headline={`${bestOtherStrategy.label} reaches $0 earliest`}
-              detail={`Projected ${bestOtherStrategy.preview.projectedZeroDate}, among the options previewed above.`}
-            />
-          ) : null}
-        </>
+          </div>
+        </Card>
       ) : null}
+      </div>
     </div>
   );
 }
@@ -1728,10 +2535,68 @@ function FinishByView({ snapshot, service, refresh, runAction, writeState }) {
   // plan is active yet (its own baseVersion?.strategy || "avalanche") - this
   // mirrors that exact fallback so the "Pro tip" copy is never a guess.
   const goalStrategyLabel = (snapshot.activeContext?.version?.strategy || "avalanche") === "snowball" ? "Snowball" : "Avalanche";
+  const targetDateLabel = result?.targetMonth ? formatMonthLabel(result.targetMonth) : "Choose a month";
+  const currentZeroDate = result?.projectedZeroDate || result?.nearestFeasibleZeroDate || "Preview needed";
+  const additionalNeeded = Math.max(0, Number(result?.additionalNeeded || 0));
+  const requiredMonthly = Number(result?.requiredMonthlyExtra || 0);
+  const finishMonthsSooner = result?.baseline?.monthsToZero != null && result?.scenario?.monthsToZero != null
+    ? Math.max(0, result.baseline.monthsToZero - result.scenario.monthsToZero)
+    : 0;
+
+  const scenarioControls = (
+    <Card variant="default">
+      <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>1. Scenario controls</div>
+      <div className="ttz-finish-control-fields" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) minmax(0, .85fr) auto", gap: GAP, marginTop: GAP, alignItems: "end" }}>
+        <Field label="Target debt-free month">
+          <Input type="month" value={targetMonth} onChange={(event) => { setTargetMonth(event.target.value); setResult(null); }} />
+        </Field>
+        <Field label="Debt (optional - defaults to all included debts)">
+          <Select value={targetDebtId} onChange={(event) => { setTargetDebtId(event.target.value); setResult(null); }}>
+            {debtOptions.map((debt) => (
+              <option key={debt.id || "all-included"} value={debt.id}>{debt.name}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Strategy (optional)">
+          <Input value={goalStrategyLabel} readOnly aria-label="Strategy used for this finish-by preview" />
+        </Field>
+        <Button variant="primary" onClick={check} disabled={!targetMonth || writeState.inProgress} loading={writeState.action === "check feasibility"}>Check feasibility</Button>
+      </div>
+    </Card>
+  );
+
+  const proTip = (
+    <Card variant="default" style={{ borderLeft: `3px solid ${ttzPalette.wa}`, background: `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <IconBadge icon={Lightbulb} tone="warning" size="sm" />
+        <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.wa }}>Pro tip</div>
+      </div>
+      <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, margin: "10px 0 0" }}>
+        Extra payments use {goalStrategyLabel} by default, so your highest-impact debt gets the first boost.
+      </p>
+    </Card>
+  );
+
+  const finishFlow = (
+    <Card variant="default" style={{
+      background: `linear-gradient(120deg, ${ttzPalette.surf2} 0%, ${ttzPalette.acS || ttzPalette.surf} 100%)`,
+      borderColor: result?.feasible ? ttzPalette.go : ttzPalette.border,
+    }}>
+      <div className="ttz-finish-flow" style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1.2fr)", alignItems: "center", gap: 20 }}>
+        <IconBadge icon={Target} tone="go" size="lg" />
+        <div><div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Target debt-free month</div><div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.go, marginTop: 4 }}>{targetDateLabel}</div></div>
+        <ArrowRight aria-hidden="true" color={ttzPalette.ac} size={28} />
+        <div><div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Current projected $0 date</div><div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.ac, marginTop: 4 }}>{currentZeroDate}</div></div>
+        <ArrowRight aria-hidden="true" color={ttzPalette.ac} size={28} />
+        <div><div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Feasibility status</div><div style={{ ...TYPE_SCALE.cardTitle, color: result?.feasible ? ttzPalette.go : ttzPalette.wa, marginTop: 4 }}>{feasibility ? FEASIBILITY_LABEL[feasibility] : "Let's check it"}</div><div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 4 }}>Based on the payment details in your plan.</div></div>
+      </div>
+    </Card>
+  );
 
   return (
     <div style={{ display: "grid", gap: GAP }}>
-      {result && result.valid !== false ? (
+      {finishFlow}
+      {false && result && result.valid !== false ? (
         <InsightBanner
           icon={Flag}
           tone={result.feasible ? "go" : "wa"}
@@ -1740,75 +2605,39 @@ function FinishByView({ snapshot, service, refresh, runAction, writeState }) {
         />
       ) : null}
 
-      <Card variant="default">
-        <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>When do you want to reach $0?</div>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.1fr)", gap: GAP, marginTop: GAP }}>
-          <Field label="Target debt-free month">
-            <Input type="month" value={targetMonth} onChange={(event) => { setTargetMonth(event.target.value); setResult(null); }} />
-          </Field>
-          <Field label="Debt (optional - defaults to all included debts)">
-            <Select value={targetDebtId} onChange={(event) => { setTargetDebtId(event.target.value); setResult(null); }}>
-              {debtOptions.map((debt) => (
-                <option key={debt.id || "all-included"} value={debt.id}>{debt.name}</option>
-              ))}
-            </Select>
-          </Field>
-        </div>
-        <div style={{ display: "grid", alignContent: "end", marginTop: GAP }}>
-          <Button variant="primary" onClick={check} disabled={!targetMonth || writeState.inProgress} loading={writeState.action === "check feasibility"}>Check feasibility</Button>
-        </div>
-      </Card>
-
-      <Card variant="default" style={{ borderLeft: `3px solid ${ttzPalette.info}` }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <IconBadge icon={Lightbulb} tone="info" size="sm" />
-          <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.info }}>Pro tip</div>
-        </div>
-        <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 6, marginBottom: 0 }}>
-          Extra payments are applied using {goalStrategyLabel} by default, directing money to the highest-impact debt first.
-        </p>
-      </Card>
+      <div className="ttz-finish-controls" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(260px, .32fr)", gap: GAP }}>
+        {scenarioControls}
+        {proTip}
+      </div>
 
       {result && result.valid === false ? (
         <WarningCallout>{result.reason || "Choose a target date in the future."}</WarningCallout>
       ) : null}
 
       {result && result.valid !== false ? (
-        <Card variant={result.feasible ? "highlight" : "default"}>
+          <Card
+            variant={result.feasible ? "highlight" : "default"}
+            style={{
+              background: result.feasible
+                ? `linear-gradient(180deg, ${ttzPalette.goD || ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`
+                : `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`,
+              boxShadow: "var(--ttz-shadow-md)",
+            }}
+          >
           {result.feasible ? (
             <div style={{ display: "grid", gap: GAP }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Target planning</div>
+                <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Your finish-by plan</div>
                 {feasibility ? <Badge tone={FEASIBILITY_TONE[feasibility]}>{FEASIBILITY_LABEL[feasibility]}</Badge> : null}
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: GAP }}>
-                <PlanMetric label="Current projected $0" value={result.projectedZeroDate || "n/a"} icon={Calendar} />
-                <PlanMetric label="Target date" value={formatMonthLabel(result.targetMonth)} tone="accent" icon={Flag} />
-                <PlanMetric label="Additional needed" value={money(Math.max(0, result.additionalNeeded || 0))} tone={result.additionalNeeded > 0 ? "warning" : "success"} icon={TrendingUp} />
+              <div className="ttz-finish-metrics" style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(150px, 1fr))", gap: GAP }}>
+                <PlanMetric label="Current projected $0 date" value={result.projectedZeroDate || "n/a"} icon={Calendar} />
+                <PlanMetric label="Target date" value={formatMonthLabel(result.targetMonth)} tone="success" icon={Target} />
+                <PlanMetric label="Additional monthly needed" value={`+${money(additionalNeeded)}/mo`} tone={additionalNeeded > 0 ? "warning" : "success"} icon={TrendingUp} />
                 <PlanMetric label="Interest savings" value={money(interestDeltaMoney)} tone="success" icon={DollarSign} />
-                <PlanMetric label="Required total monthly" value={money(result.requiredMonthlyExtra || 0)} icon={Wallet} />
+                <PlanMetric label="Required total monthly" value={`${money(requiredMonthly)}/mo`} tone="accent" icon={Wallet} />
               </div>
               <p style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, margin: 0 }}>{describePercentDelta(interestDelta, interestDeltaMoney)}</p>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: 12, borderRadius: 12, background: ttzPalette.acS || ttzPalette.surf2 }}>
-                <IconBadge icon={Sparkles} tone="ac" size="sm" />
-                <div>
-                  <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.ac }}>Recommended action</div>
-                  <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, margin: "4px 0 0" }}>
-                    {result.additionalNeeded > 0
-                      ? `To reach $0 by ${formatMonthLabel(result.targetMonth)}, increase your monthly payment by ${money(result.additionalNeeded)} to ${money(result.requiredMonthlyExtra)}/mo.`
-                      : `You're already on pace to reach $0 by ${formatMonthLabel(result.targetMonth)} at your current payment.`}
-                  </p>
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                {result.additionalNeeded > 0 ? (
-                  <Button variant="primary" onClick={() => setConfirmOpen(true)} disabled={writeState.inProgress}>Apply this payment increase</Button>
-                ) : (
-                  <Badge tone="success">Already on pace</Badge>
-                )}
-                <Input value={scenarioName} placeholder="Scenario name" onChange={(event) => setScenarioName(event.target.value)} style={{ minWidth: 180 }} />
-                <Button variant="secondary" onClick={saveScenarioIt} disabled={writeState.inProgress} loading={writeState.action === "save scenario"}>Save scenario</Button>
-              </div>
             </div>
           ) : (
             <div style={{ display: "grid", gap: GAP }}>
@@ -1823,7 +2652,7 @@ function FinishByView({ snapshot, service, refresh, runAction, writeState }) {
         </Card>
       ) : null}
 
-      {result?.feasible && result.baseline ? (
+      {false && result?.feasible && result.baseline ? (
         <>
           <Card variant="default">
             <TrendChart title="Balance to $0" subtitle="Current pace vs the payment this target requires." series={chartSeries} />
@@ -1893,6 +2722,75 @@ function FinishByView({ snapshot, service, refresh, runAction, writeState }) {
               ))}
             </ul>
           </Card>
+        </>
+      ) : null}
+
+      {result?.feasible && result.baseline ? (
+        <>
+          <div className="ttz-finish-main-row" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.35fr) minmax(250px, .56fr) minmax(300px, .7fr)", gap: GAP }}>
+            <Card variant="default">
+              <TrendChart title="Balance to $0 over time" subtitle="Current pace vs the payment this target requires." series={chartSeries} />
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, color: ttzPalette.go, ...TYPE_SCALE.caption }}>
+                <CheckCircle2 size={16} />
+                Stay on track with this payment and you’ll be debt-free {finishMonthsSooner ? `${finishMonthsSooner} months earlier.` : "on your target date."}
+              </div>
+            </Card>
+            {allocation?.segments.length ? (
+              <Card variant="default">
+                <AllocationDonut title="Payment allocation in finish-by plan" subtitle="Where the required payment goes." segments={allocation.segments} centerLabel={money(allocation.total)} centerSupporting="per month" />
+              </Card>
+            ) : <Card variant="default"><EmptyState title="Payment allocation" description="Run a feasible preview to see the split." /></Card>}
+            <Card variant="default">
+              <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Plan comparison</div>
+              <div style={{ overflowX: "auto", marginTop: 10 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead><tr>
+                    <th style={{ textAlign: "left", padding: "6px", ...TYPE_SCALE.caption, color: ttzPalette.tx2 }} />
+                    <th style={{ textAlign: "left", padding: "6px", ...TYPE_SCALE.caption, color: ttzPalette.ac }}>Current plan</th>
+                    <th style={{ textAlign: "left", padding: "6px", ...TYPE_SCALE.caption, color: ttzPalette.go }}>Finish-by plan</th>
+                    <th style={{ textAlign: "left", padding: "6px", ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>Change</th>
+                  </tr></thead>
+                  <tbody>{[
+                    ["Months to $0", String(result.baseline.monthsToZero ?? "n/a"), String(result.scenario.monthsToZero ?? "n/a"), finishMonthsSooner ? `-${finishMonthsSooner}` : "Same"],
+                    ["Payoff date", result.baseline.projectedZeroDate || "n/a", result.scenario.projectedZeroDate || "n/a", monthLabelDeltaText(result.baseline.projectedZeroDate, result.scenario.projectedZeroDate) || "Same"],
+                    ["Total interest", money(result.baseline.estimatedInterest), money(result.scenario.estimatedInterest), `-${money(interestDeltaMoney)}`],
+                    ["Monthly payment", money(result.currentMonthlyExtra || 0), money(result.requiredMonthlyExtra || 0), `+${money(additionalNeeded)}`],
+                  ].map(([label, current, scenario, change]) => <tr key={label}>
+                    <td style={{ padding: "8px 6px", borderTop: `1px solid ${ttzPalette.border}`, ...TYPE_SCALE.caption, color: ttzPalette.tx2 }}>{label}</td>
+                    <td style={{ padding: "8px 6px", borderTop: `1px solid ${ttzPalette.border}`, ...TYPE_SCALE.caption, color: ttzPalette.tx }}>{current}</td>
+                    <td style={{ padding: "8px 6px", borderTop: `1px solid ${ttzPalette.border}`, ...TYPE_SCALE.caption, color: ttzPalette.go }}>{scenario}</td>
+                    <td style={{ padding: "8px 6px", borderTop: `1px solid ${ttzPalette.border}`, ...TYPE_SCALE.caption, color: ttzPalette.go }}>{change}</td>
+                  </tr>)}</tbody>
+                </table>
+              </div>
+              <Button variant="secondary" style={{ marginTop: 10, width: "100%" }} onClick={() => navigateToPlanDestination("compare")}>View details</Button>
+            </Card>
+          </div>
+
+          <div className="ttz-finish-bottom-row" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.25fr) minmax(300px, .62fr) minmax(230px, .42fr)", gap: GAP }}>
+            <Card variant="default">
+              <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Top debts most impacted by this plan</div>
+              <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, margin: "4px 0 10px" }}>The balances this target changes most, biggest shift first.</p>
+              {impactRows.length ? <PerDebtImpactTable rows={impactRows} showImpactLevel /> : <EmptyState title="No debt changes yet" description="Run a preview with a target date to compare each debt." />}
+            </Card>
+            <Card variant="default" style={{ borderColor: ttzPalette.wa }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}><IconBadge icon={Sparkles} tone="warning" size="sm" /><div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Recommended action</div></div>
+              <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx, margin: "18px 0" }}>
+                {additionalNeeded > 0 ? <>Add <strong style={{ color: ttzPalette.go }}>{money(additionalNeeded)}/month</strong> to finish <strong style={{ color: ttzPalette.ac }}>{finishMonthsSooner} months earlier.</strong></> : "You’re already on pace for this target."}
+              </p>
+              <div style={{ display: "grid", gap: 8 }}>
+                {additionalNeeded > 0 ? <Button variant="primary" onClick={() => setConfirmOpen(true)} disabled={writeState.inProgress}>Apply this plan</Button> : <Badge tone="success">Already on pace</Badge>}
+                <Input value={scenarioName} placeholder="Scenario name" onChange={(event) => setScenarioName(event.target.value)} />
+                <Button variant="secondary" onClick={saveScenarioIt} disabled={writeState.inProgress} loading={writeState.action === "save scenario"}>Save scenario</Button>
+              </div>
+            </Card>
+            <Card variant="default">
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}><IconBadge icon={ShieldCheck} tone="go" size="sm" /><div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Make it sustainable</div></div>
+              <ul style={{ margin: "14px 0 0", paddingLeft: 20, display: "grid", gap: 8 }}>
+                {SUSTAINABILITY_CHECKLIST.map((item) => <li key={item} style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>{item}</li>)}
+              </ul>
+            </Card>
+          </div>
         </>
       ) : null}
 
@@ -1994,11 +2892,6 @@ function SavedScenariosView({ snapshot, service, refresh, runAction, writeState 
   const strategySnapshots = activeScenarios.filter((scenario) => scenario.type === "strategy_comparison");
   const whatIfScenarios = activeScenarios.filter((scenario) => WHATIF_SCENARIO_TYPES.includes(scenario.type));
   const finishByScenarios = activeScenarios.filter((scenario) => scenario.type === "goal_date");
-  const groupCounts = activeScenarios.reduce((acc, scenario) => {
-    acc[scenario.type] = (acc[scenario.type] || 0) + 1;
-    return acc;
-  }, {});
-
   const renderScenarioCard = (scenario, { isArchived = false } = {}) => (
     <ScenarioCard
       key={scenario.id}
@@ -2025,22 +2918,35 @@ function SavedScenariosView({ snapshot, service, refresh, runAction, writeState 
     { key: "finishby", title: "Saved Finish-By Targets", icon: Flag },
     { key: "archived", title: "Archived", icon: Archive },
   ];
+  const activePlanName = activeVersion
+    ? `${activeVersion.strategy === "snowball" ? "Snowball" : "Avalanche"} +${money(Number(activeVersion.extraMonthlyPayment || 0))}/mo`
+    : "No active plan";
+  const savedBestDate = bestOption?.preview?.projectedZeroDate || "No preview yet";
+  const savedBestInterest = validPreviewedEntries.length
+    ? Math.min(...validPreviewedEntries.map((entry) => Number(entry.preview.estimatedInterest || Infinity)))
+    : null;
+  const latestUpdate = planHistory?.[0]?.createdAt
+    ? new Date(planHistory[0].createdAt).toLocaleDateString()
+    : "No plan changes yet";
 
   return (
     <div style={{ display: "grid", gap: GAP }}>
-      {activeScenarios.length ? (
-        <Card variant="default">
-          <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>{activeScenarios.length} saved scenario{activeScenarios.length === 1 ? "" : "s"}</div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-            {Object.entries(groupCounts).map(([type, count]) => (
-              <Badge key={type} tone="neutral">{SCENARIO_TYPE_LABELS[type] || type} · {count}</Badge>
-            ))}
-            {archivedScenarios.length ? <Badge tone="neutral">Archived · {archivedScenarios.length}</Badge> : null}
-          </div>
-        </Card>
-      ) : null}
+      <div className="ttz-saved-summary-ribbon" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: GAP, padding: 14, border: `1px solid ${ttzPalette.border}`, borderRadius: 16, background: `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)` }}>
+        <LabelValueRow label="Active plan" value={activePlanName} />
+        <LabelValueRow label="Saved scenarios" value={String(activeScenarios.length)} />
+        <LabelValueRow label="Archived" value={String(archivedScenarios.length)} />
+        <LabelValueRow label="Last updated" value={latestUpdate} />
+      </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.9fr) minmax(260px, 1fr)", gap: GAP, alignItems: "start" }}>
+      <div className="ttz-saved-metrics" style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: GAP }}>
+        <PlanMetric label="Active plan" value={activePlanName} tone="accent" icon={Zap} />
+        <PlanMetric label="Saved scenarios" value={String(activeScenarios.length)} icon={Sparkles} />
+        <PlanMetric label="Best projected payoff date" value={savedBestDate} tone="success" icon={Calendar} />
+        <PlanMetric label="Best interest outcome" value={savedBestInterest == null ? "No preview yet" : money(savedBestInterest)} tone="success" icon={DollarSign} />
+        <PlanMetric label="Archived items" value={String(archivedScenarios.length)} tone="warning" icon={Archive} />
+      </div>
+
+      <div className="ttz-saved-layout" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.9fr) minmax(260px, .56fr)", gap: GAP, alignItems: "start" }}>
         <div style={{ display: "grid", gap: GAP }}>
           {!activeScenarios.length && !archivedScenarios.length ? (
             <Card variant="default">
@@ -2056,12 +2962,13 @@ function SavedScenariosView({ snapshot, service, refresh, runAction, writeState 
               scenario state, so it stays useful/visible regardless of
               whether anything's been saved yet. Each column already has its
               own honest "None saved yet." fallback. */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: GAP, alignItems: "start" }}>
+          <div className="ttz-saved-board" style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: GAP, alignItems: "start" }}>
             {columns.map((column) => (
               <div key={column.key} style={{ display: "grid", gap: 10 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <IconBadge icon={column.icon} tone="ac" size="sm" />
                   <div style={{ ...TYPE_SCALE.overline, color: ttzPalette.muted }}>{column.title}</div>
+                  <Badge tone="neutral" style={{ marginLeft: "auto" }}>{column.key === "strategy" ? strategySnapshots.length : column.key === "whatif" ? whatIfScenarios.length : column.key === "finishby" ? finishByScenarios.length : column.key === "archived" ? archivedScenarios.length : activeVersion ? 1 : 0}</Badge>
                 </div>
                 {column.key === "active" ? (
                   activeVersion ? (
@@ -2089,13 +2996,6 @@ function SavedScenariosView({ snapshot, service, refresh, runAction, writeState 
             ))}
           </div>
 
-          {planHistory?.length ? (
-            <Card variant="default">
-              <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Plan history timeline</div>
-              <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 4, marginBottom: GAP }}>Every activated or reforecast version of your plan, oldest to newest. This is your plan&apos;s own history, separate from the saved scenarios above.</p>
-              <PlanHistoryTimeline versions={planHistory} />
-            </Card>
-          ) : null}
         </div>
 
         <div style={{ display: "grid", gap: GAP, position: "sticky", top: 16 }}>
@@ -2155,6 +3055,14 @@ function SavedScenariosView({ snapshot, service, refresh, runAction, writeState 
           </Card>
         </div>
       </div>
+
+      {planHistory?.length ? (
+        <Card variant="default">
+          <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>Plan history timeline</div>
+          <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 4, marginBottom: GAP }}>Every activated or reforecast version of your plan, oldest to newest. This is your plan&apos;s own history, separate from the saved scenarios above.</p>
+          <PlanHistoryTimeline versions={planHistory} />
+        </Card>
+      ) : null}
 
       {showTopCompare && top3Entries.length >= 2 ? (
         <MultiScenarioCompareCard
@@ -2325,7 +3233,15 @@ function ScenarioCard({ scenario, service, workspaceId, currentZeroDate, hasActi
   const chartPreview = loaded ? scenarioPreviewForChart(scenario, loaded.preview) : null;
 
   return (
-    <Card variant="default">
+    <Card
+      variant="default"
+      style={{
+        background: selected
+          ? `linear-gradient(180deg, ${ttzPalette.acS} 0%, ${ttzPalette.surf} 100%)`
+          : `linear-gradient(180deg, ${ttzPalette.surf2} 0%, ${ttzPalette.surf} 100%)`,
+        border: `1px solid ${selected ? ttzPalette.ac : ttzPalette.border}`,
+      }}
+    >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
         <div>
           <div style={{ ...TYPE_SCALE.cardTitle, color: ttzPalette.tx }}>{scenario.name}</div>
@@ -2434,11 +3350,14 @@ export default function PlanSection({ snapshot, service, refresh, runAction, wri
             reference design's own page title) instead of one fixed
             "Your path to $0" shared across all 7 tabs - still exactly one
             h1 per page, just accurate to what's actually shown below it. */}
-        <h1 style={{ ...TYPE_SCALE.pageTitle, color: ttzPalette.tx, marginTop: 4, margin: "4px 0 0" }}>{destinationTitle}</h1>
-        {destinationSubtitle ? <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 6, marginBottom: 0, maxWidth: 640 }}>{destinationSubtitle}</p> : null}
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap", marginTop: 4 }}>
+          <h1 style={{ ...TYPE_SCALE.pageTitle, color: ttzPalette.tx, margin: 0 }}>{destinationTitle}</h1>
+          {destination === "snowball" ? <Badge tone="info">Smallest balance first</Badge> : null}
+        </div>
+        {destinationSubtitle ? <p style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2, marginTop: 6, marginBottom: 0, maxWidth: 720 }}>{destinationSubtitle}</p> : null}
       </div>
 
-      <div role="tablist" aria-label="Plan sections" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      <div role="tablist" aria-label="Plan sections" style={pillTabGroupStyle()}>
         {PLAN_DESTINATIONS.map((item) => {
           const active = destination === item.key;
           return (
@@ -2448,17 +3367,7 @@ export default function PlanSection({ snapshot, service, refresh, runAction, wri
               role="tab"
               aria-selected={active}
               onClick={() => navigate(item.key)}
-              style={{
-                ...TYPE_SCALE.supporting,
-                minHeight: 32,
-                border: `1px solid ${active ? ttzPalette.ac : ttzPalette.border}`,
-                background: active ? ttzPalette.acS : "transparent",
-                color: active ? ttzPalette.ac : ttzPalette.tx2,
-                padding: "0 12px",
-                borderRadius: 999,
-                cursor: "pointer",
-                fontWeight: 800,
-              }}
+              style={pillTabButtonStyle(active)}
             >
               {item.label}
             </button>

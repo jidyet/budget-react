@@ -8,17 +8,17 @@ import { ttzPalette, toneColors } from "../theme.js";
 // caller, never to this primitive.
 const VARIANT_STYLES = (palette) => ({
   default: {
-    background: palette.surf,
+    background: "var(--ttz-surface-glass)",
     border: `1px solid ${palette.border}`,
-    boxShadow: "none",
+    boxShadow: "var(--ttz-shadow-sm)",
   },
   elevated: {
-    background: palette.surf,
+    background: "var(--ttz-surface-glass)",
     border: `1px solid ${palette.border}`,
     boxShadow: "var(--ttz-shadow-md, 0 8px 24px rgba(10,34,54,0.08))",
   },
   interactive: {
-    background: palette.surf,
+    background: "var(--ttz-surface-glass)",
     border: `1px solid ${palette.border2}`,
     boxShadow: "var(--ttz-shadow-sm, 0 1px 2px rgba(10,34,54,0.06))",
     cursor: "pointer",
@@ -46,6 +46,7 @@ const Card = forwardRef(function Card({ variant = "default", padding = "var(--tt
       style={{
         borderRadius: "var(--ttz-radius-lg, 16px)",
         padding,
+        backdropFilter: "blur(14px)",
         ...variantStyle,
         ...style,
       }}

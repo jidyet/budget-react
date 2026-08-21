@@ -290,13 +290,41 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
 
   return (
     <>
-      <PageHeader title="Needs Review" description="TrackToZero found a few things it doesn't want to guess about." />
+      <PageHeader title="Needs Review" description="TrackToZero found a few things it refuses to fake. Clean these up once, and your plan stays honest." />
       {summary ? <InfoCallout style={{ marginBottom: 16 }} title={summary} /> : null}
 
       {loadingReview ? (
         <LoadingState label="Loading reviews" />
       ) : (
         <>
+          <Card
+            variant="default"
+            style={{
+              marginBottom: 16,
+              background: `linear-gradient(180deg, ${palette.surf2} 0%, ${palette.surf} 100%)`,
+              border: `1px solid ${palette.border2 || palette.border}`,
+              boxShadow: "var(--ttz-shadow-sm)",
+            }}
+          >
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 16 }}>
+              <div>
+                <div style={{ ...TYPE_SCALE.overline, color: palette.muted }}>Open queue</div>
+                <div style={{ ...TYPE_SCALE.metricSm, color: palette.tx, marginTop: 8 }}>{openCount}</div>
+                <div style={{ ...TYPE_SCALE.caption, color: palette.tx2, marginTop: 4 }}>items still in play</div>
+              </div>
+              <div>
+                <div style={{ ...TYPE_SCALE.overline, color: palette.muted }}>Blocking</div>
+                <div style={{ ...TYPE_SCALE.metricSm, color: blockingCount ? palette.wa : palette.tx, marginTop: 8 }}>{blockingCount}</div>
+                <div style={{ ...TYPE_SCALE.caption, color: palette.tx2, marginTop: 4 }}>decisions affecting the plan</div>
+              </div>
+              <div>
+                <div style={{ ...TYPE_SCALE.overline, color: palette.muted }}>Ready to save</div>
+                <div style={{ ...TYPE_SCALE.metricSm, color: readyCount ? palette.go : palette.tx, marginTop: 8 }}>{readyCount}</div>
+                <div style={{ ...TYPE_SCALE.caption, color: palette.tx2, marginTop: 4 }}>items already sorted</div>
+              </div>
+            </div>
+          </Card>
+
           {staleBatches.length ? (
             <WarningCallout
               style={{ marginBottom: 16 }}
@@ -332,7 +360,7 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
 
           <SectionHeader title={Array.isArray(overallSummary) ? overallSummary[0] : overallSummary} description={Array.isArray(overallSummary) ? overallSummary.slice(1).join(" · ") : undefined} />
 
-          <div role="tablist" aria-label="Review filter" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 20 }}>
+          <div role="tablist" aria-label="Review filter" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 20, padding: 6, borderRadius: 18, border: `1px solid ${palette.border}`, background: palette.surf2 }}>
             {["needsReview", "skipped", "resolved", "all"].map((key) => {
               const count = key === "needsReview" ? needsAttentionItems.length : key === "skipped" ? laterItems.length : key === "resolved" ? resolvedItems.length : openItems.length + resolvedItems.length;
               return (
@@ -424,17 +452,18 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
           {tab === "all" ? (
             <div style={{ display: "grid", gap: 24 }}>
               <div>
-                <SectionHeader eyebrow={REVIEW_TAB_LABEL.needsReview} title={itemCountLabel(needsAttentionItems.length)} />
+                <SectionHeader eyebrow={REVIEW_TAB_LABEL.needsReview} title={itemCountLabel(needsAttentionItems.length)} description="These are the live items still shaping your debt picture." />
                 <JumpList items={needsAttentionItems} onJump={(id) => { setTab("needsReview"); setCursorId(id); }} />
               </div>
               <div>
-                <SectionHeader eyebrow={REVIEW_TAB_LABEL.skipped} title={itemCountLabel(laterItems.length)} />
+                <SectionHeader eyebrow={REVIEW_TAB_LABEL.skipped} title={itemCountLabel(laterItems.length)} description="Stuff you parked for later so you could keep moving." />
                 <JumpList items={laterItems} onJump={(id) => { setTab("skipped"); setCursorId(id); }} />
               </div>
               <div>
                 <SectionHeader
                   eyebrow={REVIEW_TAB_LABEL.resolved}
                   title={itemCountLabel(resolvedItems.length)}
+                  description="Already handled and saved. No mystery leftovers."
                   actions={<Button size="sm" variant="ghost" onClick={() => setShowResolved((value) => !value)}>{showResolved ? "Hide" : "Show"}</Button>}
                 />
                 {showResolved ? <ResolvedHistory items={resolvedItems} /> : null}

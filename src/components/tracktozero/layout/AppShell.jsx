@@ -26,7 +26,7 @@ export default function AppShell({ topBarProps, mobileBottomNavProps, quickActio
       style={{
         ...ttzCssVars(palette),
         minHeight: "100vh",
-        background: palette.bg,
+        background: "var(--ttz-shell-bg)",
         color: palette.tx,
         fontFamily: "var(--ttz-font-body, 'Instrument Sans', sans-serif)",
       }}
@@ -66,6 +66,16 @@ export default function AppShell({ topBarProps, mobileBottomNavProps, quickActio
         .ttz-card-hover:hover, .ttz-card-hover:focus-visible {
           box-shadow: 0 0 0 3px var(--ttz-ac-soft, ${palette.acS}), 0 12px 28px rgba(10, 34, 54, 0.16) !important;
           border-color: var(--ttz-ac, ${palette.ac}) !important;
+        }
+        @media (max-width: 840px) {
+          .ttz-finish-flow { grid-template-columns: 1fr !important; gap: 12px !important; }
+          .ttz-finish-flow svg { display: none; }
+          .ttz-finish-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+          .ttz-finish-control-fields { grid-template-columns: 1fr !important; }
+          .ttz-finish-controls, .ttz-finish-main-row, .ttz-finish-bottom-row { grid-template-columns: 1fr !important; }
+          .ttz-saved-summary-ribbon { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+          .ttz-saved-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+          .ttz-saved-layout, .ttz-saved-board { grid-template-columns: 1fr !important; }
         }
         @media (prefers-reduced-motion: no-preference) {
           .ttz-card-hover:hover, .ttz-card-hover:focus-visible {

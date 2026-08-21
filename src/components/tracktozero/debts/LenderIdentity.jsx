@@ -9,6 +9,7 @@ const SIZES = {
   sm: { badge: 32, fontSize: 12, gap: 8, name: TYPE_SCALE.caption },
   md: { badge: 48, fontSize: 15, gap: 10, name: TYPE_SCALE.body },
   lg: { badge: 64, fontSize: 19, gap: 12, name: TYPE_SCALE.cardTitle },
+  xl: { badge: 84, fontSize: 20, gap: 12, name: TYPE_SCALE.cardTitle },
 };
 
 // UX-8.3: the ONE place a debt's lender is recognized and presented -

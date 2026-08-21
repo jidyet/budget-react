@@ -20,7 +20,9 @@ describe("TrackToZero v2 async application service", () => {
     expect(snapshot.targetDebt).toBeTruthy();
     expect(snapshot.projectedZeroDate).toBeTruthy();
     expect(snapshot.balanceHistoryByDebt["personal-capital-one"]).toHaveLength(3);
-    expect(snapshot.status.code).toBe("needs_review");
+    // Expected schedules use the engine's "Mon YYYY" labels. Normalized
+    // checkpoint matching puts this seed slightly behind, not in review.
+    expect(snapshot.status.code).toBe("slightly_behind");
   });
 
   it("returns bounded, workspace-scoped raw records for the Activity feed (UX-7)", async () => {

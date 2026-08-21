@@ -951,14 +951,6 @@ function StrategyPageBody({ strategy, title, subtitle, useLabel, applyActionLabe
     const payoffRows = currentResult?.payoffOrder || [];
     const firstTarget = payoffRows[0] || null;
     const firstTargetOwner = firstTarget ? presentedOwnerLabel(firstTarget) : null;
-    const firstTargetPerDebt = currentResult?.perDebt?.[firstTarget?.id] || null;
-    const dueLabel = firstTarget ? paymentTimingLabel(derivePaymentTiming(firstTarget)) : "n/a";
-    const versusOtherMonths = currentResult?.monthsToZero != null && otherResult?.monthsToZero != null
-      ? Math.max(0, Number(otherResult.monthsToZero) - Number(currentResult.monthsToZero))
-      : 0;
-    const versusOtherInterest = currentResult && otherResult
-      ? Math.max(0, Number(otherResult.estimatedInterest || 0) - Number(currentResult.estimatedInterest || 0))
-      : 0;
 
     return (
       <div style={{ display: "grid", gap: GAP }}>
@@ -1518,13 +1510,12 @@ function AvalancheView({ snapshot, service, refresh, runAction, writeState, onGo
 
 const SCENARIO_COMPARE_AMOUNT = 100;
 
-function CompareStrategiesView({ snapshot, service, refresh, runAction, writeState, onGoToDebts }) {
+function CompareStrategiesView({ snapshot, service, refresh, runAction, writeState }) {
   const [result, setResult] = useState(null);
   const [scenarioCompare, setScenarioCompare] = useState(null);
   const [confirmStrategy, setConfirmStrategy] = useState(null);
   const [savedComparison, setSavedComparison] = useState(false);
   const workspaceId = snapshot.workspace.id;
-  const isHousehold = snapshot.workspace.type === "household";
   const hasActivePlan = !!snapshot.activeContext?.version;
   // The scenario is "current extra + $100," not a flat $100 replacing
   // whatever's already committed - using a flat amount would make adding
@@ -1555,9 +1546,6 @@ function CompareStrategiesView({ snapshot, service, refresh, runAction, writeSta
   const winnerStrategy = recommendation.code === "avalanche_better" ? "avalanche" : recommendation.code === "snowball_better" ? "snowball" : null;
   const activeStrategyKey = result.activeStrategy || winnerStrategy || "avalanche";
   const activeStrategyLabel = activeStrategyKey === "snowball" ? "Snowball" : "Avalanche";
-  const activeStrategyResult = result[activeStrategyKey];
-  const winnerResult = winnerStrategy ? result[winnerStrategy] : activeStrategyResult;
-  const winnerTone = winnerStrategy === "snowball" ? "ac" : "go";
   const comparisonTokens = ["blue", "green", "orange"];
 
   const chartSeries = [
@@ -1570,11 +1558,9 @@ function CompareStrategiesView({ snapshot, service, refresh, runAction, writeSta
   ];
   const compositionEntries = deriveDebtCompositionSegments(snapshot.payoffQueue || []);
   const allocation = deriveAllocationSegments(snapshot.payoffQueue || [], result[result.activeStrategy || "avalanche"]?.extraMonthlyPayment || 0);
-  const winnerTarget = winnerResult?.payoffOrder?.[0] || null;
   const strategyTargetDelta = winnerStrategy
     ? Math.abs(Number(result.snowball.monthsToZero || 0) - Number(result.avalanche.monthsToZero || 0))
     : 0;
-  const currentFirstTarget = activeStrategyResult?.payoffOrder?.[0] || null;
   const orangePrimaryStyle = {
     background: `linear-gradient(135deg, ${ttzPalette.wa} 0%, #ff8a1a 100%)`,
     border: `1px solid ${ttzPalette.wa}`,
@@ -1660,7 +1646,6 @@ function CompareStrategiesView({ snapshot, service, refresh, runAction, writeSta
   const higherInterest = Math.max(Number(result.snowball.estimatedInterest || 0), Number(result.avalanche.estimatedInterest || 0));
   const lowerInterest = Math.min(Number(result.snowball.estimatedInterest || 0), Number(result.avalanche.estimatedInterest || 0));
   const interestPercentDelta = winnerStrategy ? safePercentDelta(higherInterest, lowerInterest) : null;
-  const recommendationTone = recommendation.code === "tie" ? "info" : recommendation.code === "tradeoff" ? "wa" : "go";
 
   return (
     <div style={{ display: "grid", gap: GAP }}>
@@ -2601,7 +2586,7 @@ function FinishByView({ snapshot, service, refresh, runAction, writeState }) {
   return (
     <div style={{ display: "grid", gap: GAP }}>
       {finishFlow}
-      {false && result && result.valid !== false ? (
+      {result?.showSupplementalDetails && result.valid !== false ? (
         <InsightBanner
           icon={Flag}
           tone={result.feasible ? "go" : "wa"}
@@ -2657,7 +2642,7 @@ function FinishByView({ snapshot, service, refresh, runAction, writeState }) {
         </Card>
       ) : null}
 
-      {false && result?.feasible && result.baseline ? (
+      {result?.showSupplementalDetails && result.feasible && result.baseline ? (
         <>
           <Card variant="default">
             <TrendChart title="Balance to $0" subtitle="Current pace vs the payment this target requires." series={chartSeries} />

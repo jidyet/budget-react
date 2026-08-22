@@ -531,16 +531,16 @@ export default function ReviewSessionCard({ item, isHousehold, members, people =
   const hasNothingStaged = !Object.keys(stagedForItem).length;
 
   return (
-    <Card variant="default">
+    <Card className="ttz-review-session" variant="default">
       <div className="ttz-review-session-header" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(180px, auto)", gap: 16, alignItems: "start", marginBottom: 12 }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ ...TYPE_SCALE.cardTitle, color: palette.tx, minWidth: 0, overflowWrap: "anywhere" }}>{title}</div>
-          <div style={{ display: "flex", width: "100%", marginTop: 8, flexWrap: "wrap", gap: 6 }}>
+          <div className="ttz-review-session-title" style={{ ...TYPE_SCALE.cardTitle, color: palette.tx, minWidth: 0, overflowWrap: "anywhere" }}>{title}</div>
+          <div className="ttz-review-session-tags" style={{ display: "flex", width: "100%", marginTop: 8, flexWrap: "wrap", gap: 6 }}>
             <Badge wrap tone={item.blocking ? "warning" : "neutral"}>{item.blocking ? "Affects your plan" : "Can wait"}</Badge>
             {item.types.map((type) => <Badge key={type} tone={item.blocking ? "warning" : "neutral"}>{REVIEW_TYPE_LABEL[type] || type}</Badge>)}
           </div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, width: "100%" }}>
+        <div className="ttz-review-session-actions" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, width: "100%" }}>
           <Button size="sm" variant="ghost" disabled={busy} onClick={onLeaveForLater} style={{ width: "100%" }}>{leaveForLaterLabel()}</Button>
           <Button size="sm" variant="primary" disabled={busy || hasNothingStaged} onClick={onSaveItem} style={{ width: "100%" }}>{saveThisDebtLabel()}</Button>
         </div>

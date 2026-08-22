@@ -52,20 +52,55 @@ button, input, select, textarea {
   touch-action: manipulation;
 }
 
+/* REVIEW — a dense master-detail workspace, rather than a small form page. */
+.ttz-review { padding-bottom: 8px; }
+.ttz-review-header {
+  padding: 24px 8px 20px;
+  border-bottom: 1px solid var(--ttz-border-subtle);
+}
+.ttz-review-header > div:first-child { margin-bottom: 0 !important; }
+.ttz-review-header h1 { font-size: clamp(2.25rem, 1.7rem + 2vw, 3.45rem) !important; }
+.ttz-review-summary-grid { gap: 12px !important; }
+.ttz-review-metric { min-height: 102px; box-shadow: var(--ttz-shadow-sm); }
+.ttz-review-tabs { margin-top: 6px; box-shadow: var(--ttz-shadow-sm); }
+.ttz-review-queue-nav { padding-top: 2px; }
+.ttz-review-workspace { grid-template-columns: minmax(300px, .82fr) minmax(0, 1.38fr) !important; }
+.ttz-review-queue-panel { background: var(--ttz-bg-elevated) !important; }
+.ttz-review-queue-list { gap: 10px !important; }
+.ttz-review-queue-row { min-height: 62px; }
+.ttz-review-session { padding: 20px !important; background: var(--ttz-bg-elevated) !important; }
+.ttz-review-session-header { padding-bottom: 14px; border-bottom: 1px solid var(--ttz-border-subtle); }
+.ttz-review-session-title { font-size: clamp(1.25rem, 1.05rem + .6vw, 1.75rem) !important; }
+.ttz-review-session-actions { align-self: end; }
+.ttz-review-actionbar { z-index: 4; box-shadow: 0 -12px 28px color-mix(in srgb, var(--ttz-bg-app) 70%, transparent); }
+
 /* Review is a master-detail workspace on larger screens. Keep all controls
    readable and touchable when it becomes a single-column mobile journey. */
 @media (max-width: 720px) {
   .ttz-review-header {
     grid-template-columns: minmax(0, 1fr) !important;
+    padding: 12px 0 16px;
+    border-bottom: 0;
   }
 
   .ttz-review-progress-ring {
-    justify-self: center;
+    justify-self: start;
+    transform: scale(.8);
+    transform-origin: left top;
+    margin-bottom: -28px;
   }
 
   .ttz-review-summary-grid {
     grid-template-columns: minmax(0, 1fr) !important;
+    gap: 10px !important;
   }
+
+  .ttz-review-workspace { grid-template-columns: minmax(0, 1fr) !important; }
+  .ttz-review-queue-controls { width: 100%; }
+  .ttz-review-queue-controls > * { width: 100%; }
+  .ttz-review-session { padding: 14px !important; }
+  .ttz-review-session-actions { grid-template-columns: 1fr !important; }
+  .ttz-review-actionbar { padding: 10px !important; }
 
   .ttz-review-session-header {
     grid-template-columns: minmax(0, 1fr) !important;

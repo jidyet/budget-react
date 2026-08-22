@@ -97,7 +97,7 @@ function ReviewMetric({ icon, label, value, description, tone = "info" }) {
       ? { fg: palette.go, bg: palette.goD }
       : { fg: palette.ac, bg: palette.acS || palette.surf2 };
   return (
-    <Card variant="default" padding="var(--ttz-space-3, 14px)" style={{ minWidth: 0 }}>
+    <Card className={`ttz-review-metric ttz-review-metric--${tone}`} variant="default" padding="var(--ttz-space-3, 14px)" style={{ minWidth: 0 }}>
       <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
         <span aria-hidden="true" style={{
           display: "grid", placeItems: "center", width: 48, height: 48, flexShrink: 0,
@@ -334,6 +334,7 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
 
   return (
     <>
+      <section className="ttz-review">
       <div className="ttz-review-header" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 24, alignItems: "center", marginBottom: 16 }}>
         <PageHeader title="Needs Review" description="TrackToZero found a few things it refuses to fake. Clean these up once, and your plan stays honest." />
         <div className="ttz-review-progress-ring"><ReviewProgressRing openCount={openCount} resolvedCount={resolvedItems.length} /></div>
@@ -385,7 +386,7 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
 
           <SectionHeader title={Array.isArray(overallSummary) ? overallSummary[0] : overallSummary} description={Array.isArray(overallSummary) ? overallSummary.slice(1).join(" · ") : undefined} />
 
-          <div role="tablist" aria-label="Review filter" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 20, padding: 6, borderRadius: 18, border: `1px solid ${palette.border}`, background: palette.surf2 }}>
+          <div className="ttz-review-tabs" role="tablist" aria-label="Review filter" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 20, padding: 6, borderRadius: 18, border: `1px solid ${palette.border}`, background: palette.surf2 }}>
             {["needsReview", "skipped", "resolved", "all"].map((key) => {
               const count = key === "needsReview" ? needsAttentionItems.length : key === "skipped" ? laterItems.length : key === "resolved" ? resolvedItems.length : openItems.length + resolvedItems.length;
               return (
@@ -399,11 +400,11 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
           {tab === "needsReview" || tab === "skipped" ? (
             queue.length ? (
               <>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+                <div className="ttz-review-queue-nav" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
                   <span style={{ ...TYPE_SCALE.supporting, color: palette.tx2 }} role="status" aria-live="polite">
                     {itemPositionLabel(currentIndex + 1, queue.length)}
                   </span>
-                  <div style={isTablet
+                  <div className="ttz-review-queue-controls" style={isTablet
                     ? { display: "grid", gridTemplateColumns: "1fr", gap: 8, width: "100%" }
                     : { display: "flex", alignItems: "flex-end", gap: 8, flexWrap: "wrap" }}>
                     {isTablet ? (
@@ -441,7 +442,7 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
 
                 <div className="ttz-review-workspace" style={{ display: "grid", gridTemplateColumns: isTablet ? "1fr" : "minmax(260px, 0.72fr) minmax(0, 1.45fr)", gap: 16, alignItems: "start" }}>
                   {!isTablet ? (
-                    <Card variant="default" style={{ maxHeight: 650, overflowY: "auto", padding: 12 }}>
+                    <Card className="ttz-review-queue-panel" variant="default" style={{ maxHeight: 650, overflowY: "auto", padding: 12 }}>
                       <ReviewQueueList items={queue} currentItemId={currentItem?.id} onSelect={setCursorId} />
                     </Card>
                   ) : null}
@@ -499,7 +500,7 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
           ) : null}
 
           {hasAnyWork ? (
-            <div
+            <div className="ttz-review-actionbar"
               style={{
                 position: "sticky",
                 bottom: 0,
@@ -531,6 +532,7 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
           ) : null}
         </>
       )}
+      </section>
 
       <ConfirmationDialog
         open={confirmSkipAll}

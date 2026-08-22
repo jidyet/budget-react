@@ -20,7 +20,7 @@ function QueueRow({ item, active, onSelect }) {
       type="button"
       onClick={() => onSelect(item.id)}
       aria-current={active}
-      className="ttz-focus-ring"
+      className="ttz-review-queue-row ttz-focus-ring"
       style={{
         all: "unset",
         display: "flex",
@@ -53,7 +53,7 @@ function QueueRow({ item, active, onSelect }) {
 export default function ReviewQueueList({ items, currentItemId, onSelect }) {
   if (!items.length) return null;
   return (
-    <div role="list" aria-label="Review queue" style={{ display: "grid", gap: 8 }}>
+    <div className="ttz-review-queue-list" role="list" aria-label="Review queue" style={{ display: "grid", gap: 8 }}>
       {items.map((item) => (
         <div role="listitem" key={item.id}>
           <QueueRow item={item} active={item.id === currentItemId} onSelect={onSelect} />

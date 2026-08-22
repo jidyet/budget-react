@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import PayoffOrderTable from "./PayoffOrderTable.jsx";
+import PayoffOrderTable, { PayoffOrderMobileList } from "./PayoffOrderTable.jsx";
 
 const render = (element) => renderToStaticMarkup(element);
 
@@ -48,5 +48,22 @@ describe("GATE-10B.1E: PayoffOrderTable", () => {
     const withMomentum = render(h(PayoffOrderTable, { debts: [debt(), debt({ id: "d2", name: "Old Store Card" })], showMomentum: true }));
     expect(withMomentum).toContain("Momentum");
     expect(withMomentum).toContain('aria-label="Payoff position 1 of 2"');
+  });
+
+  it("renders a phone-friendly payoff list rather than a compressed financial table", () => {
+    const html = render(h(PayoffOrderMobileList, {
+      debts: [debt(), debt({ id: "d2", name: "Old Store Card", currentBalance: 930 })],
+      isHousehold: true,
+      highlightFirst: true,
+      perDebt: { d1: { payoffMonth: "Mar 2028" } },
+      showPayoffTiming: true,
+      showMomentum: true,
+    }));
+    expect(html).not.toContain("<table");
+    expect(html).toContain('aria-label="Payoff order"');
+    expect(html).toContain("Balance");
+    expect(html).toContain("Payoff");
+    expect(html).toContain("Momentum");
+    expect(html).toContain("Mar 2028");
   });
 });

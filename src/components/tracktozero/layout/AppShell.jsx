@@ -115,7 +115,11 @@ export default function AppShell({ topBarProps, mobileBottomNavProps, quickActio
           .ttz-compare-table-row { grid-template-columns: minmax(0, 1fr) auto !important; }
           .ttz-compare-table-row > :nth-child(n + 3) { display: none !important; }
           .ttz-strategy-target-grid { grid-template-columns: 88px minmax(0, 1fr) !important; gap: 10px !important; }
+          .ttz-strategy-target-logo { width: 88px !important; height: 88px !important; padding: 8px !important; }
           .ttz-strategy-target-stats { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+          .ttz-strategy-target-detail-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+          .ttz-strategy-target-detail-grid > div { padding: 10px 8px !important; }
+          .ttz-strategy-target-detail-grid [data-target-value] { font-size: 12px !important; }
           .ttz-strategy-target-actions { grid-template-columns: 1fr !important; }
           .ttz-plan-health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
           .ttz-plan-next-move-actions { grid-template-columns: 1fr !important; }
@@ -138,7 +142,7 @@ export default function AppShell({ topBarProps, mobileBottomNavProps, quickActio
         }
       `}</style>
       <TopBar {...topBarProps} />
-      <div style={{ minWidth: 0, paddingBottom: hasMobileBottomNav ? 76 : 0 }}>{children}</div>
+      <div style={{ minWidth: 0, paddingBottom: hasMobileBottomNav ? "calc(104px + env(safe-area-inset-bottom, 0px))" : 0 }}>{children}</div>
       <MobileBottomNav {...mobileBottomNavProps} />
       <QuickActionSheet {...quickActionSheetProps} />
     </div>

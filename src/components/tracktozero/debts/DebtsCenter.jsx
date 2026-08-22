@@ -18,7 +18,7 @@ import { deriveDebtPortfolioView, filterDebtsByOwnerScope } from "../debtPortfol
 import { resolveDebtsDestination, buildDebtsPath } from "./debtsRouting.js";
 import LenderIdentity from "./LenderIdentity.jsx";
 import { resolveWorkingBalance } from "../../../domain/tracktozero/paymentCycle.js";
-import { useIsTablet } from "../useViewport.js";
+import { useIsMobile, useIsTablet } from "../useViewport.js";
 import {
   BALANCE_RANGE_OPTIONS,
   DEBT_EXPLORER_SORTS,
@@ -133,6 +133,7 @@ function RootPaymentPanel({ debt, snapshot, runAction, service, refresh, writeSt
 
 function RootFilterBar({
   palette,
+  isMobile,
   snapshot,
   ownerFilter,
   setOwnerFilter,
@@ -186,7 +187,7 @@ function RootFilterBar({
         padding: "14px 16px",
       }}
     >
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(0, 1fr))", gap: 10, alignItems: "end" }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, alignItems: "end" }}>
         <div style={{ display: "grid", gap: 8, minWidth: 0 }}>
           <div style={{ ...TYPE_SCALE.caption, color: palette.tx2, fontWeight: 800 }}>Status</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -270,6 +271,7 @@ export default function DebtsCenter({ snapshot, service, refresh, refreshReview,
   const [dueTimingFilter, setDueTimingFilter] = useState("all");
   const [sort, setSort] = useState("payoff_order");
   const [selectedDebtId, setSelectedDebtId] = useState(null);
+  const isMobile = useIsMobile();
   const isTablet = useIsTablet();
 
   useEffect(() => {
@@ -381,6 +383,7 @@ export default function DebtsCenter({ snapshot, service, refresh, refreshReview,
           <CategoryGrid portfolio={portfolio} ownerFilter={ownerFilter} latestSnapshotsByDebt={snapshot.latestSnapshotsByDebt} onSelectCategory={navigate} />
           <RootFilterBar
             palette={palette}
+            isMobile={isMobile}
             snapshot={snapshot}
             ownerFilter={ownerFilter}
             setOwnerFilter={setOwnerFilter}

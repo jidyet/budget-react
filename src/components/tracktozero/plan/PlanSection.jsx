@@ -1086,6 +1086,7 @@ function StrategyPageBody({ strategy, title, subtitle, useLabel, applyActionLabe
             </div>
             <div className="ttz-strategy-target-grid" style={{ display: "grid", gridTemplateColumns: "108px minmax(0, 1fr)", gap: 16, marginTop: GAP, alignItems: "start" }}>
               <div
+                className="ttz-strategy-target-logo"
                 style={{
                   width: 108,
                   height: 108,
@@ -1125,6 +1126,7 @@ function StrategyPageBody({ strategy, title, subtitle, useLabel, applyActionLabe
                   </div>
                 </div>
                 <div
+                  className="ttz-strategy-target-detail-grid"
                   style={{
                     display: "grid",
                     gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
@@ -1141,7 +1143,7 @@ function StrategyPageBody({ strategy, title, subtitle, useLabel, applyActionLabe
                     ["Min. due", money(firstTarget?.minimumRequiredPayment || 0)],
                   ].map(([label, value], index) => (
                     <div key={label} style={{ minWidth: 0, padding: "14px 16px", borderLeft: index === 0 ? "none" : `1px solid ${ttzPalette.border}` }}>
-                      <div style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.tx, fontSize: 13, lineHeight: 1.2 }}>{value}</div>
+                      <div data-target-value="true" style={{ ...TYPE_SCALE.metricSm, color: ttzPalette.tx, fontSize: 13, lineHeight: 1.2 }}>{value}</div>
                       <div style={{ ...TYPE_SCALE.caption, color: ttzPalette.tx2, marginTop: 6 }}>{label}</div>
                     </div>
                   ))}

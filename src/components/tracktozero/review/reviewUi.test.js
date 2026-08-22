@@ -140,6 +140,8 @@ describe("REVIEW-1C: ReviewCenter (batch session)", () => {
     expect(html).toContain("1 import decision still needs your input");
     expect(html).toContain("Firstmark Services");
     expect(html).toContain("Item 1 of 1");
+    expect(html).toContain("Unified verification");
+    expect(html).toContain("$33,810.12");
     expect(html).toContain("0 ready");
     expect(html).toContain("1 still needs a decision");
     expect(html).toContain("Save what I know");

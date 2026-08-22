@@ -497,7 +497,8 @@ function ConfirmedEvidenceSummary({ item }) {
   if (!rows.length) return null;
   return (
     <Card variant="default" padding="var(--ttz-space-3, 12px)">
-      <div style={{ ...TYPE_SCALE.overline, color: palette.go, marginBottom: 6 }}>Confirmed</div>
+      <div style={{ ...TYPE_SCALE.cardTitle, color: palette.tx, marginBottom: 8 }}>Unified verification</div>
+      <div style={{ ...TYPE_SCALE.overline, color: palette.go, marginBottom: 6 }}>Confirmed fields</div>
       <div style={{ display: "grid", gap: 4 }}>
         {rows.map(([label, value]) => (
           <div key={label} style={{ display: "flex", gap: 8, ...TYPE_SCALE.supporting, color: palette.tx }}>
@@ -531,17 +532,15 @@ export default function ReviewSessionCard({ item, isHousehold, members, people =
 
   return (
     <Card variant="default">
-      <div style={{ marginBottom: 12 }}>
+      <div className="ttz-review-session-header" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(180px, auto)", gap: 16, alignItems: "start", marginBottom: 12 }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ ...TYPE_SCALE.cardTitle, color: palette.tx, minWidth: 0, overflowWrap: "anywhere" }}>{title}</div>
-          <div style={{ display: "flex", width: "100%", marginTop: 8 }}>
+          <div style={{ display: "flex", width: "100%", marginTop: 8, flexWrap: "wrap", gap: 6 }}>
             <Badge wrap tone={item.blocking ? "warning" : "neutral"}>{item.blocking ? "Affects your plan" : "Can wait"}</Badge>
-          </div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
             {item.types.map((type) => <Badge key={type} tone={item.blocking ? "warning" : "neutral"}>{REVIEW_TYPE_LABEL[type] || type}</Badge>)}
           </div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 8, width: "100%", marginTop: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, width: "100%" }}>
           <Button size="sm" variant="ghost" disabled={busy} onClick={onLeaveForLater} style={{ width: "100%" }}>{leaveForLaterLabel()}</Button>
           <Button size="sm" variant="primary" disabled={busy || hasNothingStaged} onClick={onSaveItem} style={{ width: "100%" }}>{saveThisDebtLabel()}</Button>
         </div>

@@ -52,6 +52,26 @@ button, input, select, textarea {
   touch-action: manipulation;
 }
 
+/* Review is a master-detail workspace on larger screens. Keep all controls
+   readable and touchable when it becomes a single-column mobile journey. */
+@media (max-width: 720px) {
+  .ttz-review-header {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .ttz-review-progress-ring {
+    justify-self: center;
+  }
+
+  .ttz-review-summary-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .ttz-review-session-header {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
 
 .app-shell-page {
   width: 100%;

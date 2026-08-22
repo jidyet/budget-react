@@ -89,6 +89,50 @@ function JumpList({ items, onJump }) {
   );
 }
 
+function ReviewMetric({ icon, label, value, description, tone = "info" }) {
+  const palette = ttzPalette;
+  const colors = tone === "warning"
+    ? { fg: palette.wa, bg: palette.waD }
+    : tone === "success"
+      ? { fg: palette.go, bg: palette.goD }
+      : { fg: palette.ac, bg: palette.acS || palette.surf2 };
+  return (
+    <Card variant="default" padding="var(--ttz-space-3, 14px)" style={{ minWidth: 0 }}>
+      <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+        <span aria-hidden="true" style={{
+          display: "grid", placeItems: "center", width: 48, height: 48, flexShrink: 0,
+          borderRadius: 16, background: colors.bg, color: colors.fg, border: `1px solid ${colors.fg}`,
+          fontSize: 24, fontWeight: 800,
+        }}>{icon}</span>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ ...TYPE_SCALE.overline, color: palette.muted }}>{label}</div>
+          <div style={{ ...TYPE_SCALE.metricSm, color: colors.fg, marginTop: 2 }}>{value}</div>
+          <div style={{ ...TYPE_SCALE.caption, color: palette.tx2, marginTop: 2 }}>{description}</div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function ReviewProgressRing({ openCount, resolvedCount }) {
+  const palette = ttzPalette;
+  const total = openCount + resolvedCount;
+  const resolvedPercent = total ? Math.round((resolvedCount / total) * 100) : 0;
+  return (
+    <div aria-label={`${openCount} items to resolve, ${resolvedCount} resolved`} style={{
+      width: 186, height: 186, borderRadius: "50%", display: "grid", placeItems: "center", flexShrink: 0,
+      background: `conic-gradient(${palette.info || palette.ac} 0 ${Math.max(8, resolvedPercent)}%, ${palette.go} ${Math.max(8, resolvedPercent)}% ${resolvedPercent}%, ${palette.border2 || palette.border} ${resolvedPercent}% 100%)`,
+    }}>
+      <div style={{ width: 142, height: 142, borderRadius: "50%", display: "grid", placeItems: "center", textAlign: "center", background: palette.surf, border: `1px solid ${palette.border}` }}>
+        <div>
+          <div style={{ ...TYPE_SCALE.metricLg, color: palette.tx }}>{openCount}</div>
+          <div style={{ ...TYPE_SCALE.overline, color: palette.tx2, maxWidth: 92, margin: "2px auto 0" }}>items to resolve</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ReviewCenter({ snapshot, service, workspaceId, reviewSnapshot, loadingReview, onRefreshReview }) {
   const palette = ttzPalette;
   const [staged, setStaged] = useState({}); // { [itemId]: { [subtype]: {action,args,label} } }
@@ -290,40 +334,21 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
 
   return (
     <>
-      <PageHeader title="Needs Review" description="TrackToZero found a few things it refuses to fake. Clean these up once, and your plan stays honest." />
+      <div className="ttz-review-header" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 24, alignItems: "center", marginBottom: 16 }}>
+        <PageHeader title="Needs Review" description="TrackToZero found a few things it refuses to fake. Clean these up once, and your plan stays honest." />
+        <div className="ttz-review-progress-ring"><ReviewProgressRing openCount={openCount} resolvedCount={resolvedItems.length} /></div>
+      </div>
       {summary ? <InfoCallout style={{ marginBottom: 16 }} title={summary} /> : null}
 
       {loadingReview ? (
         <LoadingState label="Loading reviews" />
       ) : (
         <>
-          <Card
-            variant="default"
-            style={{
-              marginBottom: 16,
-              background: `linear-gradient(180deg, ${palette.surf2} 0%, ${palette.surf} 100%)`,
-              border: `1px solid ${palette.border2 || palette.border}`,
-              boxShadow: "var(--ttz-shadow-sm)",
-            }}
-          >
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 16 }}>
-              <div>
-                <div style={{ ...TYPE_SCALE.overline, color: palette.muted }}>Open queue</div>
-                <div style={{ ...TYPE_SCALE.metricSm, color: palette.tx, marginTop: 8 }}>{openCount}</div>
-                <div style={{ ...TYPE_SCALE.caption, color: palette.tx2, marginTop: 4 }}>items still in play</div>
-              </div>
-              <div>
-                <div style={{ ...TYPE_SCALE.overline, color: palette.muted }}>Blocking</div>
-                <div style={{ ...TYPE_SCALE.metricSm, color: blockingCount ? palette.wa : palette.tx, marginTop: 8 }}>{blockingCount}</div>
-                <div style={{ ...TYPE_SCALE.caption, color: palette.tx2, marginTop: 4 }}>decisions affecting the plan</div>
-              </div>
-              <div>
-                <div style={{ ...TYPE_SCALE.overline, color: palette.muted }}>Ready to save</div>
-                <div style={{ ...TYPE_SCALE.metricSm, color: readyCount ? palette.go : palette.tx, marginTop: 8 }}>{readyCount}</div>
-                <div style={{ ...TYPE_SCALE.caption, color: palette.tx2, marginTop: 4 }}>items already sorted</div>
-              </div>
-            </div>
-          </Card>
+          <div className="ttz-review-summary-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 16, marginBottom: 22 }}>
+            <ReviewMetric icon="▣" label="Open queue" value={openCount} description="items still in play" />
+            <ReviewMetric icon="!" label="Blocking" value={blockingCount} description="decisions affecting the plan" tone="warning" />
+            <ReviewMetric icon="✓" label="Ready to save" value={readyCount} description="items already sorted" tone="success" />
+          </div>
 
           {staleBatches.length ? (
             <WarningCallout
@@ -364,7 +389,7 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
             {["needsReview", "skipped", "resolved", "all"].map((key) => {
               const count = key === "needsReview" ? needsAttentionItems.length : key === "skipped" ? laterItems.length : key === "resolved" ? resolvedItems.length : openItems.length + resolvedItems.length;
               return (
-                <Button key={key} role="tab" aria-selected={tab === key} size="sm" variant={tab === key ? "primary" : "secondary"} onClick={() => setTab(key)}>
+                <Button key={key} role="tab" aria-selected={tab === key} size="sm" variant={tab === key ? "secondary" : "ghost"} style={tab === key ? { color: palette.info || palette.ac, borderColor: palette.info || palette.ac, background: palette.infoD || palette.surf } : undefined} onClick={() => setTab(key)}>
                   {REVIEW_TAB_LABEL[key]} ({count})
                 </Button>
               );
@@ -414,9 +439,9 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
                   </Drawer>
                 ) : null}
 
-                <div style={{ display: "grid", gridTemplateColumns: isTablet ? "1fr" : "minmax(220px, 280px) 1fr", gap: 16, alignItems: "start" }}>
+                <div className="ttz-review-workspace" style={{ display: "grid", gridTemplateColumns: isTablet ? "1fr" : "minmax(260px, 0.72fr) minmax(0, 1.45fr)", gap: 16, alignItems: "start" }}>
                   {!isTablet ? (
-                    <Card variant="default" style={{ maxHeight: 640, overflowY: "auto" }}>
+                    <Card variant="default" style={{ maxHeight: 650, overflowY: "auto", padding: 12 }}>
                       <ReviewQueueList items={queue} currentItemId={currentItem?.id} onSelect={setCursorId} />
                     </Card>
                   ) : null}
@@ -478,12 +503,11 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
               style={{
                 position: "sticky",
                 bottom: 0,
-                background: palette.surf,
-                borderTop: `1px solid ${palette.border}`,
+                background: palette.surf2,
+                border: `1px solid ${palette.border2 || palette.border}`,
+                borderRadius: "var(--ttz-radius-lg, 20px)",
                 padding: "12px 16px",
                 marginTop: 24,
-                marginLeft: -16,
-                marginRight: -16,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",

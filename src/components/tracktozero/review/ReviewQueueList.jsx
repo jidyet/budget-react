@@ -1,5 +1,6 @@
 import React from "react";
 import Badge from "../ui/Badge.jsx";
+import { formatMoney } from "../formatting.js";
 import { TYPE_SCALE, ttzPalette } from "../theme.js";
 
 // REVIEW-2: a real, visible queue pane next to the current item - the prior
@@ -13,6 +14,7 @@ import { TYPE_SCALE, ttzPalette } from "../theme.js";
 function QueueRow({ item, active, onSelect }) {
   const palette = ttzPalette;
   const title = item.candidate.accountName || item.candidate.creditorName || "Debt statement";
+  const balance = item.candidate.currentBalance;
   return (
     <button
       type="button"
@@ -23,10 +25,10 @@ function QueueRow({ item, active, onSelect }) {
         all: "unset",
         display: "flex",
         alignItems: "center",
-        gap: 8,
+        gap: 10,
         width: "100%",
         boxSizing: "border-box",
-        padding: "10px 12px",
+        padding: "11px 12px",
         borderRadius: "var(--ttz-radius-md, 16px)",
         cursor: "pointer",
         background: active ? `linear-gradient(180deg, ${palette.acS || palette.surf2} 0%, ${palette.surf} 100%)` : palette.surf,
@@ -37,12 +39,13 @@ function QueueRow({ item, active, onSelect }) {
       <span aria-hidden="true" style={{ ...TYPE_SCALE.supporting, color: item.blocking ? palette.wa : palette.tx2, width: 14, flexShrink: 0 }}>
         {item.blocking ? "⚠" : "•"}
       </span>
-      <span style={{ flex: 1, minWidth: 0 }}>
+      <span style={{ flex: 1, minWidth: 0, display: "grid", gap: 2 }}>
         <div style={{ ...TYPE_SCALE.supporting, color: palette.tx, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {title}
         </div>
+        {balance != null ? <div style={{ ...TYPE_SCALE.caption, color: palette.tx2 }}>{formatMoney(balance)}</div> : null}
       </span>
-      {item.blocking ? <Badge tone="warning">{item.types.length}</Badge> : null}
+      <Badge tone={item.blocking ? "warning" : "neutral"}>{item.blocking ? "Critical" : "Needs info"}</Badge>
     </button>
   );
 }

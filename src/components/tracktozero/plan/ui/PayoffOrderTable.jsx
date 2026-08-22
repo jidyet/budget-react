@@ -22,8 +22,9 @@ export default function PayoffOrderTable({ debts = [], isHousehold = false, high
   const isMobile = useIsMobile();
   if (!debts.length) return <p style={{ ...TYPE_SCALE.body, color: palette.tx2 }}>No debts included in this preview.</p>;
 
-  const thStyle = { textAlign: "left", padding: "10px 12px", ...TYPE_SCALE.overline, color: palette.tx2, borderBottom: `1px solid ${palette.border}` };
-  const tdStyle = { padding: "12px", ...TYPE_SCALE.body, color: palette.tx, borderBottom: `1px solid ${palette.border}`, verticalAlign: "middle" };
+  const thStyle = { textAlign: "left", padding: "10px 12px", ...TYPE_SCALE.overline, color: palette.tx2, borderBottom: `1px solid ${palette.border}`, whiteSpace: "nowrap" };
+  const tdStyle = { padding: "12px", ...TYPE_SCALE.body, color: palette.tx, borderBottom: `1px solid ${palette.border}`, verticalAlign: "middle", whiteSpace: "nowrap" };
+  const tableMinWidth = showMomentum ? (isHousehold ? 800 : 690) : (isHousehold ? 700 : 610);
 
   // Tables are useful at desktop width, but reducing seven financial columns
   // into a 360px viewport makes names wrap character-by-character. On phones
@@ -34,8 +35,17 @@ export default function PayoffOrderTable({ debts = [], isHousehold = false, high
   }
 
   return (
-    <div style={{ overflowX: "auto hidden" }}>
-      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: showMomentum ? 0 : 520, tableLayout: "fixed" }}>
+    <div className="ttz-payoff-order-table-wrap" style={{ overflowX: "auto", overflowY: "hidden", WebkitOverflowScrolling: "touch" }}>
+      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: tableMinWidth, tableLayout: "auto" }}>
+        <colgroup>
+          <col style={{ width: 52 }} />
+          <col style={{ minWidth: 190 }} />
+          {isHousehold ? <col style={{ width: 114 }} /> : null}
+          <col style={{ width: 110 }} />
+          <col style={{ width: 95 }} />
+          {showPayoffTiming ? <col style={{ width: 130 }} /> : null}
+          {showMomentum ? <col style={{ width: 122 }} /> : null}
+        </colgroup>
         <thead>
           <tr>
             <th style={thStyle}>#</th>
@@ -66,7 +76,7 @@ export default function PayoffOrderTable({ debts = [], isHousehold = false, high
                     {index + 1}
                   </span>
                 </td>
-                <td style={tdStyle}><LenderIdentity creditorName={debt.name} disambiguator={suffix} size="sm" /></td>
+                <td style={{ ...tdStyle, minWidth: 190, whiteSpace: "normal" }}><LenderIdentity creditorName={debt.name} disambiguator={suffix} size="sm" /></td>
                 {isHousehold ? <td style={tdStyle}><Badge tone="neutral">{presentedOwnerLabel(debt)}</Badge></td> : null}
                 <td style={tdStyle}>{money(debt.currentBalance || 0)}</td>
                 <td style={tdStyle}>{debt.aprStatus === "unknown" ? "Unknown APR" : percent(debt.apr)}</td>

@@ -533,7 +533,7 @@ export default function ReviewSessionCard({ item, isHousehold, members, people =
   return (
     <Card className="ttz-review-session" variant="default">
       <div className="ttz-review-session-header" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(180px, auto)", gap: 16, alignItems: "start", marginBottom: 12 }}>
-        <div style={{ minWidth: 0 }}>
+        <div className="ttz-review-session-heading" style={{ minWidth: 0 }}>
           <div className="ttz-review-session-title" style={{ ...TYPE_SCALE.cardTitle, color: palette.tx, minWidth: 0, overflowWrap: "anywhere" }}>{title}</div>
           <div className="ttz-review-session-tags" style={{ display: "flex", width: "100%", marginTop: 8, flexWrap: "wrap", gap: 6 }}>
             <Badge wrap tone={item.blocking ? "warning" : "neutral"}>{item.blocking ? "Affects your plan" : "Can wait"}</Badge>

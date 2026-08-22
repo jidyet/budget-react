@@ -11,6 +11,12 @@ const debt = (overrides = {}) => ({
 });
 
 describe("GATE-10B.1E: PayoffOrderTable", () => {
+  it("keeps desktop payoff columns readable instead of compressing them", () => {
+    const html = render(h(PayoffOrderTable, { debts: [debt()], isHousehold: true, showMomentum: true }));
+    expect(html).toContain("ttz-payoff-order-table-wrap");
+    expect(html).toContain("<colgroup>");
+  });
+
   it("shows an honest empty message when there are no debts", () => {
     const html = render(h(PayoffOrderTable, { debts: [] }));
     expect(html).toContain("No debts included");

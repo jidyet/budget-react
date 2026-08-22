@@ -53,26 +53,35 @@ button, input, select, textarea {
 }
 
 /* REVIEW — a dense master-detail workspace, rather than a small form page. */
-.ttz-review { padding-bottom: 8px; }
+.ttz-review { padding: 4px 0 24px; }
 .ttz-review-header {
-  padding: 24px 8px 20px;
+  grid-template-columns: minmax(0, 1fr) 186px !important;
+  padding: 26px 8px 22px;
   border-bottom: 1px solid var(--ttz-border-subtle);
 }
 .ttz-review-header > div:first-child { margin-bottom: 0 !important; }
 .ttz-review-header h1 { font-size: clamp(2.25rem, 1.7rem + 2vw, 3.45rem) !important; }
-.ttz-review-summary-grid { gap: 12px !important; }
-.ttz-review-metric { min-height: 102px; box-shadow: var(--ttz-shadow-sm); }
+.ttz-review-progress-ring { justify-self: end; }
+.ttz-review-summary-grid { gap: 12px !important; margin-bottom: 18px !important; }
+.ttz-review-metric { min-height: 106px; box-shadow: var(--ttz-shadow-sm); }
 .ttz-review-tabs { margin-top: 6px; box-shadow: var(--ttz-shadow-sm); }
-.ttz-review-queue-nav { padding-top: 2px; }
-.ttz-review-workspace { grid-template-columns: minmax(300px, .82fr) minmax(0, 1.38fr) !important; }
-.ttz-review-queue-panel { background: var(--ttz-bg-elevated) !important; }
-.ttz-review-queue-list { gap: 10px !important; }
-.ttz-review-queue-row { min-height: 62px; }
+.ttz-review-queue-nav { padding: 8px 0 12px; gap: 12px; align-items: end; }
+.ttz-review-queue-controls { min-width: min(100%, 550px); }
+.ttz-review-workspace { grid-template-columns: minmax(285px, .78fr) minmax(0, 1.5fr) !important; }
+.ttz-review-queue-panel { background: var(--ttz-bg-elevated) !important; max-height: 596px !important; }
+.ttz-review-queue-list { gap: 8px !important; }
+.ttz-review-queue-row { min-height: 64px; }
 .ttz-review-session { padding: 20px !important; background: var(--ttz-bg-elevated) !important; }
-.ttz-review-session-header { padding-bottom: 14px; border-bottom: 1px solid var(--ttz-border-subtle); }
+.ttz-review-session-header { grid-template-columns: minmax(0, 1fr) minmax(244px, auto) !important; padding-bottom: 14px; border-bottom: 1px solid var(--ttz-border-subtle); }
 .ttz-review-session-title { font-size: clamp(1.25rem, 1.05rem + .6vw, 1.75rem) !important; }
-.ttz-review-session-actions { align-self: end; }
+.ttz-review-session-actions { align-self: end; min-width: 244px; }
 .ttz-review-actionbar { z-index: 4; box-shadow: 0 -12px 28px color-mix(in srgb, var(--ttz-bg-app) 70%, transparent); }
+.ttz-payoff-order-table-wrap { max-width: 100%; scrollbar-color: var(--ttz-border-strong, var(--ttz-border)) transparent; }
+
+@media (max-width: 1100px) {
+  .ttz-review-session-header { grid-template-columns: minmax(0, 1fr) !important; }
+  .ttz-review-session-actions { min-width: 0; width: 100%; align-self: auto; }
+}
 
 /* Review is a master-detail workspace on larger screens. Keep all controls
    readable and touchable when it becomes a single-column mobile journey. */

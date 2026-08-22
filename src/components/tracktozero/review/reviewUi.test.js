@@ -527,6 +527,7 @@ describe("Fix: per-item 'Save this debt' action", () => {
     }));
     expect(html).toContain("flex-wrap:wrap");
     expect(html).toContain("overflow-wrap:anywhere");
+    expect(html).toContain("ttz-review-session-heading");
     expect(html).toContain("Affects your plan");
     expect(html).toContain("Leave for later");
     expect(html).toContain("Save this debt");

@@ -1056,6 +1056,20 @@ function TrackToZeroV2AppInner() {
   };
 
   const refresh = useCallback(async (nextWorkspaceId = workspaceId) => {
+    // A controlled-beta user may read only their own allowlist document until
+    // they are approved.  Do not probe member_index/workspaces while that
+    // decision is unresolved (or after it is declined): doing so turns a
+    // normal invite-only state into the generic PERMISSION_DENIED screen.
+    // The beta invite screen below is the deliberate, useful outcome here.
+    if (
+      usesRealAuthUi
+      && isBetaGatedRuntime
+      && !joinIntent
+      && authState.user
+      && betaApprovalState.status !== "approved"
+    ) {
+      return;
+    }
     const requestId = requestSeq.current + 1;
     requestSeq.current = requestId;
     setRuntimeState((state) => ({ ...state, status: "loading", error: "", snapshot: null }));
@@ -1124,7 +1138,7 @@ function TrackToZeroV2AppInner() {
       const safe = getUserSafeTrackToZeroError(error);
       setRuntimeState({ status: safe.kind, workspaces: [], snapshot: null, error: safe.message });
     }
-  }, [actorId, authState.user, isFreshLocalBetaSignup, isLocalBetaRuntime, joinAcceptedState.workspaceId, joinIntent, usesRealAuthUi, repository, runtime, service, workspaceId]);
+  }, [actorId, authState.user, betaApprovalState.status, isBetaGatedRuntime, isFreshLocalBetaSignup, isLocalBetaRuntime, joinAcceptedState.workspaceId, joinIntent, usesRealAuthUi, repository, runtime, service, workspaceId]);
 
   // Review counts/lists come from exactly one place - service.getReviewSnapshot,
   // which itself only calls REVIEW-1A's shared selectors over

@@ -333,6 +333,20 @@ export default function ReviewEditDebtDrawer({ open, debt, onClose, snapshot, se
               <Button type="submit" variant="primary" disabled={!canManage || writeState.inProgress || !isRuleDraftComplete(draft)}>
                 {writeState.action === "edit debt details" ? "Saving..." : "Save details"}
               </Button>
+              {debt.status !== "archived" ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={!canManage || writeState.inProgress}
+                  onClick={() => runAction("archive debt", async () => {
+                    await service.archiveDebt(snapshot.workspace.id, debt.id);
+                    await refresh();
+                    onClose();
+                  })}
+                >
+                  Remove from active debts
+                </Button>
+              ) : null}
             </div>
             {!canManage && <p style={{ ...TYPE_SCALE.caption, color: palette.tx2 }}>Your role is read-only for debt details.</p>}
             {canManage && !isRuleDraftComplete(draft) ? (

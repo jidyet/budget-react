@@ -81,6 +81,10 @@ export class InMemoryTrackToZeroRepository {
   }
   getMembership(workspaceId, uid) { return this.members.has(this.key(workspaceId, uid)) ? clone(this.members.get(this.key(workspaceId, uid))) : null; }
   listMemberships(workspaceId) { return [...this.members.values()].filter((m) => m.workspaceId === workspaceId).map(clone); }
+  removeMembership({ workspaceId, uid, unlinkedPeople = [] }) {
+    this.members.delete(this.key(workspaceId, uid));
+    unlinkedPeople.forEach((person) => this.people.set(this.key(workspaceId, person.id), clone(person)));
+  }
   listMembershipsForUser(uid) {
     return [...this.members.values()]
       .filter((membership) => membership.uid === uid && membership.status === "active")

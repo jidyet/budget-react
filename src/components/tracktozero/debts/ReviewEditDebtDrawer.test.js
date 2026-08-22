@@ -86,4 +86,22 @@ describe("DEBT-PAY: ReviewEditDebtDrawer payment section (GATE-10B.1C restructur
     expect(buttonMatch).toBeTruthy();
     expect(buttonMatch[0]).toContain("disabled");
   });
+
+  it("DEBT-PAY-19: offers a non-destructive remove action for active debts, but never for an already archived record", () => {
+    const activeHtml = render(h(ReviewEditDebtDrawer, {
+      ...baseProps,
+      initialSection: "details",
+      debt: debt(),
+      snapshot: snapshot(),
+    }));
+    expect(activeHtml).toContain("Remove from active debts");
+
+    const archivedHtml = render(h(ReviewEditDebtDrawer, {
+      ...baseProps,
+      initialSection: "details",
+      debt: debt({ status: "archived" }),
+      snapshot: snapshot({ debts: [debt({ status: "archived" })] }),
+    }));
+    expect(archivedHtml).not.toContain("Remove from active debts");
+  });
 });

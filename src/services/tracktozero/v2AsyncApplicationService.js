@@ -645,6 +645,23 @@ export const createTrackToZeroV2AsyncAppService = ({
     });
   };
 
+  const removeHouseholdMember = async (workspaceId, memberUid) => {
+    assertInteractive();
+    const context = await getWorkspaceContext(workspaceId);
+    if (context.workspace.type !== "household") throw new Error("Members can only be removed from a household workspace.");
+    if (context.membership.role !== "owner") throw new Error("Only the household owner can remove members.");
+    if (memberUid === actorId) throw new Error("The household owner cannot remove themselves.");
+    const member = context.members.find((entry) => entry.uid === memberUid && entry.status === "active");
+    if (!member) throw new Error("Active household member not found.");
+    if (member.role === "owner") throw new Error("A household owner cannot be removed.");
+    if (typeof repository.removeMembership !== "function") throw new Error("This workspace repository cannot remove members yet.");
+
+    const unlinkedPeople = context.people
+      .filter((person) => person.workspaceMembershipId === memberUid && person.status !== "merged")
+      .map((person) => ({ ...person, workspaceMembershipId: "", updatedAt: asOf, updatedBy: actorId }));
+    await repository.removeMembership({ workspaceId, uid: memberUid, unlinkedPeople });
+  };
+
   const createNewDebt = async (workspaceId, input) => {
     assertInteractive();
     const { workspace, membership, members, people } = await getWorkspaceContext(workspaceId);
@@ -781,6 +798,22 @@ export const createTrackToZeroV2AsyncAppService = ({
     }
 
     return updated;
+  };
+
+  const archiveDebt = async (workspaceId, debtId) => {
+    assertInteractive();
+    const { membership } = await getWorkspaceContext(workspaceId);
+    if (!hasPermission(membership, "manageDebts")) throw new Error("Your role cannot remove debts from the active list.");
+    const current = (await repository.listDebts(workspaceId)).find((debt) => debt.id === debtId);
+    if (!current) throw new Error("Debt not found.");
+    if (current.status === "archived") return current;
+    return repository.saveDebt({
+      ...current,
+      status: "archived",
+      includedInCorePayoffPlan: false,
+      updatedAt: asOf,
+      updatedBy: actorId,
+    });
   };
 
   const recordPayment = async (workspaceId, debtId, { amount, paidAt = asOf, notes = "" } = {}) => {
@@ -2376,8 +2409,10 @@ export const createTrackToZeroV2AsyncAppService = ({
     getActivityFeed,
     renameWorkspace,
     connectWorkspacePersonToMember,
+    removeHouseholdMember,
     createNewDebt,
     updateDebt,
+    archiveDebt,
     recordPayment,
     recordBalanceSnapshot,
     confirmDebtPaidOff,

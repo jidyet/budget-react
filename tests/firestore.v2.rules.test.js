@@ -115,6 +115,24 @@ test("member_index mirror: owner can create their own index entry and find it vi
   await assertFails(outsider.doc("member_index/new_owner").get());
 });
 
+test("household owner can remove a non-owner membership and its member-index mirror", async () => {
+  await seed(async (db) => {
+    await db.doc("workspaces/w1").set(ws());
+    await db.doc("workspaces/w1/members/owner").set(member("w1", "owner", "owner"));
+    await db.doc("workspaces/w1/members/member").set(member("w1", "member", "contributor"));
+    await db.doc("member_index/w1_member").set(member("w1", "member", "contributor"));
+  });
+
+  const owner = testEnv.authenticatedContext("owner").firestore();
+  const removal = owner.batch();
+  removal.delete(owner.doc("workspaces/w1/members/member"));
+  removal.delete(owner.doc("member_index/w1_member"));
+  await assertSucceeds(removal.commit());
+
+  const removedMember = testEnv.authenticatedContext("member").firestore();
+  await assertFails(removedMember.doc("workspaces/w1").get());
+});
+
 test("unauthenticated and non-members cannot read/write financial data", async () => {
   await seedWorkspace();
   await assertFails(testEnv.unauthenticatedContext().firestore().doc("workspaces/w1/debts/d1").get());

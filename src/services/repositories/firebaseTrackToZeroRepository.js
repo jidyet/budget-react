@@ -102,6 +102,16 @@ export class FirebaseTrackToZeroRepository {
     const snap = await getDocs(collection(this.db, "workspaces", workspaceId, "members"));
     return snap.docs.map((d) => fromFirestoreDoc("member", d.data()));
   }
+  async removeMembership({ workspaceId, uid, unlinkedPeople = [] }) {
+    const batch = writeBatch(this.db);
+    batch.delete(doc(this.db, v2Paths.member(workspaceId, uid)));
+    batch.delete(doc(this.db, v2Paths.memberIndex(workspaceId, uid)));
+    unlinkedPeople.forEach((person) => {
+      const next = createWorkspacePerson(person);
+      batch.set(doc(this.db, v2Paths.person(workspaceId, next.id)), toFirestoreDoc("person", next));
+    });
+    await batch.commit();
+  }
   async listMembershipsForUser(uid) {
     // Queries the top-level member_index mirror (see v2Paths.memberIndex),
     // not a collectionGroup("members") query - Firestore's security rules

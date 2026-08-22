@@ -11,12 +11,12 @@ const render = (props) => renderToStaticMarkup(h(MobileBottomNavContent, {
 }));
 
 describe("UX-8: MobileBottomNav", () => {
-  it("renders all 4 destinations with real text labels, not icon-only", () => {
+  it("renders the mobile task destinations with real text labels, including Review", () => {
     const markup = render({});
     expect(markup).toContain("Home");
+    expect(markup).toContain("Review");
     expect(markup).toContain("Debts");
     expect(markup).toContain("Plan");
-    expect(markup).toContain("Activity");
   });
 
   it("marks the active tab with aria-current=\"page\" and no other tab", () => {
@@ -25,13 +25,14 @@ describe("UX-8: MobileBottomNav", () => {
     expect((markup.match(/aria-current="page"/g) || []).length).toBe(1);
   });
 
-  it("marks no tab as current when activeTab matches none of the 4 (e.g. Review/Settings)", () => {
+  it("marks Review as current when the user is resolving attention items", () => {
     const markup = render({ activeTab: "review" });
-    expect(markup).not.toContain('aria-current="page"');
+    expect((markup.match(/aria-current="page"/g) || []).length).toBe(1);
+    expect(markup).toContain("Review");
   });
 
   it("renders a badge count when a tab has one, and omits it when zero", () => {
-    const withBadge = render({ badges: { debts: 3 } });
+    const withBadge = render({ badges: { review: 3 } });
     expect(withBadge).toContain(">3<");
     const withoutBadge = render({ badges: {} });
     expect(withoutBadge).not.toMatch(/>\d+</);

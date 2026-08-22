@@ -127,6 +127,32 @@ describe("TrackToZero v2 async application service", () => {
     expect(repository.listMemberships("household-owner-a").filter((membership) => membership.uid === "future-user")).toHaveLength(1);
   });
 
+  it("lets the household owner remove a non-owner member without deleting financial history", async () => {
+    const repository = new InMemoryTrackToZeroRepository();
+    const ownerService = createTrackToZeroV2AsyncAppService({ repository, actorId: "owner-a", asOf: V2_TEST_NOW });
+    await ownerService.bootstrapOwnerWorkspace("household-owner-a", { type: "household", displayName: "Owner A", email: "owner@example.test" });
+    const invite = await ownerService.createMemberInvite("household-owner-a", { email: "future@example.test", role: "viewer" });
+    const token = new URL(`https://tracktozero.test${invite.joinUrl}`).searchParams.get("token");
+    const futureService = createTrackToZeroV2AsyncAppService({ repository, actorId: "future-user", asOf: V2_TEST_NOW });
+    await futureService.acceptMemberInvite("household-owner-a", { token, displayName: "Future User", email: "future@example.test" });
+
+    await ownerService.removeHouseholdMember("household-owner-a", "future-user");
+
+    expect(repository.getMembership("household-owner-a", "future-user")).toBeNull();
+    await expect(futureService.getWorkspaceSnapshot("household-owner-a")).rejects.toThrow(/not a member/i);
+    await expect(ownerService.removeHouseholdMember("household-owner-a", "owner-a")).rejects.toThrow(/cannot remove themselves/i);
+
+    const adminInvite = await ownerService.createMemberInvite("household-owner-a", { email: "admin@example.test", role: "admin" });
+    const adminToken = new URL(`https://tracktozero.test${adminInvite.joinUrl}`).searchParams.get("token");
+    const adminService = createTrackToZeroV2AsyncAppService({ repository, actorId: "admin-a", asOf: V2_TEST_NOW });
+    await adminService.acceptMemberInvite("household-owner-a", {
+      token: adminToken,
+      displayName: "Admin A",
+      email: "admin@example.test",
+    });
+    await expect(adminService.removeHouseholdMember("household-owner-a", "owner-a")).rejects.toThrow(/only.*owner/i);
+  });
+
   it("blocks invite acceptance when the signed-in email does not match the invited email", async () => {
     const repository = new InMemoryTrackToZeroRepository();
     const ownerService = createTrackToZeroV2AsyncAppService({ repository, actorId: "owner-a", asOf: V2_TEST_NOW });
@@ -183,6 +209,14 @@ describe("TrackToZero v2 async application service", () => {
       apr: 6.1,
     });
     expect(mortgage.includedInCorePayoffPlan).toBe(false);
+  });
+
+  it("removes a debt from active payoff views by archiving it, while preserving the debt record", async () => {
+    const { repository, service } = makeService();
+    const archived = await service.archiveDebt("personal-seed", "personal-sofi");
+    expect(archived.status).toBe("archived");
+    expect(archived.includedInCorePayoffPlan).toBe(false);
+    expect(repository.listDebts("personal-seed").find((debt) => debt.id === "personal-sofi")).toMatchObject({ status: "archived" });
   });
 
   it("UX-9: an omitted minimum payment stays unknown (null), never a silent confirmed $0, through both creation and later edit", async () => {

@@ -1,24 +1,22 @@
 import React from "react";
-import { Activity, Home, Plus, Target, Wallet } from "lucide-react";
+import { ClipboardCheck, Home, Plus, Target, Wallet } from "lucide-react";
 import { ttzPalette, TYPE_SCALE } from "../theme.js";
 import { useHasMobileBottomNav } from "../useViewport.js";
 
-// UX-8: dedicated mobile navigation. Deliberately 4 destinations (not
-// PrimaryNav's full 6) + one center action, matching the task's explicit
-// target IA - Review and Settings are intentionally left off the bottom bar
-// (Settings is already one tap away via the account menu's "Workspace
-// settings" item, TopBar.jsx/UserMenu.jsx, unchanged by this component;
-// Review is reachable from Home's Next Move / the horizontally-scrolling
-// top nav that already exists below the tablet breakpoint).
+// Review is a first-class mobile destination. It cannot be hidden behind a
+// desktop-only nav or a secondary action sheet: unresolved import/debt items
+// must always have an obvious, one-tap route on a phone. Activity remains
+// available from the desktop nav and page links; review is more urgent on the
+// compact, task-oriented mobile bar.
 //
 // Uses the EXACT SAME activeTab/onSelectTab authority PrimaryNav already
 // consumes - no second tab-router, no independent state. aria-current and
 // real text labels (never color/icon alone) mark the active item.
 const ITEMS = [
   { key: "home", label: "Home", Icon: Home },
+  { key: "review", label: "Review", Icon: ClipboardCheck },
   { key: "debts", label: "Debts", Icon: Wallet },
   { key: "plan", label: "Plan", Icon: Target },
-  { key: "activity", label: "Activity", Icon: Activity },
 ];
 
 // Exported separately from the viewport-gated default export so it can be

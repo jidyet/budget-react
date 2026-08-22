@@ -518,6 +518,18 @@ describe("Fix: a no-match candidate always has a way to reach a terminal decisio
 });
 
 describe("Fix: per-item 'Save this debt' action", () => {
+  it("keeps the review title, status, and actions in wrapping containers so a phone never overlaps them", () => {
+    const html = render(h(ReviewSessionCard, {
+      item: item(), isHousehold: false, members: [], people: [], debts: [], latestSnapshotsByDebt: {},
+      stagedForItem: {}, onStage: () => {}, onLeaveForLater: () => {}, onSaveItem: () => {},
+    }));
+    expect(html).toContain("flex-wrap:wrap");
+    expect(html).toContain("overflow-wrap:anywhere");
+    expect(html).toContain("Affects your plan");
+    expect(html).toContain("Leave for later");
+    expect(html).toContain("Save this debt");
+  });
+
   it("is present but disabled when nothing has been staged for this item yet", () => {
     const html = render(h(ReviewSessionCard, {
       item: item(), isHousehold: false, members: [], people: [], debts: [], latestSnapshotsByDebt: {},

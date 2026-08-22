@@ -543,7 +543,7 @@ function MigrationPanel() {
   );
 }
 
-function Settings({ snapshot, repositoryMode, service, refresh, runAction, writeState, latestInvite, setLatestInvite }) {
+function Settings({ snapshot, repositoryMode, service, refresh, runAction, writeState, latestInvite, setLatestInvite, onCreateHousehold }) {
   const palette = ttzPalette;
   const flags = getLaunchFlags();
   const canManageMembers = ROLE_PERMISSIONS[snapshot.membership?.role]?.manageMembers;
@@ -597,6 +597,19 @@ function Settings({ snapshot, repositoryMode, service, refresh, runAction, write
               <li key={member.uid} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <span>{member.displayName || member.uid} · {member.role}</span>
                 <Badge tone="success">Verified member</Badge>
+                {snapshot.workspace.type === "household" && snapshot.membership?.role === "owner" && member.uid !== snapshot.membership?.uid && member.role !== "owner" ? (
+                  <button
+                    type="button"
+                    disabled={writeState.inProgress}
+                    style={writeState.inProgress ? styles.disabledButton : styles.button}
+                    onClick={() => runAction("remove household member", async () => {
+                      await service.removeHouseholdMember(snapshot.workspace.id, member.uid);
+                      await refresh();
+                    })}
+                  >
+                    Remove from household
+                  </button>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -606,6 +619,15 @@ function Settings({ snapshot, repositoryMode, service, refresh, runAction, write
           <p>TrackToZero provides planning projections based on the information you enter. Actual balances, interest, fees, and payoff amounts may differ from your creditor's records.</p>
         </div>
       </div>
+      {snapshot.workspace.type === "personal" ? (
+        <div style={{ ...styles.card, marginTop: 18, background: palette.surf2, border: `1px solid ${palette.border}`, boxShadow: "none" }}>
+          <h3 style={{ marginTop: 0 }}>Start a household</h3>
+          <p style={{ color: palette.tx2 }}>Create a separate shared workspace whenever you are ready. Your personal workspace stays intact.</p>
+          <button type="button" style={styles.primaryButton} disabled={writeState.inProgress} onClick={onCreateHousehold}>
+            Create household
+          </button>
+        </div>
+      ) : null}
       {snapshot.workspace.type === "household" && (
         <>
           <div style={{ ...styles.grid, marginTop: 18 }}>
@@ -1528,11 +1550,10 @@ function TrackToZeroV2AppInner() {
   const mobileBottomNavProps = {
     activeTab: tab,
     onSelectTab: navigateTab,
-    // None of MobileBottomNav's 4 items (home/debts/plan/activity) currently
-    // has a badge count of its own - Review is the only nav-badge count
-    // today (topBarProps.navBadges), and Review is deliberately not one of
-    // the 4 mobile items (see MobileBottomNav.jsx's own comment).
-    badges: {},
+    // Review is intentionally visible on mobile. The badge is the same live
+    // actionable-review count shown in desktop navigation, never a stale
+    // import total.
+    badges: { review: topBarProps.navBadges.review },
     onOpenQuickActions: () => setQuickActionsOpen(true),
   };
   const quickActionSheetProps = {
@@ -1628,7 +1649,7 @@ function TrackToZeroV2AppInner() {
         )}
         {tab === "debts" && <DebtsCenter key={snapshot.workspace?.id} snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} refreshReview={() => refreshReview(workspaceId)} runAction={runAction} writeState={writeState} reviewSnapshot={reviewState.snapshot} onGoToReview={() => navigateTab("review")} initialAction={debtsInitialAction} onInitialActionHandled={() => setDebtsInitialAction(null)} />}
         {tab === "plan" && <Plan snapshot={snapshot} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} navigateTab={navigateTab} reviewSnapshot={reviewState.snapshot} />}
-        {tab === "settings" && <Settings snapshot={snapshot} repositoryMode={runtime.mode} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} latestInvite={latestInvite} setLatestInvite={setLatestInvite} />}
+        {tab === "settings" && <Settings snapshot={snapshot} repositoryMode={runtime.mode} service={service} refresh={() => refresh(workspaceId)} runAction={runAction} writeState={writeState} latestInvite={latestInvite} setLatestInvite={setLatestInvite} onCreateHousehold={() => chooseProductionWorkspace("household")} />}
         </Suspense>
       </PageContainer>
     </AppShell>

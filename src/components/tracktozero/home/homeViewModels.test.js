@@ -102,10 +102,10 @@ describe("UX-2 fix: all-paid-off reflects included/core payoff truth, not every 
   });
 });
 
-describe("UX-2 fix: blocking-review is a distinct Home state", () => {
-  it("routes to blocking-review when blockingReviewCount > 0 and the plan isn't already critical", () => {
+describe("Home review confidence", () => {
+  it("keeps the command center active when blocking review decisions exist", () => {
     const context = deriveHomeContext(baseSnapshot(), { openCount: 2, blockingCount: 1 }, null);
-    expect(context.homeState).toBe("blocking-review");
+    expect(context.homeState).toBe("active-plan");
     expect(context.blockingReviewCount).toBe(1);
     expect(context.openReviewCount).toBe(2);
   });

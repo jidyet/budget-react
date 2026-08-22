@@ -120,15 +120,15 @@ describe("UX-2.1 Home redesign", () => {
     expect(noPlanHtml).toContain("Your debt trend");
   });
 
-  it("routes blocking-review into a distinct trust state instead of the normal command center", () => {
+  it("keeps the normal command center visible while review decisions need attention", () => {
     const html = render(h(HomeCommandCenter, {
       ...baseProps,
       snapshot: activePlanSnapshot(),
       reviewSnapshot: { openCount: 2, actionableCount: 2, blockingCount: 1 },
     }));
-    expect(html).toMatch(/can.*fully trust this plan yet/i);
-    expect(html).not.toContain("Debt freedom");
-    expect(html).not.toContain("Payoff progress");
+    expect(html).toMatch(/decision.*affect.*payoff plan/i);
+    expect(html).toContain("Open review");
+    expect(html).toContain("Current target");
   });
 
   it("treats the no-plan state as compare-strategies, not a fake target", () => {
@@ -228,7 +228,7 @@ describe("UX-2.1 Home redesign", () => {
       portfolioSummary: { totalWorkspaceDebt: 500, includedDebt: 500, excludedDebt: 0 },
     });
     const recordedHtml = render(h(HomeCommandCenter, { ...baseProps, snapshot: paymentRecorded, reviewSnapshot: { openCount: 0, blockingCount: 0 } }));
-    expect(recordedHtml).toContain("Record payment");
+    expect(recordedHtml).toContain("Update balance");
     expect(recordedHtml).toContain("$500.00");
 
     const balanceUpdated = activePlanSnapshot({

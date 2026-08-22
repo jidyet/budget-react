@@ -820,7 +820,9 @@ export const deriveHomeContext = (snapshot, reviewSnapshot, scenario) => {
   let homeState = "unknown";
   if (!hasDebts) homeState = "no-debt";
   else if (!hasActivePlan) homeState = "no-plan";
-  else if (hasBlockingReview && planHealth?.code !== "critical") homeState = "blocking-review";
+  // Import decisions affect projection confidence, but they must not replace
+  // the command center. Home keeps the next move, progress, debts and
+  // payment context visible; ReviewSummaryCard carries the actionable warning.
   else if (planHealth?.code === "critical") homeState = "critical";
   else if (allDebtsArePaidOff) homeState = "all-paid-off";
   else homeState = "active-plan";

@@ -787,42 +787,6 @@ function NoActivePlanState({ homeContext, onCompareStrategies, onAddDebt, onGoTo
     </div>
   );
 }
-function BlockingReviewState({ homeContext, onGoToReview, onGoToDebts, onRecordPayment, paymentActions }) {
-  return (
-    <div style={{ display: "grid", gap: GAP }}>
-      <Card variant="warning" style={{ padding: 24 }}>
-        <div style={{ display: "grid", gap: 12 }}>
-          <div style={{ ...TYPE_SCALE.overline, color: toneColors(ttzPalette).warning.fg }}>Needs review</div>
-          <div style={{ ...TYPE_SCALE.pageTitle, color: ttzPalette.tx, fontSize: 24 }}>TrackToZero can&apos;t fully trust this plan yet.</div>
-          <div style={{ ...TYPE_SCALE.body, color: ttzPalette.tx2 }}>
-            Resolve the blocking review items before Home treats this plan&apos;s momentum and projection as fully trusted.
-          </div>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <Button variant="primary" onClick={onGoToReview}>Review now</Button>
-            <Button variant="secondary" onClick={onGoToDebts}>View debts</Button>
-          </div>
-        </div>
-      </Card>
-
-      <div style={gridColumns(260)}>
-        <Card variant="default" style={{ padding: 24 }}>
-          <MetricBlock label="Debt remaining (provisional)" value={money(homeContext.primaryRemainingDebt)} />
-          <div style={{ ...TYPE_SCALE.supporting, color: ttzPalette.tx2, marginTop: 8 }}>This may change once blocking review items are resolved.</div>
-        </Card>
-        {homeContext.currentTarget ? (
-          <Card variant="default" style={{ padding: 24 }}>
-            <MetricBlock label="Current target (provisional)" value={homeContext.currentTarget.name} supporting={homeContext.currentTarget.ownerLabel || "Unassigned"} />
-          </Card>
-        ) : null}
-      </div>
-
-      {/* Required-payment timing is independent of whether the plan can be
-          fully trusted yet - a real-world due date doesn't wait on review. */}
-      <UpcomingPaymentsCard homeContext={homeContext} onGoToDebts={onGoToDebts} onRecordPayment={onRecordPayment} {...paymentActions} />
-    </div>
-  );
-}
-
 function AllPaidOffState({ homeContext, onViewMyPlan, onGoToDebts, onRecordPayment, paymentActions }) {
   return (
     <div style={{ display: "grid", gap: GAP }}>
@@ -883,7 +847,7 @@ export default function HomeCommandCenter({
   const goToDebts = onGoToDebts || onViewDetails || onAddDebt || onGoToPlan;
   const nextMoveActions = { review: onGoToReview, plan: goToMyPlan, compare: goToCompare, debts: goToDebts };
   // GATE-10B.1C: bundled once and spread onto every UpcomingPaymentsCard
-  // render site (main + no-plan/blocking-review/all-paid-off states) so
+  // render site (main + no-plan/all-paid-off states) so
   // "Mark as paid" works identically no matter which Home state is showing.
   const paymentActions = { service, workspaceId: snapshot?.workspace?.id, refresh, runAction, canObserve };
 
@@ -916,14 +880,6 @@ export default function HomeCommandCenter({
     return (
       <main style={{ display: "grid", gap: GAP }}>
         <NoActivePlanState homeContext={homeContext} onCompareStrategies={goToCompare} onAddDebt={onAddDebt} onGoToReview={onGoToReview} onGoToDebts={goToDebts} onRecordPayment={onRecordPayment} paymentActions={paymentActions} />
-      </main>
-    );
-  }
-
-  if (homeContext.homeState === "blocking-review") {
-    return (
-      <main style={{ display: "grid", gap: GAP }}>
-        <BlockingReviewState homeContext={homeContext} onGoToReview={onGoToReview} onGoToDebts={goToDebts} onRecordPayment={onRecordPayment} paymentActions={paymentActions} />
       </main>
     );
   }

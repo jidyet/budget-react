@@ -6,7 +6,7 @@ import { ttzPalette, TYPE_SCALE } from "../theme.js";
 // every field gets consistent accessible labeling without each input
 // reimplementing it. Financial value handling stays entirely in the child
 // input (MoneyInput/DateInput/etc.) - this component is presentation only.
-export default function Field({ label, help, error, required, children }) {
+export default function Field({ label, help, error, required, children, style }) {
   const palette = ttzPalette;
   const autoId = useId();
   const inputId = children?.props?.id || autoId;
@@ -23,7 +23,7 @@ export default function Field({ label, help, error, required, children }) {
     : children;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0, ...style }}>
       {label ? (
         <label htmlFor={inputId} style={{ ...TYPE_SCALE.supporting, color: palette.tx, fontWeight: 700 }}>
           {label}

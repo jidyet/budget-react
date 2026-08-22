@@ -378,14 +378,16 @@ export default function ReviewCenter({ snapshot, service, workspaceId, reviewSna
                   <span style={{ ...TYPE_SCALE.supporting, color: palette.tx2 }} role="status" aria-live="polite">
                     {itemPositionLabel(currentIndex + 1, queue.length)}
                   </span>
-                  <div style={{ display: "flex", alignItems: "flex-end", gap: 8, flexWrap: "wrap" }}>
+                  <div style={isTablet
+                    ? { display: "grid", gridTemplateColumns: "1fr", gap: 8, width: "100%" }
+                    : { display: "flex", alignItems: "flex-end", gap: 8, flexWrap: "wrap" }}>
                     {isTablet ? (
                       <Button size="sm" variant="secondary" onClick={() => setQueueDrawerOpen(true)}>
                         Queue ({queue.length})
                       </Button>
                     ) : null}
-                    <Field label={jumpToItemLabel()}>
-                      <Select value={currentItem?.id || ""} onChange={(event) => setCursorId(event.target.value)} aria-label={jumpToItemLabel()}>
+                    <Field label={jumpToItemLabel()} style={isTablet ? { width: "100%" } : undefined}>
+                      <Select style={isTablet ? { width: "100%", minWidth: 0 } : undefined} value={currentItem?.id || ""} onChange={(event) => setCursorId(event.target.value)} aria-label={jumpToItemLabel()}>
                         {queue.map((item, index) => (
                           <option key={item.id} value={item.id}>
                             {index + 1}. {item.candidate.accountName || item.candidate.creditorName || "Debt statement"}

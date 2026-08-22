@@ -7,7 +7,7 @@ import { toneColors } from "../theme.js";
 // input; callers decide WHAT tone applies (see StatusBadge for how UX-0's
 // truthful status codes map to a tone - that mapping lives in theme.js, not
 // here, so it can never be duplicated/re-derived per badge).
-export default function Badge({ tone = "neutral", children, style, ...rest }) {
+export default function Badge({ tone = "neutral", wrap = false, children, style, ...rest }) {
   const colors = toneColors()[tone] || toneColors().neutral;
   return (
     <span
@@ -20,11 +20,17 @@ export default function Badge({ tone = "neutral", children, style, ...rest }) {
         fontFamily: "var(--ttz-font-body, 'Instrument Sans', sans-serif)",
         fontWeight: 700,
         fontSize: 12,
-        lineHeight: 1,
         color: colors.fg,
         background: colors.bg,
         border: `1px solid ${colors.border}`,
-        whiteSpace: "nowrap",
+        // Most status pills are intentionally one line. A review status can
+        // be longer than a narrow portrait card permits, so callers may opt
+        // into contained wrapping rather than letting text escape the pill.
+        whiteSpace: wrap ? "normal" : "nowrap",
+        overflowWrap: wrap ? "anywhere" : undefined,
+        maxWidth: "100%",
+        lineHeight: wrap ? 1.25 : 1,
+        textAlign: wrap ? "center" : undefined,
         ...style,
       }}
       {...rest}

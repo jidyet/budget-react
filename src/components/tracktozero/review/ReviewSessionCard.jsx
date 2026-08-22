@@ -535,7 +535,7 @@ export default function ReviewSessionCard({ item, isHousehold, members, people =
         <div style={{ minWidth: 0 }}>
           <div style={{ ...TYPE_SCALE.cardTitle, color: palette.tx, minWidth: 0, overflowWrap: "anywhere" }}>{title}</div>
           <div style={{ display: "flex", width: "100%", marginTop: 8 }}>
-            <Badge tone={item.blocking ? "warning" : "neutral"}>{item.blocking ? "Affects your plan" : "Can wait"}</Badge>
+            <Badge wrap tone={item.blocking ? "warning" : "neutral"}>{item.blocking ? "Affects your plan" : "Can wait"}</Badge>
           </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
             {item.types.map((type) => <Badge key={type} tone={item.blocking ? "warning" : "neutral"}>{REVIEW_TYPE_LABEL[type] || type}</Badge>)}

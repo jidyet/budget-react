@@ -734,9 +734,9 @@ function NoActivePlanState({ homeContext, onCompareStrategies, onAddDebt, onGoTo
                 Choose a payoff strategy and we&apos;ll show you which debt to target first, your projected debt-free date, and the full payoff order.
               </div>
               <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gap: 8 }}>
-                <li style={{ display: "flex", gap: 10, alignItems: "center", color: ttzPalette.tx2 }}><span style={{ color: ttzPalette.ac, fontWeight: 900 }}>{"\\u2713"}</span><span>Compare Snowball vs Avalanche side by side</span></li>
-                <li style={{ display: "flex", gap: 10, alignItems: "center", color: ttzPalette.tx2 }}><span style={{ color: ttzPalette.ac, fontWeight: 900 }}>{"\\u2713"}</span><span>See projected payoff dates and total interest saved</span></li>
-                <li style={{ display: "flex", gap: 10, alignItems: "center", color: ttzPalette.tx2 }}><span style={{ color: ttzPalette.ac, fontWeight: 900 }}>{"\\u2713"}</span><span>Get a clear, step-by-step payoff order</span></li>
+                <li style={{ display: "flex", gap: 10, alignItems: "center", color: ttzPalette.tx2 }}><span aria-hidden="true" style={{ color: ttzPalette.ac, fontWeight: 900 }}>✓</span><span>Compare Snowball vs Avalanche side by side</span></li>
+                <li style={{ display: "flex", gap: 10, alignItems: "center", color: ttzPalette.tx2 }}><span aria-hidden="true" style={{ color: ttzPalette.ac, fontWeight: 900 }}>✓</span><span>See projected payoff dates and total interest saved</span></li>
+                <li style={{ display: "flex", gap: 10, alignItems: "center", color: ttzPalette.tx2 }}><span aria-hidden="true" style={{ color: ttzPalette.ac, fontWeight: 900 }}>✓</span><span>Get a clear, step-by-step payoff order</span></li>
               </ul>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <Button variant="primary" onClick={onCompareStrategies}>Compare Snowball vs Avalanche</Button>

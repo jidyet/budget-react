@@ -7,7 +7,6 @@ import Input from "../ui/Input.jsx";
 import Select from "../ui/Select.jsx";
 import Field from "../ui/Field.jsx";
 import { ttzPalette, TYPE_SCALE } from "../theme.js";
-import { useIsTablet } from "../useViewport.js";
 import { formatMoney, formatPercent } from "../formatting.js";
 // BETA-3.1: a workbook due-date cell that holds a bare day-of-month
 // integer (e.g. "15" meaning "due on the 15th") - rather than a full
@@ -524,12 +523,6 @@ function ConfirmedEvidenceSummary({ item }) {
 // instead, cheaply and honestly, without dominating the whole card.
 export default function ReviewSessionCard({ item, isHousehold, members, people = [], debts, latestSnapshotsByDebt, stagedForItem = {}, onStage, onLeaveForLater, onSaveItem, onCreatePerson, busy, resultMessage, resultTone }) {
   const palette = ttzPalette;
-  // Review cards have a title, status and two actions. They need the more
-  // generous stacked layout before the global phone breakpoint: Android
-  // portrait browsers can report a 700-900px CSS viewport even though the
-  // visible content area is phone-sized. Treat tablet-width and below as
-  // compact here so the status badge can never intrude into the title.
-  const isCompact = useIsTablet();
   const candidate = item.candidate;
   const title = candidate.accountName || candidate.creditorName || "Debt statement";
   const hasMatch = item.types.includes(REVIEW_TYPES.matchDecision) || item.types.includes(REVIEW_TYPES.multipleMatches);
@@ -538,24 +531,19 @@ export default function ReviewSessionCard({ item, isHousehold, members, people =
 
   return (
     <Card variant="default">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
-        <div style={{ minWidth: 0, flex: isCompact ? "1 1 100%" : "1 1 220px" }}>
-          <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap", minWidth: 0 }}>
-            <div style={{ ...TYPE_SCALE.cardTitle, color: palette.tx, minWidth: 0, overflowWrap: "anywhere", flex: "1 1 170px" }}>{title}</div>
-            {!isCompact ? <Badge tone={item.blocking ? "warning" : "neutral"}>{item.blocking ? "Affects your plan" : "Can wait"}</Badge> : null}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ ...TYPE_SCALE.cardTitle, color: palette.tx, minWidth: 0, overflowWrap: "anywhere" }}>{title}</div>
+          <div style={{ display: "flex", width: "100%", marginTop: 8 }}>
+            <Badge tone={item.blocking ? "warning" : "neutral"}>{item.blocking ? "Affects your plan" : "Can wait"}</Badge>
           </div>
-          {isCompact ? (
-            <div style={{ display: "flex", width: "100%", marginTop: 8 }}>
-              <Badge tone={item.blocking ? "warning" : "neutral"}>{item.blocking ? "Affects your plan" : "Can wait"}</Badge>
-            </div>
-          ) : null}
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
             {item.types.map((type) => <Badge key={type} tone={item.blocking ? "warning" : "neutral"}>{REVIEW_TYPE_LABEL[type] || type}</Badge>)}
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", width: isCompact ? "100%" : "auto" }}>
-          <Button size="sm" variant="ghost" disabled={busy} onClick={onLeaveForLater} style={isCompact ? { flex: "1 1 148px" } : undefined}>{leaveForLaterLabel()}</Button>
-          <Button size="sm" variant="primary" disabled={busy || hasNothingStaged} onClick={onSaveItem} style={isCompact ? { flex: "1 1 148px" } : undefined}>{saveThisDebtLabel()}</Button>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 8, width: "100%", marginTop: 12 }}>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={onLeaveForLater} style={{ width: "100%" }}>{leaveForLaterLabel()}</Button>
+          <Button size="sm" variant="primary" disabled={busy || hasNothingStaged} onClick={onSaveItem} style={{ width: "100%" }}>{saveThisDebtLabel()}</Button>
         </div>
       </div>
 
